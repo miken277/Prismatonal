@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { AppSettings, LatticeNode } from '../types';
-import { generateLattice } from '../services/LatticeService';
+import { generateGrid } from '../services/LatticeService';
 import AudioEngine from '../services/AudioEngine';
 
 interface Props {
@@ -24,10 +24,10 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine }) => {
   const [nodes, setNodes] = useState<LatticeNode[]>([]);
   const [activeTouches, setActiveTouches] = useState<Map<number, ActiveTouch>>(new Map());
 
-  // Generate nodes when limit changes
+  // Generate nodes when grid settings change
   useEffect(() => {
-    setNodes(generateLattice(settings.tonalityLimit));
-  }, [settings.tonalityLimit]);
+    setNodes(generateGrid(settings.gridSize, settings.gridData));
+  }, [settings.gridSize, settings.gridData]);
 
   // Audio Engine updates
   useEffect(() => {
@@ -113,12 +113,16 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine }) => {
     });
   };
 
+  const getColor = (limit: number): string => {
+      // Default fallback is grey if limit not found in map (e.g. limit 17)
+      return settings.colors[limit] || '#94a3b8';
+  };
+
   // Calculations for layout
   // Base unit size (responsive)
   const baseSize = 60 * settings.buttonSizeScale;
-  const spacing = 90 * settings.buttonSpacingScale;
+  const spacing = 70 * settings.buttonSpacingScale;
 
-  // Pre-calculate array to fix type inference issues in the map loop
   const touches: ActiveTouch[] = Array.from(activeTouches.values());
 
   return (
@@ -127,13 +131,11 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine }) => {
       className="relative w-full h-full flex items-center justify-center overflow-hidden bg-slate-900 touch-none"
       style={{ perspective: '1000px' }}
     >
-      {/* Diamond Container with Rotation */}
+      {/* Container with Rotation */}
       <div 
         className="relative transition-transform duration-500 ease-out"
         style={{
           transform: `rotate(${settings.diamondRotation}deg) scale(${settings.aspectRatio}, 1)`,
-          // We set width/height to 0 to act as a point of origin, 
-          // allowing absolute children to spread out from the center.
           width: '0', 
           height: '0',
           display: 'flex',
@@ -155,28 +157,32 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine }) => {
           }
 
           // Grid Position
-          // Center is 0,0 calculated by LatticeService
           const left = `${node.x * spacing}px`;
           const top = `${node.y * spacing}px`;
 
-          // Dynamic text size for long fractions
           const fontSize = node.label.length > 5 ? '10px' : '12px';
+
+          // Dual Color Gradient
+          const colorTop = getColor(node.limitTop);
+          const colorBottom = getColor(node.limitBottom);
+          const background = `linear-gradient(to bottom, ${colorTop} 50%, ${colorBottom} 50%)`;
 
           return (
             <div
               key={node.id}
-              className="absolute flex items-center justify-center shadow-lg border-2 border-slate-800/50 cursor-pointer touch-none select-none transition-colors duration-75"
+              className="absolute flex items-center justify-center shadow-lg cursor-pointer touch-none select-none transition-colors duration-75"
               style={{
                 left,
                 top,
                 width: `${baseSize}px`,
                 height: `${baseSize}px`,
-                backgroundColor: settings.colors[node.limitIdentity] || '#fff',
+                background: background,
                 borderRadius: settings.buttonShape,
                 transform: `translate(-50%, -50%) translate(${transformX}px, ${transformY}px)`,
-                boxShadow: isActive ? `0 0 20px ${settings.colors[node.limitIdentity]}` : 'none',
+                boxShadow: isActive ? `0 0 20px white` : '0 4px 6px rgba(0,0,0,0.5)',
                 zIndex: isActive ? 10 : 1,
-                opacity: isActive ? 1 : 0.8
+                opacity: isActive ? 1 : 0.9,
+                border: '2px solid rgba(255,255,255,0.2)'
               }}
               onPointerDown={(e) => handlePointerDown(e, node)}
               onPointerMove={handlePointerMove}
@@ -184,12 +190,11 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine }) => {
               onPointerLeave={handlePointerUp}
               onPointerCancel={handlePointerUp}
             >
-              <span 
-                className="font-bold text-black/60 pointer-events-none"
-                style={{ fontSize }}
-              >
-                {node.label}
-              </span>
+              <div className="flex flex-col items-center justify-center pointer-events-none drop-shadow-md">
+                <span className="font-bold text-white text-shadow-sm leading-none" style={{ fontSize, textShadow: '0 1px 2px black' }}>
+                   {node.label}
+                </span>
+              </div>
             </div>
           );
         })}

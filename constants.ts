@@ -1,5 +1,5 @@
 
-import { AppSettings, ButtonShape, LimitType, LimitColorMap, SynthPreset, WaveformType } from './types';
+import { AppSettings, ButtonShape, LimitColorMap, SynthPreset, WaveformType } from './types';
 
 export const DEFAULT_COLORS: LimitColorMap = {
   1: '#EF4444', // Red (Unity)
@@ -9,8 +9,16 @@ export const DEFAULT_COLORS: LimitColorMap = {
   11: '#A855F7', // Purple (11-Limit)
 };
 
+const INITIAL_GRID = `1/1, 9/8, 5/4, 11/8, 3/2, 7/4
+4/3, 1/1, 10/9, 11/9, 4/3, 14/9
+8/5, 9/5, 1/1, 11/10, 6/5, 7/5
+16/11, 18/11, 20/11, 1/1, 12/11, 14/11
+4/3, 3/2, 5/3, 11/6, 1/1, 7/6
+8/7, 9/7, 10/7, 11/7, 12/7, 1/1`;
+
 export const DEFAULT_SETTINGS: AppSettings = {
-  tonalityLimit: LimitType.LIMIT_5,
+  gridSize: 6,
+  gridData: INITIAL_GRID,
   buttonSizeScale: 1.0,
   buttonSpacingScale: 1.0,
   diamondRotation: 0,
@@ -35,4 +43,4 @@ export const DEFAULT_PRESET: SynthPreset = {
   gain: 0.5,
 };
 
-export const BASE_FREQUENCY = 196.00; // G3 (Typical Partch root is G)
+export const BASE_FREQUENCY = 196.00; // G3

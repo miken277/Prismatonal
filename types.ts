@@ -23,7 +23,10 @@ export interface LimitColorMap {
 }
 
 export interface AppSettings {
-  tonalityLimit: LimitType;
+  // layoutMode: 'manual'; // Implicit now as we are switching to manual grid
+  gridSize: number; // N x N
+  gridData: string; // CSV string representing the grid rows
+  
   buttonSizeScale: number; // 0.5 to 2.0
   buttonSpacingScale: number; // 0.5 to 2.0
   diamondRotation: number; // Degrees
@@ -54,7 +57,8 @@ export interface LatticeNode {
   label: string; // The fraction string (e.g. "3/2")
   x: number; // Grid X
   y: number; // Grid Y
-  limitIdentity: number; // 1, 3, 5, 7, 11...
+  limitTop: number; // Numerator limit identity
+  limitBottom: number; // Denominator limit identity
 }
 
 export interface ActiveVoice {
