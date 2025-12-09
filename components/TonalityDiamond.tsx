@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { AppSettings, LatticeNode, LatticeLine } from '../types';
-import { generateLattice } from '../services/LatticeService';
+import { generateLattice, getHarmonicDistance } from '../services/LatticeService';
 import AudioEngine from '../services/AudioEngine';
 
 interface Props {
@@ -12,12 +12,20 @@ interface Props {
 
 interface ActiveTouch {
   id: number;
-  nodeId: string;
+  nodeId: string; // The "Anchor" node for the current bend
   startX: number;
   startY: number;
   currentX: number;
   currentY: number;
-  lockedAxis: 'x' | 'y' | null;
+  
+  // Dynamic bending state
+  targetNodeId: string | null;
+  bendAmount: number; // 0 to 1
+}
+
+interface LatchedVoice {
+  voiceId: number;
+  nodeId: string;
 }
 
 const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitInteraction }) => {
@@ -26,28 +34,22 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
   
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
   const [activeTouches, setActiveTouches] = useState<Map<number, ActiveTouch>>(new Map());
+  const [latchedVoices, setLatchedVoices] = useState<Map<string, number>>(new Map()); // nodeId -> voiceId
   
-  // Track if we have done the initial scroll centering to avoid jumping during re-renders
+  const [lastPlayedCoords, setLastPlayedCoords] = useState<number[]>([0, 0, 0, 0, 0]); 
+
   const [hasCentered, setHasCentered] = useState(false);
 
-  // Generate Data
   useEffect(() => {
     const result = generateLattice(settings);
-    
-    // Filter out nodes based on hiddenLimits (visual hiding)
+    // Filter out nodes based on visibility, but we need them for logic?
+    // Better to filter just visual rendering or keep them all for connectivity?
+    // Let's filter visually but keep structure if needed. For now, strict filter.
     const visibleNodes = result.nodes.filter(n => !settings.hiddenLimits.includes(n.maxPrime));
-    
-    // Ensure 1/1 (Limit 1) is handled correctly if settings dictate, though typically 1 limit isn't "hidden" structurally.
-    // If user hides "1" via settings (now allowed), we respect it here.
-    
     const visibleLines = result.lines.filter(l => !settings.hiddenLimits.includes(l.limit));
-    
     setData({ nodes: visibleNodes, lines: visibleLines });
   }, [settings]);
 
-  // Initial Center Scroll
-  // We center based on the canvas size, not the content bounding box.
-  // This keeps 1/1 locked in the center of the scroll area.
   useLayoutEffect(() => {
     if (scrollContainerRef.current && !hasCentered) {
         const center = settings.canvasSize / 2;
@@ -68,7 +70,20 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
     e.preventDefault();
     e.stopPropagation();
     
+    // Tap to stop Latched Voice
+    if (latchedVoices.has(node.id)) {
+        const voiceId = latchedVoices.get(node.id)!;
+        audioEngine.stopVoice(voiceId);
+        setLatchedVoices(prev => {
+            const next = new Map(prev);
+            next.delete(node.id);
+            return next;
+        });
+        return;
+    }
+
     onLimitInteraction(node.maxPrime);
+    setLastPlayedCoords(node.coords);
     
     audioEngine.startVoice(e.pointerId, node.ratio);
     setActiveTouches(prev => {
@@ -80,7 +95,8 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
         startY: e.clientY,
         currentX: e.clientX,
         currentY: e.clientY,
-        lockedAxis: null
+        targetNodeId: null,
+        bendAmount: 0
       });
       return newMap;
     });
@@ -88,55 +104,168 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!settings.isPitchBendEnabled || !activeTouches.has(e.pointerId)) return;
+    if (!activeTouches.has(e.pointerId)) return;
     const touch = activeTouches.get(e.pointerId)!;
     
-    let lockedAxis = touch.lockedAxis;
-    if (!lockedAxis) {
-      const dx = Math.abs(e.clientX - touch.startX);
-      const dy = Math.abs(e.clientY - touch.startY);
-      if (dx > 5 || dy > 5) {
-        lockedAxis = dx > dy ? 'x' : 'y';
-      }
+    const centerOffset = settings.canvasSize / 2;
+    const spacing = settings.buttonSpacingScale;
+
+    // 1. Calculate Vector from Start to Current
+    const dx = e.clientX - touch.startX;
+    const dy = e.clientY - touch.startY;
+    
+    // 2. Vector-based Bend Logic
+    if (settings.isPitchBendEnabled) {
+        const anchorNode = data.nodes.find(n => n.id === touch.nodeId);
+        if (!anchorNode) return;
+
+        const anchorX = anchorNode.x * spacing + centerOffset;
+        const anchorY = anchorNode.y * spacing + centerOffset;
+
+        // Find neighbors (connected via lines)
+        const connectedLines = data.lines.filter(l => 
+            (l.x1 === anchorNode.x && l.y1 === anchorNode.y) || 
+            (l.x2 === anchorNode.x && l.y2 === anchorNode.y)
+        );
+
+        let bestTarget: LatticeNode | null = null;
+        let bestProjection = 0;
+        let bestDistSq = 0;
+
+        connectedLines.forEach(line => {
+             const isStart = (line.x1 === anchorNode.x && line.y1 === anchorNode.y);
+             const nx = isStart ? line.x2 : line.x1;
+             const ny = isStart ? line.y2 : line.y1;
+             
+             // Visual Vector to neighbor
+             const vx = (nx * spacing + centerOffset) - anchorX;
+             const vy = (ny * spacing + centerOffset) - anchorY;
+             
+             // Dot Product projection
+             // Project drag vector onto neighbor vector
+             const vMagSq = vx*vx + vy*vy;
+             const dot = dx*vx + dy*vy;
+             
+             const projection = dot / vMagSq; // 0 to 1 scalar along the line
+             
+             if (projection > 0 && projection > bestProjection) {
+                 const neighbor = data.nodes.find(n => n.x === nx && n.y === ny);
+                 if (neighbor) {
+                     bestProjection = projection;
+                     bestTarget = neighbor;
+                     bestDistSq = vMagSq;
+                 }
+             }
+        });
+
+        // 3. Apply Bend or Handoff
+        if (bestTarget && bestTarget.id) {
+            // Cap at 1.0 (arrived at neighbor)
+            const amount = Math.min(1.0, bestProjection);
+            
+            // Calculate frequency: Geometric interpolation
+            // F = F_start * (F_target / F_start) ^ amount
+            const ratioRatio = bestTarget.ratio / anchorNode.ratio;
+            const currentRatio = anchorNode.ratio * Math.pow(ratioRatio, amount);
+            
+            audioEngine.glideVoice(e.pointerId, currentRatio, 0.02); // Fast glide for bend responsiveness
+
+            // Check for Handoff (Legato / Glissando)
+            // If we are significantly past the midpoint or close to the target, switch anchor
+            if (amount >= 0.95) {
+                 onLimitInteraction(bestTarget.maxPrime);
+                 setLastPlayedCoords(bestTarget.coords);
+                 
+                 // Update touch state to new anchor
+                 setActiveTouches(prev => {
+                     const newMap = new Map(prev);
+                     newMap.set(e.pointerId, {
+                         ...touch,
+                         nodeId: bestTarget!.id,
+                         // Reset start to new node position to allow continuous bending
+                         // We need screen coords of the new node
+                         startX: e.clientX, // Resetting startX/Y to current assumes we are AT the node. 
+                         // But we might be slightly off. Ideally, we snap the 'virtual' start to the node center.
+                         startY: e.clientY,
+                         currentX: e.clientX,
+                         currentY: e.clientY,
+                         targetNodeId: null,
+                         bendAmount: 0
+                     });
+                     return newMap;
+                 });
+            } else {
+                 // Just update visual bend
+                 setActiveTouches(prev => {
+                     const newMap = new Map(prev);
+                     newMap.set(e.pointerId, {
+                         ...touch,
+                         currentX: e.clientX,
+                         currentY: e.clientY,
+                         targetNodeId: bestTarget!.id,
+                         bendAmount: amount
+                     });
+                     return newMap;
+                 });
+            }
+        } else {
+            // No valid target, stick to anchor (or minor wobble)
+            setActiveTouches(prev => {
+                 const newMap = new Map(prev);
+                 newMap.set(e.pointerId, {
+                     ...touch,
+                     currentX: e.clientX,
+                     currentY: e.clientY,
+                     targetNodeId: null,
+                     bendAmount: 0
+                 });
+                 return newMap;
+             });
+        }
     }
-
-    const sensitivity = 2.0; 
-    let delta = 0;
-    if (lockedAxis === 'x') delta = e.clientX - touch.startX;
-    if (lockedAxis === 'y') delta = -(e.clientY - touch.startY);
-
-    let detune = delta * sensitivity;
-    if (settings.isPitchSnapEnabled) {
-       const snapStrength = 20;
-       if (Math.abs(detune) < snapStrength) detune = 0;
-    }
-
-    audioEngine.bendVoice(e.pointerId, detune);
-
-    setActiveTouches(prev => {
-        const newMap = new Map(prev);
-        newMap.set(e.pointerId, { ...touch, currentX: e.clientX, currentY: e.clientY, lockedAxis });
-        return newMap;
-    });
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    audioEngine.stopVoice(e.pointerId);
-    setActiveTouches(prev => {
-      const newMap = new Map(prev);
-      newMap.delete(e.pointerId);
-      return newMap;
-    });
+    const touch = activeTouches.get(e.pointerId);
+    
+    // --- Momentum Logic ---
+    // If momentum enabled, latch the note at its CURRENT pitch (even if bent)
+    if (settings.isMomentumEnabled && touch) {
+         // Latch the anchor node
+         // If bent halfway, maybe we should latch the target? 
+         // For now, latch the current Anchor (which updates on handoff)
+         const nodeToLatch = touch.nodeId;
+         
+         setLatchedVoices(prev => {
+            const newMap = new Map(prev);
+            newMap.set(nodeToLatch, e.pointerId);
+            return newMap;
+         });
+
+         // Voice keeps running, remove touch tracker
+         setActiveTouches(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(e.pointerId);
+            return newMap;
+         });
+    } else {
+        audioEngine.stopVoice(e.pointerId);
+        setActiveTouches(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(e.pointerId);
+          return newMap;
+        });
+    }
   };
 
   const getColor = (limit: number): string => settings.colors[limit] || '#64748b';
 
   const baseSize = 60 * settings.buttonSizeScale;
   const touches: ActiveTouch[] = Array.from(activeTouches.values());
-  
-  // Center Offset: (0,0) in math space = (canvasSize/2, canvasSize/2) in screen space
   const centerOffset = settings.canvasSize / 2;
   const spacing = settings.buttonSpacingScale;
+  
+  const activeNodeIds = new Set([...touches.map(t => t.nodeId), ...latchedVoices.keys()]);
 
   return (
     <div 
@@ -155,20 +284,46 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
             {/* SVG Layer for Lines */}
             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
                 {data.lines.map(line => {
-                    // Apply spacing scale and offset
                     const x1 = line.x1 * spacing + centerOffset;
                     const y1 = line.y1 * spacing + centerOffset;
                     const x2 = line.x2 * spacing + centerOffset;
                     const y2 = line.y2 * spacing + centerOffset;
                     const color = getColor(line.limit);
                     
+                    // Only show lines connected to active/focused nodes or high level grid
+                    // To avoid clutter with the vertical layout
+                    
                     return (
                         <line 
                             key={line.id}
                             x1={x1} y1={y1} x2={x2} y2={y2}
                             stroke={color}
-                            strokeWidth={2}
-                            strokeOpacity={0.3}
+                            strokeWidth={line.limit === 1 ? 4 : 2} // Thicker for Octaves
+                            strokeOpacity={line.limit === 1 ? 0.4 : 0.2}
+                            strokeDasharray={line.limit === 1 ? "5,5" : "0"} // Dashed for Octaves
+                        />
+                    );
+                })}
+                
+                {/* Active Pitch Bend Lines (Straight) */}
+                {touches.map(touch => {
+                    if (!touch.targetNodeId || !touch.nodeId) return null;
+                    const startNode = data.nodes.find(n => n.id === touch.nodeId);
+                    const targetNode = data.nodes.find(n => n.id === touch.targetNodeId);
+                    if (!startNode || !targetNode) return null;
+                    
+                    const x1 = startNode.x * spacing + centerOffset;
+                    const y1 = startNode.y * spacing + centerOffset;
+                    const x2 = targetNode.x * spacing + centerOffset;
+                    const y2 = targetNode.y * spacing + centerOffset;
+                    
+                    return (
+                        <line 
+                           key={`bend-${touch.id}`}
+                           x1={x1} y1={y1} x2={x2} y2={y2}
+                           stroke="white"
+                           strokeWidth={4}
+                           strokeOpacity={0.6 + (touch.bendAmount * 0.4)}
                         />
                     );
                 })}
@@ -177,33 +332,46 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
             {/* Nodes Layer */}
             {data.nodes.map((node) => {
                 const activeTouch = touches.find(t => t.nodeId === node.id);
-                const isActive = !!activeTouch;
+                const isLatched = latchedVoices.has(node.id);
+                const isActive = !!activeTouch || isLatched;
+                const isTarget = touches.some(t => t.targetNodeId === node.id);
                 
-                let transformX = 0;
-                let transformY = 0;
-
-                if (isActive && activeTouch && settings.isPitchBendEnabled) {
-                    if (activeTouch.lockedAxis === 'x') transformX = activeTouch.currentX - activeTouch.startX;
-                    if (activeTouch.lockedAxis === 'y') transformY = activeTouch.currentY - activeTouch.startY;
-                }
-
                 const left = node.x * spacing + centerOffset;
                 const top = node.y * spacing + centerOffset;
                 
-                // Color logic
                 const cTop = getColor(node.limitTop);
                 const cBottom = getColor(node.limitBottom);
                 const background = `linear-gradient(to bottom, ${cTop} 50%, ${cBottom} 50%)`;
 
-                // Z-Index Logic based on Layer Order
-                // Find index in layerOrder array. Higher index = Higher Z.
                 const layerIndex = settings.layerOrder.indexOf(node.maxPrime);
                 const zIndex = isActive ? 100 : (10 + layerIndex);
+
+                let scale = 1.0;
+                let opacity = 0.95;
+                
+                if (settings.isVoiceLeadingEnabled) {
+                  const dist = getHarmonicDistance(node.coords, lastPlayedCoords);
+                  
+                  // Modify distance check: Include Pitch Proximity?
+                  // For now, stick to harmonic distance + active state
+                  if (!isActive && !isTarget) {
+                    const falloff = settings.voiceLeadingStrength; 
+                    const visibility = Math.max(0.25, 1 - (dist * falloff));
+                    scale = Math.max(0.4, visibility);
+                    opacity = Math.max(0.15, visibility);
+                  } else {
+                    scale = 1.2; 
+                    opacity = 1.0;
+                  }
+                } else {
+                    scale = (isActive || isTarget) ? 1.2 : 1.0;
+                    opacity = (isActive || isTarget) ? 1.0 : 0.95;
+                }
 
                 return (
                     <div
                         key={node.id}
-                        className="absolute flex items-center justify-center shadow-md cursor-pointer touch-none select-none transition-transform"
+                        className="absolute flex items-center justify-center shadow-md cursor-pointer touch-none select-none transition-transform duration-100 ease-out"
                         style={{
                             left: `${left}px`,
                             top: `${top}px`,
@@ -211,11 +379,12 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
                             height: `${baseSize}px`,
                             background: background,
                             borderRadius: settings.buttonShape,
-                            transform: `translate(-50%, -50%) translate(${transformX}px, ${transformY}px) scale(${isActive ? 1.1 : 1})`,
-                            boxShadow: isActive ? `0 0 25px white` : '0 4px 6px rgba(0,0,0,0.6)',
+                            transform: `translate(-50%, -50%) scale(${scale})`,
+                            boxShadow: isActive ? `0 0 35px white` : '0 4px 6px rgba(0,0,0,0.6)',
                             zIndex: zIndex,
-                            opacity: isActive ? 1 : 0.95,
-                            border: '2px solid rgba(255,255,255,0.3)'
+                            opacity: opacity,
+                            border: isLatched ? '3px solid white' : (isActive ? '2px solid white' : '2px solid rgba(255,255,255,0.3)'),
+                            filter: isActive ? 'brightness(1.3)' : 'none'
                         }}
                         onPointerDown={(e) => handlePointerDown(e, node)}
                         onPointerMove={handlePointerMove}
@@ -223,7 +392,7 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
                         onPointerLeave={handlePointerUp}
                         onPointerCancel={handlePointerUp}
                     >
-                        <div className="flex flex-col w-full h-full text-white font-bold leading-none text-shadow-sm">
+                        <div className={`flex flex-col w-full h-full text-white font-bold leading-none text-shadow-sm transition-opacity ${scale < 0.6 ? 'opacity-0' : 'opacity-100'}`}>
                             <span className="flex-1 flex items-center justify-center pt-1" style={{ fontSize: '11px' }}>{node.n}</span>
                             <span className="flex-1 flex items-center justify-center pb-1 border-t border-white/20" style={{ fontSize: '11px' }}>{node.d}</span>
                         </div>

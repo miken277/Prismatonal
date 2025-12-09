@@ -160,6 +160,15 @@ class AudioEngine {
     }
   }
 
+  public glideVoice(pointerId: number, newRatio: number, glideTime: number = 0.1) {
+    const voice = this.voices.get(pointerId);
+    if (voice && this.ctx) {
+       const newFreq = BASE_FREQUENCY * newRatio;
+       voice.osc.frequency.setTargetAtTime(newFreq, this.ctx.currentTime, glideTime);
+       voice.startRatio = newRatio; 
+    }
+  }
+
   public stopAll() {
     this.voices.forEach((v, key) => {
       this.stopVoice(key);

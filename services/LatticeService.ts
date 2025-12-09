@@ -3,10 +3,8 @@ import { LatticeNode, LatticeLine, AppSettings } from '../types';
 
 // --- Math Helpers ---
 
-// Reduce fraction to simplest form
 const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
 
-// Returns the largest prime factor of n (ignoring 2)
 const getMaxPrime = (n: number): number => {
   let temp = n;
   while (temp % 2 === 0 && temp > 1) temp /= 2;
@@ -25,7 +23,6 @@ const getMaxPrime = (n: number): number => {
   return maxP;
 };
 
-// Fraction Class for integer math
 class Fraction {
   n: number;
   d: number;
@@ -40,33 +37,42 @@ class Fraction {
   }
 
   normalize(): Fraction {
-    // Bring into 1/1 to 2/1 range (approx)
-    // Actually, we usually want 1 <= ratio < 2
     let nn = this.n;
     let dd = this.d;
     
-    // Simplification first
     const divisor = gcd(nn, dd);
     nn /= divisor;
     dd /= divisor;
 
-    // Octave reduce
     while (nn >= 2 * dd) dd *= 2;
     while (nn < dd) nn *= 2;
 
     return new Fraction(nn, dd);
   }
+
+  // Adjust fraction by octave shift
+  shiftOctave(octave: number): Fraction {
+    let nn = this.n;
+    let dd = this.d;
+    if (octave > 0) {
+        nn *= Math.pow(2, octave);
+    } else if (octave < 0) {
+        dd *= Math.pow(2, Math.abs(octave));
+    }
+    // Simplify again to keep numbers clean
+    const divisor = gcd(nn, dd);
+    return new Fraction(nn / divisor, dd / divisor);
+  }
 }
 
-// --- Vectors for Projection ---
-// Adjust these to change the visual "tilt"
-// Screen coords: +y is Down.
-const VECTORS = {
-  3: { x: 0, y: -90 },    // North (Up)
-  5: { x: 75, y: -50 },   // Northeast (Right-Up)
-  7: { x: 60, y: 50 },    // Southeast (Right-Down)
-  11: { x: -60, y: -40 }, // Northwest (Left-Up)
-  13: { x: -50, y: 60 },  // Southwest (Left-Down)
+// X-Axis projection vectors (Harmonic Width)
+// Y-Axis is now dedicated to Pitch
+const X_VECTORS = {
+  3: 100,
+  5: 30,  
+  7: 20,
+  11: -20,
+  13: -30,
 };
 
 const PRIMES = [3, 5, 7, 11, 13];
@@ -80,92 +86,67 @@ const PRIME_RATIOS = {
 
 // --- Generation ---
 
-const getDistance = (coords: number[]): number => {
-  const p3 = coords[0];
-  const p5 = coords[1];
-
+export const getHarmonicDistance = (coordsA: number[], coordsB: number[] = [0,0,0,0,0]): number => {
+  const p3 = coordsA[0] - coordsB[0];
+  const p5 = coordsA[1] - coordsB[1];
+  
+  // Standard lattice distance logic for generation bounds
   let hexDist = 0;
-  // Hexagonal Distance Metric for the 3-Limit (Axis 1) and 5-Limit (Axis 2) plane.
-  // In a hex grid defined by two axes 60 degrees apart:
-  // - If signs match (e.g., +3, +5), we are moving away in the cone between axes -> Sum of coords.
-  // - If signs differ (e.g., +3, -5), we are moving "across" the hex -> Max of coords.
-  // This ensures that "Northwest" (1, -1) is distance 1, forming a hexagon instead of a diamond.
   if (Math.sign(p3) === Math.sign(p5) && p3 !== 0 && p5 !== 0) {
     hexDist = Math.abs(p3) + Math.abs(p5);
   } else {
     hexDist = Math.max(Math.abs(p3), Math.abs(p5));
   }
 
-  // For higher limits (7, 11, 13), we treat them as additional orthogonal dimensions (Manhattan distance)
-  // because they don't form a planar hex grid with 3 and 5 in this visualization.
   let otherDist = 0;
-  for (let i = 2; i < coords.length; i++) {
-    otherDist += Math.abs(coords[i]);
+  for (let i = 2; i < coordsA.length; i++) {
+    otherDist += Math.abs(coordsA[i] - coordsB[i]);
   }
 
   return hexDist + otherDist;
 };
 
 export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], lines: LatticeLine[] } => {
-  const nodes: Map<string, LatticeNode> = new Map();
+  const baseNodes: Map<string, { coords: number[], ratio: Fraction }> = new Map();
   const queue: { coords: number[], ratio: Fraction }[] = [];
   
-  // Start at Origin
-  // Coords: [exp3, exp5, exp7, exp11, exp13]
+  // 1. Generate Base Set (Normalized 1-2)
   const originCoords = [0, 0, 0, 0, 0];
   const originFrac = new Fraction(1, 1);
   queue.push({ coords: originCoords, ratio: originFrac });
+  baseNodes.set(originCoords.join(','), { coords: originCoords, ratio: originFrac });
 
-  // Add origin node immediately
-  nodes.set(originCoords.join(','), createNode(originCoords, originFrac));
-
-  const MAX_NODES = 4000; // Increased safety cap for larger shells
+  const MAX_NODES = 2000;
   let processedCount = 0;
-
-  // Set of visited coord strings to prevent duplicates in queue
-  const visited = new Set<string>();
-  visited.add(originCoords.join(','));
 
   while (queue.length > 0 && processedCount < MAX_NODES) {
     const current = queue.shift()!;
     processedCount++;
-    
     const { coords, ratio } = current;
     
     PRIMES.forEach((prime, idx) => {
-      // Skip if limit not enabled
       if (prime === 7 && !settings.enabledLimits[7]) return;
       if (prime === 11 && !settings.enabledLimits[11]) return;
       if (prime === 13 && !settings.enabledLimits[13]) return;
 
-      // Directions: +1 and -1
       [1, -1].forEach(dir => {
         const nextPos = [...coords];
         nextPos[idx] += dir;
         const posKey = nextPos.join(',');
         
-        if (!visited.has(posKey)) {
-          // Check Distance
-          const dist = getDistance(nextPos);
-
+        if (!baseNodes.has(posKey)) {
+          const dist = getHarmonicDistance(nextPos);
           if (dist < settings.latticeShells) {
-             
              let nextRatio: Fraction;
              const pRat = PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS];
-             
-             if (dir === 1) {
-                nextRatio = ratio.mul(pRat).normalize();
-             } else {
+             if (dir === 1) nextRatio = ratio.mul(pRat).normalize();
+             else {
                 const invRatio = new Fraction(pRat.d, pRat.n);
                 nextRatio = ratio.mul(invRatio).normalize();
              }
 
-             // --- Complexity Check ---
-             // Prune branches that exceed the max Numerator/Denominator complexity
              if (nextRatio.n <= settings.maxND && nextRatio.d <= settings.maxND) {
-                visited.add(posKey);
-                const node = createNode(nextPos, nextRatio);
-                nodes.set(posKey, node);
+                baseNodes.set(posKey, { coords: nextPos, ratio: nextRatio });
                 queue.push({ coords: nextPos, ratio: nextRatio });
              }
           }
@@ -174,83 +155,121 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
     });
   }
 
-  // Generate Lines
-  const lines: LatticeLine[] = [];
-  const nodeList = Array.from(nodes.values());
-  
-  // Sort nodes for rendering order (Consonance: Low limit first -> High Z-Index)
-  // But DOM renders bottom-up. So first in array = behind.
-  // User wants "top to bottom layer 2,3,5...".
-  // So 13 limit should be drawn first (bottom layer), 1 limit last (top layer).
-  nodeList.sort((a, b) => b.maxPrime - a.maxPrime);
+  // 2. Expand Vertically (Octaves)
+  // We'll create copies of baseNodes for octaves -2 to +2 (or based on canvas size)
+  const OCTAVE_RANGE = 2; 
+  const nodes: LatticeNode[] = [];
+  const nodesMap: Map<string, LatticeNode> = new Map();
 
-  // Generate connections
-  nodeList.forEach(node => {
-    PRIMES.forEach((prime, idx) => {
-       // Look for neighbor in +1 direction only (to avoid double lines)
-       const neighborCoords = [...node.coords];
-       neighborCoords[idx] += 1;
-       const neighborKey = neighborCoords.join(',');
-       const neighbor = nodes.get(neighborKey);
+  baseNodes.forEach((data, key) => {
+      for (let oct = -OCTAVE_RANGE; oct <= OCTAVE_RANGE; oct++) {
+          const shiftedRatio = data.ratio.shiftOctave(oct);
+          const absoluteRatio = shiftedRatio.n / shiftedRatio.d;
+          
+          // ID includes octave to differentiate
+          const id = `${key}:${oct}`;
+          
+          // Calculate X (Harmonic)
+          let x = 0;
+          x += data.coords[0] * X_VECTORS[3];
+          x += data.coords[1] * X_VECTORS[5];
+          x += data.coords[2] * X_VECTORS[7];
+          x += data.coords[3] * X_VECTORS[11];
+          x += data.coords[4] * X_VECTORS[13];
+          
+          // Calculate Y (Pitch)
+          // Visual Up (Lower Y) = Higher Pitch. 
+          // Base Frequency is Y=0 offset.
+          // log2(1) = 0. log2(2) = 1.
+          const PITCH_SCALE = 200; // Pixels per octave
+          const y = -(Math.log2(absoluteRatio) * PITCH_SCALE);
 
-       if (neighbor) {
-         lines.push({
-           id: `${node.id}-${neighbor.id}`,
-           x1: node.x,
-           y1: node.y,
-           x2: neighbor.x,
-           y2: neighbor.y,
-           limit: prime
-         });
-       }
-    });
+          const limitTop = getMaxPrime(shiftedRatio.n);
+          const limitBottom = getMaxPrime(shiftedRatio.d);
+          const maxPrime = Math.max(limitTop, limitBottom);
+
+          const node: LatticeNode = {
+              id,
+              coords: data.coords,
+              ratio: absoluteRatio,
+              n: shiftedRatio.n,
+              d: shiftedRatio.d,
+              label: `${shiftedRatio.n}/${shiftedRatio.d}`,
+              x,
+              y,
+              limitTop,
+              limitBottom,
+              maxPrime,
+              octave: oct
+          };
+          nodes.push(node);
+          nodesMap.set(id, node);
+      }
   });
 
-  return { nodes: nodeList, lines };
-};
-
-const createNode = (coords: number[], frac: Fraction): LatticeNode => {
-  // Project coordinates to 2D
-  let x = 0;
-  let y = 0;
+  // 3. Generate Lines (including vertical octave connections)
+  const lines: LatticeLine[] = [];
   
-  // 3-limit (Index 0)
-  x += coords[0] * VECTORS[3].x;
-  y += coords[0] * VECTORS[3].y;
-  
-  // 5-limit (Index 1)
-  x += coords[1] * VECTORS[5].x;
-  y += coords[1] * VECTORS[5].y;
+  // Sort for Z-index
+  nodes.sort((a, b) => b.maxPrime - a.maxPrime);
 
-  // 7-limit (Index 2)
-  x += coords[2] * VECTORS[7].x;
-  y += coords[2] * VECTORS[7].y;
+  nodes.forEach(node => {
+      // Harmonic Neighbors
+      PRIMES.forEach((prime, idx) => {
+          const neighborCoords = [...node.coords];
+          neighborCoords[idx] += 1;
+          const key = neighborCoords.join(',');
+          
+          if (baseNodes.has(key)) {
+             // We need to find which octave of this neighbor is "closest" or "valid"
+             
+             // Target Ratio
+             const targetVal = node.ratio * (PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS].n / PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS].d);
+             
+             // Iterate nearby octaves
+             for(let o = node.octave - 1; o <= node.octave + 1; o++) {
+                 const targetId = `${key}:${o}`;
+                 const target = nodesMap.get(targetId);
+                 if (target) {
+                     // Check if this is the interval we want (approx)
+                     const ratio = target.ratio / node.ratio;
+                     const expected = PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS];
+                     const expectedVal = expected.n / expected.d;
+                     const invExpectedVal = expected.d / expected.n;
+                     
+                     // Allow slight floating point error
+                     const EPSILON = 0.001;
+                     // Check regular or inverse
+                     if (Math.abs(ratio - expectedVal) < EPSILON || Math.abs(ratio - invExpectedVal) < EPSILON) {
+                          lines.push({
+                            id: `${node.id}-${target.id}`,
+                            x1: node.x,
+                            y1: node.y,
+                            x2: target.x,
+                            y2: target.y,
+                            limit: prime
+                          });
+                     }
+                 }
+             }
+          }
+      });
+      
+      // 2. Vertical Octave Connections
+      // Connect node to node:oct+1
+      const octUpId = `${node.coords.join(',')}:${node.octave + 1}`;
+      const octUpNode = nodesMap.get(octUpId);
+      if (octUpNode) {
+          lines.push({
+              id: `${node.id}-oct-${node.octave}`,
+              x1: node.x,
+              y1: node.y,
+              x2: octUpNode.x,
+              y2: octUpNode.y,
+              limit: 1 // Octave "limit" (Identity)
+          });
+      }
+  });
 
-  // 11-limit (Index 3)
-  x += coords[3] * VECTORS[11].x;
-  y += coords[3] * VECTORS[11].y;
-
-  // 13-limit (Index 4)
-  x += coords[4] * VECTORS[13].x;
-  y += coords[4] * VECTORS[13].y;
-
-  const n = frac.n;
-  const d = frac.d;
-  const val = n / d;
-  
-  const limitTop = getMaxPrime(n);
-  const limitBottom = getMaxPrime(d);
-  const maxPrime = Math.max(limitTop, limitBottom);
-
-  return {
-    id: coords.join(','),
-    label: `${n}/${d}`,
-    n, d,
-    ratio: val,
-    x, y,
-    limitTop,
-    limitBottom,
-    maxPrime,
-    coords
-  };
+  return { nodes, lines };
 };

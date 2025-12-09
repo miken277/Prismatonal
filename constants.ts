@@ -23,6 +23,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   
   maxND: 2048, // Common sense limit for complexity
   
+  isVoiceLeadingEnabled: false,
+  voiceLeadingStrength: 0.2, // Default gentle falloff
+  isMomentumEnabled: false,
+
   buttonSizeScale: 1.0,
   buttonSpacingScale: 1.5, // Slightly wider default
   canvasSize: 4000, // Large canvas for scrolling

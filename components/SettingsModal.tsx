@@ -140,6 +140,29 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                 <h3 className="font-semibold text-purple-400 border-b border-slate-700 pb-1">Appearance</h3>
 
                 <div>
+                    <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-indigo-500/30">
+                        <input type="checkbox" checked={settings.isVoiceLeadingEnabled} onChange={(e) => handleChange('isVoiceLeadingEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
+                        <span className="font-semibold text-indigo-300">Voice Leading Mode</span>
+                    </label>
+                    <div className={`transition-opacity ${settings.isVoiceLeadingEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                        <label className="block text-xs mb-1 text-slate-400">Dimming Strength</label>
+                         <input 
+                            type="range" min="0.1" max="0.5" step="0.05" 
+                            value={settings.voiceLeadingStrength}
+                            onChange={(e) => handleChange('voiceLeadingStrength', parseFloat(e.target.value))}
+                            className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                        />
+                    </div>
+                </div>
+                
+                <div>
+                     <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-teal-500/30">
+                        <input type="checkbox" checked={settings.isMomentumEnabled} onChange={(e) => handleChange('isMomentumEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-teal-500 focus:ring-teal-500" />
+                        <span className="font-semibold text-teal-300">Momentum / Latch</span>
+                    </label>
+                </div>
+
+                <div className="border-t border-slate-700 pt-4">
                     <label className="block text-sm mb-1">Button Size ({settings.buttonSizeScale.toFixed(1)}x)</label>
                     <input 
                         type="range" min="0.5" max="2.0" step="0.1" 
