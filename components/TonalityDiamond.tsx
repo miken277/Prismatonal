@@ -53,7 +53,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   // Reactive Delatching Logic
   useEffect(() => {
     setLatchedNodes(prev => {
-        const next = new Map(prev);
+        const next = new Map<string, string>(prev);
         let changed = false;
 
         const visibleNodeMap = new Map<string, LatticeNode>();
@@ -284,6 +284,26 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   
   const activeNodes = data.nodes.filter(n => latchedNodes.has(n.id));
 
+  // Rainbow Generation
+  // To ensure a continuous, vibrant rainbow we use multiple stops rather than a single 0-360 interpolation.
+  const rainbowPeriod = PITCH_SCALE * spacing;
+  
+  let rainbowBackgroundFixed: string | undefined = undefined;
+  
+  if (settings.isRainbowModeEnabled) {
+      const stops: string[] = [];
+      const steps = 6;
+      for (let i = 0; i <= steps; i++) {
+          const pct = i / steps;
+          const px = pct * rainbowPeriod;
+          // Calculate hue: Start at offset, cycle once (360) over the period.
+          const hue = (settings.rainbowOffset + i * 60); 
+          stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${px.toFixed(1)}px`);
+      }
+      // Use repeating-linear-gradient with explicit stops
+      rainbowBackgroundFixed = `repeating-linear-gradient(to bottom, ${stops.join(', ')})`;
+  }
+  
   return (
     <div 
         ref={scrollContainerRef}
@@ -295,6 +315,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
             style={{ 
                 width: settings.canvasSize, 
                 height: settings.canvasSize,
+                background: rainbowBackgroundFixed,
             }}
         >
             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
@@ -381,7 +402,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                         opacity = 1.0;
                     } else {
                         // Unified Voice Leading Logic
-                        // Check if node is within the current "Harmonic Reach" (Latch Limit)
                         const allowedMaxIndex = settings.latchShellLimit - 2; 
                         let isCompatible = false;
                         let minDist = Infinity;
@@ -423,6 +443,28 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                     opacity = isActive ? 1.0 : 0.95;
                 }
 
+                // Colored Illumination calculation
+                let boxShadowColor = 'white';
+                let borderColor = isLatched ? 'white' : (isHovered ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.3)');
+                
+                if (settings.isColoredIlluminationEnabled) {
+                     // The background gradient repeats every `rainbowPeriod`.
+                     // The gradient starts at 0px (top) with hue = offset.
+                     // At Y = top, the hue has progressed by (top / period) * 360.
+                     
+                     // We use standard mod logic. Since `top` can be effectively any positive value (canvas is large),
+                     // and CSS repeating-linear-gradient handles the tiling, we math it:
+                     
+                     const phase = (top % rainbowPeriod) / rainbowPeriod;
+                     const hue = (settings.rainbowOffset + phase * 360) % 360;
+                     
+                     if (isLatched || isHovered) {
+                         // High saturation/lightness for the "Illumination" effect
+                         boxShadowColor = `hsl(${hue}, 100%, 70%)`;
+                         borderColor = `hsl(${hue}, 100%, 80%)`;
+                     }
+                }
+
                 return (
                     <div
                         key={node.id}
@@ -435,10 +477,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                             background: background,
                             borderRadius: settings.buttonShape,
                             transform: `translate(-50%, -50%) scale(${scale})`,
-                            boxShadow: isLatched ? `0 0 35px white` : (isHovered ? `0 0 15px white` : '0 4px 6px rgba(0,0,0,0.6)'),
+                            boxShadow: isLatched ? `0 0 35px ${boxShadowColor}` : (isHovered ? `0 0 15px ${boxShadowColor}` : '0 4px 6px rgba(0,0,0,0.6)'),
                             zIndex: zIndex,
                             opacity: opacity,
-                            border: isLatched ? '3px solid white' : (isHovered ? '2px solid rgba(255,255,255,0.8)' : '2px solid rgba(255,255,255,0.3)'),
+                            border: settings.isColoredIlluminationEnabled && (isLatched || isHovered) ? `3px solid ${borderColor}` : (isLatched ? '3px solid white' : (isHovered ? '2px solid rgba(255,255,255,0.8)' : '2px solid rgba(255,255,255,0.3)')),
                             filter: isActive ? 'brightness(1.3)' : 'none'
                         }}
                         onPointerDown={(e) => handlePointerDown(e, node)}

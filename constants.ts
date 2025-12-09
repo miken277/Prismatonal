@@ -40,6 +40,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   polyphony: 10, // Higher polyphony
   pitchOffLocked: false,
   volumeLocked: false,
+
+  // Rainbow Defaults
+  isRainbowModeEnabled: false,
+  rainbowSaturation: 60,
+  rainbowBrightness: 10,
+  rainbowOffset: 0,
+  isColoredIlluminationEnabled: false,
 };
 
 export const DEFAULT_PRESET: SynthPreset = {

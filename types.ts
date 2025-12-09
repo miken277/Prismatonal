@@ -58,6 +58,13 @@ export interface AppSettings {
   polyphony: number;
   pitchOffLocked: boolean;
   volumeLocked: boolean;
+
+  // Visuals - Rainbow
+  isRainbowModeEnabled: boolean;
+  rainbowSaturation: number; // 0-100
+  rainbowBrightness: number; // 0-100
+  rainbowOffset: number; // 0-360 (Hue shift)
+  isColoredIlluminationEnabled: boolean;
 }
 
 export interface SynthPreset {
