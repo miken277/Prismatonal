@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { SynthPreset, WaveformType } from '../types';
 
@@ -35,6 +36,18 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
                             {w}
                         </button>
                     ))}
+                </div>
+            </div>
+
+            <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-400">Filter & FX</h3>
+                <div>
+                    <label className="flex justify-between text-xs mb-1"><span>Cutoff Freq</span> <span>{preset.filterCutoff}Hz</span></label>
+                    <input type="range" min="20" max="10000" step="10" value={preset.filterCutoff} onChange={(e) => update('filterCutoff', parseFloat(e.target.value))} className="w-full h-1 bg-yellow-600 rounded appearance-none" />
+                </div>
+                <div>
+                    <label className="flex justify-between text-xs mb-1"><span>Reverb Mix</span> <span>{(preset.reverbMix * 100).toFixed(0)}%</span></label>
+                    <input type="range" min="0" max="1" step="0.01" value={preset.reverbMix} onChange={(e) => update('reverbMix', parseFloat(e.target.value))} className="w-full h-1 bg-blue-600 rounded appearance-none" />
                 </div>
             </div>
 

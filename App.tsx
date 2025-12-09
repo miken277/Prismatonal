@@ -1,8 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
 import SynthControls from './components/SynthControls';
 import FloatingControls from './components/FloatingControls';
+import LimitLayerControls from './components/LimitLayerControls';
 import AudioEngine from './services/AudioEngine';
 import { AppSettings, SynthPreset } from './types';
 import { DEFAULT_COLORS, DEFAULT_SETTINGS, DEFAULT_PRESET } from './constants';
@@ -27,6 +29,16 @@ const App: React.FC = () => {
   useEffect(() => {
     engineRef.current.setPreset(preset);
   }, [preset]);
+
+  const handleLimitInteraction = (limit: number) => {
+    // Move touched limit to the end of the array (front)
+    // Only if it's not already at the front
+    if (settings.layerOrder[settings.layerOrder.length - 1] !== limit) {
+      const newOrder = settings.layerOrder.filter(l => l !== limit);
+      newOrder.push(limit);
+      setSettings(prev => ({ ...prev, layerOrder: newOrder }));
+    }
+  };
 
   // XML Handlers
   const saveSettingsToXML = () => {
@@ -101,6 +113,7 @@ const App: React.FC = () => {
       <TonalityDiamond 
         settings={settings} 
         audioEngine={engineRef.current} 
+        onLimitInteraction={handleLimitInteraction}
       />
 
       {/* Floating UI */}
@@ -110,6 +123,11 @@ const App: React.FC = () => {
         onPanic={() => engineRef.current.stopAll()}
         pitchOffLocked={settings.pitchOffLocked}
         volumeLocked={settings.volumeLocked}
+      />
+
+      <LimitLayerControls 
+        settings={settings}
+        updateSettings={setSettings}
       />
 
       {/* Modals */}

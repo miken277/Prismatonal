@@ -4,6 +4,7 @@ export enum LimitType {
   LIMIT_5 = 5,
   LIMIT_7 = 7,
   LIMIT_11 = 11,
+  LIMIT_13 = 13,
 }
 
 export enum WaveformType {
@@ -23,14 +24,22 @@ export interface LimitColorMap {
 }
 
 export interface AppSettings {
-  // layoutMode: 'manual'; // Implicit now as we are switching to manual grid
-  gridSize: number; // N x N
-  gridData: string; // CSV string representing the grid rows
+  latticeShells: number; // 1 to 20
+  enabledLimits: {
+    7: boolean;
+    11: boolean;
+    13: boolean;
+  };
+  // Visible toggle for lower limits
+  hiddenLimits: number[]; 
+  
+  layerOrder: number[]; // Array of limit numbers, index 0 = back, last index = front
+  
+  maxND: number; // Complexity limit: Maximum Numerator or Denominator
   
   buttonSizeScale: number; // 0.5 to 2.0
-  buttonSpacingScale: number; // 0.5 to 2.0
-  diamondRotation: number; // Degrees
-  aspectRatio: number; // 1.0 is square
+  buttonSpacingScale: number; // 0.5 to 5.0
+  canvasSize: number; // Width/Height of the scrollable area in pixels (e.g. 3000, 5000)
   buttonShape: ButtonShape;
   colors: LimitColorMap;
   isPitchBendEnabled: boolean;
@@ -49,16 +58,31 @@ export interface SynthPreset {
   sustain: number;
   release: number;
   gain: number;
+  filterCutoff: number; // Hz
+  reverbMix: number; // 0 to 1
 }
 
 export interface LatticeNode {
+  id: string; // Coordinate key "0,0,0,0,0"
+  ratio: number; // Frequency multiplier
+  n: number; // Numerator
+  d: number; // Denominator
+  label: string; 
+  x: number; // Screen X
+  y: number; // Screen Y
+  limitTop: number; 
+  limitBottom: number;
+  maxPrime: number; // For Z-sorting
+  coords: number[]; // [p3, p5, p7, p11, p13]
+}
+
+export interface LatticeLine {
   id: string;
-  ratio: number; // The frequency multiplier relative to root
-  label: string; // The fraction string (e.g. "3/2")
-  x: number; // Grid X
-  y: number; // Grid Y
-  limitTop: number; // Numerator limit identity
-  limitBottom: number; // Denominator limit identity
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  limit: number;
 }
 
 export interface ActiveVoice {
