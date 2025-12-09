@@ -9,8 +9,9 @@ class AudioEngine {
   private reverbGain: GainNode | null = null;
   private dryGain: GainNode | null = null;
   
-  private voices: Map<number, { osc: OscillatorNode; gain: GainNode; filter: BiquadFilterNode; startRatio: number }> = new Map();
-  private maxPolyphony: number = 6;
+  // Changed key to string to support 'node-ID' and 'cursor-ID'
+  private voices: Map<string, { osc: OscillatorNode; gain: GainNode; filter: BiquadFilterNode; startRatio: number }> = new Map();
+  private maxPolyphony: number = 10;
   private activePreset: SynthPreset;
 
   constructor(preset: SynthPreset) {
@@ -87,14 +88,20 @@ class AudioEngine {
     }
   }
 
-  public startVoice(pointerId: number, ratio: number) {
+  public startVoice(id: string, ratio: number) {
     this.init();
     if (!this.ctx || !this.dryGain || !this.reverbGain) return;
 
+    // Check if voice already exists (restart it)
+    if (this.voices.has(id)) {
+        this.stopVoice(id, true);
+    }
+
     // Voice stealing
     if (this.voices.size >= this.maxPolyphony) {
+      // Find the oldest voice (first key) and kill it
       const firstKey = this.voices.keys().next().value;
-      if (firstKey !== undefined) this.stopVoice(firstKey);
+      if (firstKey !== undefined) this.stopVoice(firstKey, true); // True = immediate
     }
 
     const osc = this.ctx.createOscillator();
@@ -115,7 +122,7 @@ class AudioEngine {
     // Gain Envelope
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(this.activePreset.gain, now + this.activePreset.attack);
-    gain.gain.exponentialRampToValueAtTime(this.activePreset.gain * this.activePreset.sustain, now + this.activePreset.attack + this.activePreset.decay);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, this.activePreset.gain * this.activePreset.sustain), now + this.activePreset.attack + this.activePreset.decay);
 
     // Connect Graph
     osc.connect(filter);
@@ -127,32 +134,35 @@ class AudioEngine {
 
     osc.start();
 
-    this.voices.set(pointerId, { osc, gain, filter, startRatio: ratio });
+    this.voices.set(id, { osc, gain, filter, startRatio: ratio });
   }
 
-  public stopVoice(pointerId: number) {
+  public stopVoice(id: string, immediate: boolean = false) {
     if (!this.ctx) return;
-    const voice = this.voices.get(pointerId);
+    const voice = this.voices.get(id);
     if (voice) {
       const now = this.ctx.currentTime;
       
       voice.gain.gain.cancelScheduledValues(now);
       voice.gain.gain.setValueAtTime(voice.gain.gain.value, now);
-      voice.gain.gain.exponentialRampToValueAtTime(0.001, now + this.activePreset.release);
       
-      voice.osc.stop(now + this.activePreset.release + 0.1);
+      const releaseTime = immediate ? 0.05 : this.activePreset.release;
+      
+      voice.gain.gain.exponentialRampToValueAtTime(0.001, now + releaseTime);
+      
+      voice.osc.stop(now + releaseTime + 0.1);
       setTimeout(() => {
         voice.osc.disconnect();
         voice.gain.disconnect();
         voice.filter.disconnect();
-      }, (this.activePreset.release + 0.2) * 1000);
+      }, (releaseTime + 0.2) * 1000);
 
-      this.voices.delete(pointerId);
+      this.voices.delete(id);
     }
   }
 
-  public bendVoice(pointerId: number, detuneCents: number) {
-    const voice = this.voices.get(pointerId);
+  public bendVoice(id: string, detuneCents: number) {
+    const voice = this.voices.get(id);
     if (voice && this.ctx) {
       const multiplier = Math.pow(2, detuneCents / 1200);
       const baseFreq = BASE_FREQUENCY * voice.startRatio;
@@ -160,18 +170,32 @@ class AudioEngine {
     }
   }
 
-  public glideVoice(pointerId: number, newRatio: number, glideTime: number = 0.1) {
-    const voice = this.voices.get(pointerId);
+  public glideVoice(id: string, newRatio: number, glideTime: number = 0.1) {
+    const voice = this.voices.get(id);
     if (voice && this.ctx) {
        const newFreq = BASE_FREQUENCY * newRatio;
        voice.osc.frequency.setTargetAtTime(newFreq, this.ctx.currentTime, glideTime);
+       // We update startRatio so subsequent bends are relative to the new note? 
+       // Actually, standard glissando replaces the base frequency.
        voice.startRatio = newRatio; 
     }
   }
 
   public stopAll() {
-    this.voices.forEach((v, key) => {
-      this.stopVoice(key);
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Hard Panic: Disconnect everything immediately
+    this.voices.forEach((voice) => {
+        try {
+            voice.gain.gain.cancelScheduledValues(now);
+            voice.gain.gain.setValueAtTime(0, now);
+            voice.osc.stop();
+            voice.osc.disconnect();
+            voice.gain.disconnect();
+            voice.filter.disconnect();
+        } catch (e) {
+            console.error("Error stopping voice in panic", e);
+        }
     });
     this.voices.clear();
   }

@@ -23,9 +23,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   
   maxND: 2048, // Common sense limit for complexity
   
-  isVoiceLeadingEnabled: false,
-  voiceLeadingStrength: 0.2, // Default gentle falloff
-  isMomentumEnabled: false,
+  isVoiceLeadingEnabled: true, // Default to true for new visual behavior
+  voiceLeadingStrength: 0.3, 
+  isMomentumEnabled: false, // Disabled by default
+  
+  isLatchModeEnabled: false,
+  latchShellLimit: 5, // Default allows reasonable complexity to be latched
 
   buttonSizeScale: 1.0,
   buttonSpacingScale: 1.5, // Slightly wider default
@@ -34,7 +37,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   colors: { ...DEFAULT_COLORS },
   isPitchBendEnabled: true,
   isPitchSnapEnabled: true,
-  polyphony: 8, // Higher polyphony for pads
+  polyphony: 10, // Higher polyphony
   pitchOffLocked: false,
   volumeLocked: false,
 };

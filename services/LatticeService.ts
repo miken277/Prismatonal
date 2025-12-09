@@ -66,7 +66,6 @@ class Fraction {
 }
 
 // X-Axis projection vectors (Harmonic Width)
-// Y-Axis is now dedicated to Pitch
 const X_VECTORS = {
   3: 100,
   5: 30,  
@@ -156,7 +155,6 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
   }
 
   // 2. Expand Vertically (Octaves)
-  // We'll create copies of baseNodes for octaves -2 to +2 (or based on canvas size)
   const OCTAVE_RANGE = 2; 
   const nodes: LatticeNode[] = [];
   const nodesMap: Map<string, LatticeNode> = new Map();
@@ -166,10 +164,8 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
           const shiftedRatio = data.ratio.shiftOctave(oct);
           const absoluteRatio = shiftedRatio.n / shiftedRatio.d;
           
-          // ID includes octave to differentiate
           const id = `${key}:${oct}`;
           
-          // Calculate X (Harmonic)
           let x = 0;
           x += data.coords[0] * X_VECTORS[3];
           x += data.coords[1] * X_VECTORS[5];
@@ -177,10 +173,6 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
           x += data.coords[3] * X_VECTORS[11];
           x += data.coords[4] * X_VECTORS[13];
           
-          // Calculate Y (Pitch)
-          // Visual Up (Lower Y) = Higher Pitch. 
-          // Base Frequency is Y=0 offset.
-          // log2(1) = 0. log2(2) = 1.
           const PITCH_SCALE = 200; // Pixels per octave
           const y = -(Math.log2(absoluteRatio) * PITCH_SCALE);
 
@@ -207,10 +199,9 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
       }
   });
 
-  // 3. Generate Lines (including vertical octave connections)
+  // 3. Generate Lines
   const lines: LatticeLine[] = [];
   
-  // Sort for Z-index
   nodes.sort((a, b) => b.maxPrime - a.maxPrime);
 
   nodes.forEach(node => {
@@ -221,26 +212,22 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
           const key = neighborCoords.join(',');
           
           if (baseNodes.has(key)) {
-             // We need to find which octave of this neighbor is "closest" or "valid"
-             
-             // Target Ratio
-             const targetVal = node.ratio * (PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS].n / PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS].d);
+             const basePrimeRatio = PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS].n / PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS].d;
              
              // Iterate nearby octaves
              for(let o = node.octave - 1; o <= node.octave + 1; o++) {
                  const targetId = `${key}:${o}`;
                  const target = nodesMap.get(targetId);
+                 
                  if (target) {
-                     // Check if this is the interval we want (approx)
-                     const ratio = target.ratio / node.ratio;
-                     const expected = PRIME_RATIOS[prime as keyof typeof PRIME_RATIOS];
-                     const expectedVal = expected.n / expected.d;
-                     const invExpectedVal = expected.d / expected.n;
-                     
-                     // Allow slight floating point error
-                     const EPSILON = 0.001;
-                     // Check regular or inverse
-                     if (Math.abs(ratio - expectedVal) < EPSILON || Math.abs(ratio - invExpectedVal) < EPSILON) {
+                      // Check for power-of-2 relationship relative to prime
+                      // ratio / basePrimeRatio = 2^k
+                      const ratio = target.ratio / node.ratio;
+                      const test = ratio / basePrimeRatio;
+                      const log2 = Math.log2(test);
+                      
+                      // Allow small epsilon error
+                      if (Math.abs(log2 - Math.round(log2)) < 0.001) {
                           lines.push({
                             id: `${node.id}-${target.id}`,
                             x1: node.x,
@@ -249,14 +236,13 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
                             y2: target.y,
                             limit: prime
                           });
-                     }
+                      }
                  }
              }
           }
       });
       
-      // 2. Vertical Octave Connections
-      // Connect node to node:oct+1
+      // Vertical Octave Connections
       const octUpId = `${node.coords.join(',')}:${node.octave + 1}`;
       const octUpNode = nodesMap.get(octUpId);
       if (octUpNode) {
@@ -266,7 +252,7 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
               y1: node.y,
               x2: octUpNode.x,
               y2: octUpNode.y,
-              limit: 1 // Octave "limit" (Identity)
+              limit: 1 // Octave "limit"
           });
       }
   });

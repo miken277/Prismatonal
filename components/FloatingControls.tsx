@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 
 interface Props {
@@ -35,7 +36,7 @@ const FloatingControls: React.FC<Props> = ({ volume, setVolume, onPanic, pitchOf
       {/* Volume Slider */}
       <div 
         className={`absolute bg-slate-800/80 p-3 rounded-full flex items-center gap-2 backdrop-blur border border-white/10 ${volumeLocked ? '' : 'cursor-move'}`}
-        style={{ left: volPos.x, top: volPos.y, width: 200, zIndex: 50 }}
+        style={{ left: volPos.x, top: volPos.y, width: 200, zIndex: 150 }}
         onPointerDown={(e) => handleDrag(e, setVolPos, volumeLocked)}
       >
         <span className="text-xs font-bold text-slate-400">VOL</span>
@@ -51,7 +52,7 @@ const FloatingControls: React.FC<Props> = ({ volume, setVolume, onPanic, pitchOf
       {/* Panic Button */}
       <button
         className={`absolute w-20 h-20 rounded-full bg-red-600/20 border-2 border-red-500 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-600/40 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.4)] ${pitchOffLocked ? '' : 'cursor-move'}`}
-        style={{ left: panicPos.x, top: panicPos.y, zIndex: 50 }}
+        style={{ left: panicPos.x, top: panicPos.y, zIndex: 150 }}
         onClick={onPanic}
         onPointerDown={(e) => handleDrag(e, setPanicPos, pitchOffLocked)}
       >

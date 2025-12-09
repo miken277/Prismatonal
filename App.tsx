@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import TonalityDiamond from './components/TonalityDiamond';
+import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
 import SynthControls from './components/SynthControls';
 import FloatingControls from './components/FloatingControls';
@@ -20,6 +20,7 @@ const App: React.FC = () => {
 
   // Audio Engine Singleton Ref
   const engineRef = useRef<AudioEngine>(new AudioEngine(DEFAULT_PRESET));
+  const diamondRef = useRef<TonalityDiamondHandle>(null);
 
   // Init Engine updates
   useEffect(() => {
@@ -38,6 +39,11 @@ const App: React.FC = () => {
       newOrder.push(limit);
       setSettings(prev => ({ ...prev, layerOrder: newOrder }));
     }
+  };
+
+  const handlePanic = () => {
+    engineRef.current.stopAll();
+    diamondRef.current?.clearLatches();
   };
 
   // XML Handlers
@@ -111,6 +117,7 @@ const App: React.FC = () => {
 
       {/* Main Canvas */}
       <TonalityDiamond 
+        ref={diamondRef}
         settings={settings} 
         audioEngine={engineRef.current} 
         onLimitInteraction={handleLimitInteraction}
@@ -120,7 +127,7 @@ const App: React.FC = () => {
       <FloatingControls 
         volume={masterVolume}
         setVolume={setMasterVolume}
-        onPanic={() => engineRef.current.stopAll()}
+        onPanic={handlePanic}
         pitchOffLocked={settings.pitchOffLocked}
         volumeLocked={settings.volumeLocked}
       />

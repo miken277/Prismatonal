@@ -17,7 +17,7 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
   };
 
   return (
-    <div className="fixed top-0 right-0 h-full w-80 bg-slate-800/95 backdrop-blur shadow-2xl z-40 transform transition-transform p-6 overflow-y-auto border-l border-slate-700">
+    <div className="fixed top-0 right-0 h-full w-80 bg-slate-800/95 backdrop-blur shadow-2xl z-[200] transform transition-transform p-6 overflow-y-auto border-l border-slate-700">
         <div className="flex justify-between mb-6">
             <h2 className="text-xl font-bold">Synth Engine</h2>
             <button onClick={onClose} className="text-slate-400 hover:text-white">Close</button>
@@ -55,20 +55,20 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
                 <h3 className="text-sm font-semibold text-slate-400">Envelope</h3>
                 
                 <div>
-                    <label className="flex justify-between text-xs mb-1"><span>Attack</span> <span>{preset.attack}s</span></label>
-                    <input type="range" min="0.01" max="2.0" step="0.01" value={preset.attack} onChange={(e) => update('attack', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none" />
+                    <label className="flex justify-between text-xs mb-1"><span>Attack</span> <span>{preset.attack.toFixed(2)}s</span></label>
+                    <input type="range" min="0.01" max="10.0" step="0.01" value={preset.attack} onChange={(e) => update('attack', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none" />
                 </div>
                 <div>
-                    <label className="flex justify-between text-xs mb-1"><span>Decay</span> <span>{preset.decay}s</span></label>
-                    <input type="range" min="0.01" max="2.0" step="0.01" value={preset.decay} onChange={(e) => update('decay', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none" />
+                    <label className="flex justify-between text-xs mb-1"><span>Decay</span> <span>{preset.decay.toFixed(2)}s</span></label>
+                    <input type="range" min="0.01" max="10.0" step="0.01" value={preset.decay} onChange={(e) => update('decay', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none" />
                 </div>
                 <div>
-                    <label className="flex justify-between text-xs mb-1"><span>Sustain</span> <span>{preset.sustain}</span></label>
+                    <label className="flex justify-between text-xs mb-1"><span>Sustain Level</span> <span>{preset.sustain}</span></label>
                     <input type="range" min="0.0" max="1.0" step="0.01" value={preset.sustain} onChange={(e) => update('sustain', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none" />
                 </div>
                 <div>
-                    <label className="flex justify-between text-xs mb-1"><span>Release</span> <span>{preset.release}s</span></label>
-                    <input type="range" min="0.01" max="4.0" step="0.01" value={preset.release} onChange={(e) => update('release', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none" />
+                    <label className="flex justify-between text-xs mb-1"><span>Release</span> <span>{preset.release.toFixed(2)}s</span></label>
+                    <input type="range" min="0.01" max="10.0" step="0.01" value={preset.release} onChange={(e) => update('release', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none" />
                 </div>
             </div>
 

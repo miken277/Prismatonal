@@ -38,7 +38,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center backdrop-blur-sm">
+    <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center backdrop-blur-sm">
       <div className="bg-slate-800 p-6 rounded-xl w-[90%] max-w-2xl max-h-[90vh] overflow-y-auto text-slate-200 shadow-2xl border border-slate-700 flex flex-col">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-white">Lattice Configuration</h2>
@@ -74,7 +74,19 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         />
                         <span className="text-sm font-bold min-w-[4ch]">{settings.maxND}</span>
                     </div>
-                    <p className="text-xs text-slate-500 mt-1">Limits the maximum numerator/denominator to prevent clutter.</p>
+                </div>
+
+                 <div>
+                    <label className="block text-sm font-semibold mb-2">Polyphony (Voices)</label>
+                    <div className="flex items-center gap-4">
+                        <input 
+                            type="range" min="1" max="10" step="1" 
+                            value={settings.polyphony}
+                            onChange={(e) => handleChange('polyphony', parseInt(e.target.value))}
+                            className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                        />
+                        <span className="text-xl font-bold min-w-[2ch]">{settings.polyphony}</span>
+                    </div>
                 </div>
 
                 <div>
@@ -88,7 +100,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                 </div>
 
                 <div>
-                    <label className="block text-sm font-semibold mb-2">Canvas Size (Pixels)</label>
+                    <label className="block text-sm font-semibold mb-2">Canvas Size</label>
                     <select 
                         value={settings.canvasSize}
                         onChange={(e) => handleChange('canvasSize', parseInt(e.target.value))}
@@ -137,29 +149,49 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
             {/* Visuals & Colors */}
             <div className="space-y-6">
-                <h3 className="font-semibold text-purple-400 border-b border-slate-700 pb-1">Appearance</h3>
+                <h3 className="font-semibold text-purple-400 border-b border-slate-700 pb-1">Behavior</h3>
+
+                 <div>
+                     <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-teal-500/30">
+                        <input type="checkbox" checked={settings.isLatchModeEnabled} onChange={(e) => handleChange('isLatchModeEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-teal-500 focus:ring-teal-500" />
+                        <span className="font-semibold text-teal-300">Latch Mode</span>
+                    </label>
+                    <div className={`transition-opacity pl-4 border-l-2 border-slate-700 ${settings.isLatchModeEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                        <label className="block text-xs mb-1 text-slate-400">Harmonic Reach (Latch & Visuals)</label>
+                        <div className="flex gap-2 items-center">
+                            <input 
+                                type="range" min="1" max="6" step="1" 
+                                value={settings.latchShellLimit}
+                                onChange={(e) => handleChange('latchShellLimit', parseInt(e.target.value))}
+                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                            />
+                            <span className="text-xs font-mono">{settings.latchShellLimit}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-1">1=Octaves, 2=5th (3), 3=3rd (5), 4=7th...</p>
+                    </div>
+                </div>
+
+                 <div className="opacity-50 pointer-events-none grayscale">
+                     <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-slate-600">
+                        <input type="checkbox" checked={settings.isMomentumEnabled} readOnly className="w-5 h-5 rounded border-slate-600" />
+                        <span className="font-semibold text-slate-400">Momentum (Deprecated)</span>
+                    </label>
+                </div>
 
                 <div>
                     <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-indigo-500/30">
                         <input type="checkbox" checked={settings.isVoiceLeadingEnabled} onChange={(e) => handleChange('isVoiceLeadingEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
-                        <span className="font-semibold text-indigo-300">Voice Leading Mode</span>
+                        <span className="font-semibold text-indigo-300">Voice Leading Visuals</span>
                     </label>
                     <div className={`transition-opacity ${settings.isVoiceLeadingEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
-                        <label className="block text-xs mb-1 text-slate-400">Dimming Strength</label>
+                        <label className="block text-xs mb-1 text-slate-400">Falloff Strength</label>
                          <input 
-                            type="range" min="0.1" max="0.5" step="0.05" 
+                            type="range" min="0.1" max="1.0" step="0.05" 
                             value={settings.voiceLeadingStrength}
                             onChange={(e) => handleChange('voiceLeadingStrength', parseFloat(e.target.value))}
                             className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                         />
                     </div>
-                </div>
-                
-                <div>
-                     <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-teal-500/30">
-                        <input type="checkbox" checked={settings.isMomentumEnabled} onChange={(e) => handleChange('isMomentumEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-teal-500 focus:ring-teal-500" />
-                        <span className="font-semibold text-teal-300">Momentum / Latch</span>
-                    </label>
                 </div>
 
                 <div className="border-t border-slate-700 pt-4">
@@ -185,32 +217,11 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                        >Diamond</button>
                      </div>
                 </div>
-
-                <div className="space-y-2">
-                    <span className="block text-sm font-semibold">Limit Colors</span>
-                    <div className="flex gap-3 flex-wrap">
-                      {[1, 3, 5, 7, 11, 13].map(limit => (
-                        <div key={limit} className="flex flex-col items-center">
-                          <input 
-                            type="color" 
-                            value={settings.colors[limit] || '#ffffff'} 
-                            onChange={(e) => handleColorChange(limit, e.target.value)}
-                            className="w-8 h-8 rounded cursor-pointer border-none"
-                          />
-                          <span className="text-xs mt-1 text-slate-400">{limit}</span>
-                        </div>
-                      ))}
-                    </div>
-                </div>
                 
                  <div className="grid grid-cols-2 gap-2 text-sm">
                  <label className="flex items-center space-x-2">
                    <input type="checkbox" checked={settings.isPitchBendEnabled} onChange={(e) => handleChange('isPitchBendEnabled', e.target.checked)} />
-                   <span>Pitch Bend</span>
-                 </label>
-                 <label className="flex items-center space-x-2">
-                   <input type="checkbox" checked={settings.isPitchSnapEnabled} onChange={(e) => handleChange('isPitchSnapEnabled', e.target.checked)} />
-                   <span>Snap</span>
+                   <span>Bend Animations</span>
                  </label>
               </div>
 

@@ -40,7 +40,13 @@ export interface AppSettings {
   // Voice Leading / Focus Mode
   isVoiceLeadingEnabled: boolean;
   voiceLeadingStrength: number; // 0 to 1, higher means stricter falloff
-  isMomentumEnabled: boolean; // Retain motion and latch on release
+  
+  // Momentum is deprecated/greyed out in favor of Latch Mode
+  isMomentumEnabled: boolean; 
+
+  // Latch Settings
+  isLatchModeEnabled: boolean;
+  latchShellLimit: number; // 1 = Octaves, 2 = Fifths, etc.
 
   buttonSizeScale: number; // 0.5 to 2.0
   buttonSpacingScale: number; // 0.5 to 5.0
@@ -92,8 +98,8 @@ export interface LatticeLine {
 }
 
 export interface ActiveVoice {
-  id: number; // Pointer ID
-  nodeId: string;
+  id: string; // Pointer ID or Node ID
+  nodeId?: string;
   stop: () => void;
   setDetune: (cents: number) => void;
 }

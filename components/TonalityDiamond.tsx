@@ -1,8 +1,12 @@
 
-import React, { useEffect, useRef, useState, useLayoutEffect } from 'react';
+import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef } from 'react';
 import { AppSettings, LatticeNode, LatticeLine } from '../types';
 import { generateLattice, getHarmonicDistance } from '../services/LatticeService';
 import AudioEngine from '../services/AudioEngine';
+
+export interface TonalityDiamondHandle {
+  clearLatches: () => void;
+}
 
 interface Props {
   settings: AppSettings;
@@ -10,45 +14,99 @@ interface Props {
   onLimitInteraction: (limit: number) => void;
 }
 
-interface ActiveTouch {
-  id: number;
-  nodeId: string; // The "Anchor" node for the current bend
-  startX: number;
-  startY: number;
+interface ActiveCursor {
+  pointerId: number;
   currentX: number;
   currentY: number;
-  
-  // Dynamic bending state
-  targetNodeId: string | null;
-  bendAmount: number; // 0 to 1
+  originNodeId: string; // The node where the touch started
 }
 
-interface LatchedVoice {
-  voiceId: number;
-  nodeId: string;
-}
+const PITCH_SCALE = 200; // Pixels per octave, matches LatticeService
 
-const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitInteraction }) => {
+const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, audioEngine, onLimitInteraction }, ref) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
   
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
-  const [activeTouches, setActiveTouches] = useState<Map<number, ActiveTouch>>(new Map());
-  const [latchedVoices, setLatchedVoices] = useState<Map<string, number>>(new Map()); // nodeId -> voiceId
   
-  const [lastPlayedCoords, setLastPlayedCoords] = useState<number[]>([0, 0, 0, 0, 0]); 
-
+  // Track latched nodes: Key = NodeID, Value = OriginNodeID (The note that caused the latch)
+  const [latchedNodes, setLatchedNodes] = useState<Map<string, string>>(new Map());
+  
+  // Track active pointers (cursors) for bending and "drawing"
+  const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
+  
   const [hasCentered, setHasCentered] = useState(false);
+
+  // Expose methods to parent
+  useImperativeHandle(ref, () => ({
+    clearLatches: () => {
+      setLatchedNodes(new Map()); // Visual clear
+    }
+  }));
 
   useEffect(() => {
     const result = generateLattice(settings);
-    // Filter out nodes based on visibility, but we need them for logic?
-    // Better to filter just visual rendering or keep them all for connectivity?
-    // Let's filter visually but keep structure if needed. For now, strict filter.
     const visibleNodes = result.nodes.filter(n => !settings.hiddenLimits.includes(n.maxPrime));
     const visibleLines = result.lines.filter(l => !settings.hiddenLimits.includes(l.limit));
     setData({ nodes: visibleNodes, lines: visibleLines });
   }, [settings]);
+
+  // Reactive Delatching Logic
+  useEffect(() => {
+    setLatchedNodes(prev => {
+        const next = new Map(prev);
+        let changed = false;
+
+        const visibleNodeMap = new Map<string, LatticeNode>();
+        data.nodes.forEach(n => visibleNodeMap.set(n.id, n));
+
+        next.forEach((originId, nodeId) => {
+            const node = visibleNodeMap.get(nodeId);
+            
+            // Check 1: Is the node still visible/existent in the new grid?
+            if (!node) {
+                audioEngine.stopVoice(`node-${nodeId}`);
+                next.delete(nodeId);
+                changed = true;
+                return;
+            }
+
+            // Check 2: Latch Limit Constraint (Unified Logic)
+            if (originId !== nodeId) {
+                 const originNode = visibleNodeMap.get(originId);
+                 if (!originNode) {
+                     audioEngine.stopVoice(`node-${nodeId}`);
+                     next.delete(nodeId);
+                     changed = true;
+                     return;
+                 }
+
+                 const allowedMaxIndex = settings.latchShellLimit - 2; 
+                 let isAllowed = true;
+                 if (settings.latchShellLimit === 1) {
+                     const dist = getHarmonicDistance(node.coords, originNode.coords);
+                     if (dist > 0) isAllowed = false;
+                 } else {
+                     for(let i=0; i<node.coords.length; i++) {
+                        const diff = Math.abs(node.coords[i] - originNode.coords[i]);
+                        if (diff > 0 && i > allowedMaxIndex) {
+                            isAllowed = false;
+                            break;
+                        }
+                     }
+                 }
+
+                 if (!isAllowed) {
+                     audioEngine.stopVoice(`node-${nodeId}`);
+                     next.delete(nodeId);
+                     changed = true;
+                 }
+            }
+        });
+
+        return changed ? next : prev;
+    });
+  }, [settings, data.nodes, audioEngine]);
+
 
   useLayoutEffect(() => {
     if (scrollContainerRef.current && !hasCentered) {
@@ -66,206 +124,165 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
     audioEngine.setPolyphony(settings.polyphony);
   }, [settings.polyphony, audioEngine]);
 
+  // --- Logic Helpers ---
+
+  const toggleLatch = (nodeId: string, ratio: number) => {
+    setLatchedNodes(prev => {
+        const newMap = new Map(prev);
+        if (newMap.has(nodeId)) {
+            newMap.delete(nodeId);
+            audioEngine.stopVoice(`node-${nodeId}`);
+        } else {
+            newMap.set(nodeId, nodeId);
+            audioEngine.startVoice(`node-${nodeId}`, ratio);
+        }
+        return newMap;
+    });
+  };
+
+  const latchOn = (nodeId: string, ratio: number, originId: string) => {
+      setLatchedNodes(prev => {
+          if (prev.has(nodeId)) return prev; 
+          const newMap = new Map(prev);
+          newMap.set(nodeId, originId);
+          audioEngine.startVoice(`node-${nodeId}`, ratio);
+          return newMap;
+      });
+  };
+
   const handlePointerDown = (e: React.PointerEvent, node: LatticeNode) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // Tap to stop Latched Voice
-    if (latchedVoices.has(node.id)) {
-        const voiceId = latchedVoices.get(node.id)!;
-        audioEngine.stopVoice(voiceId);
-        setLatchedVoices(prev => {
-            const next = new Map(prev);
-            next.delete(node.id);
-            return next;
-        });
-        return;
-    }
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
     onLimitInteraction(node.maxPrime);
-    setLastPlayedCoords(node.coords);
     
-    audioEngine.startVoice(e.pointerId, node.ratio);
-    setActiveTouches(prev => {
-      const newMap = new Map(prev);
-      newMap.set(e.pointerId, {
-        id: e.pointerId,
-        nodeId: node.id,
-        startX: e.clientX,
-        startY: e.clientY,
-        currentX: e.clientX,
-        currentY: e.clientY,
-        targetNodeId: null,
-        bendAmount: 0
-      });
-      return newMap;
-    });
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    if (settings.isLatchModeEnabled) {
+        toggleLatch(node.id, node.ratio);
+    } else {
+        latchOn(node.id, node.ratio, node.id);
+    }
+
+    if (settings.isPitchBendEnabled) {
+        const cursorId = `cursor-${e.pointerId}`;
+        audioEngine.startVoice(cursorId, node.ratio);
+        
+        setActiveCursors(prev => {
+            const next = new Map(prev);
+            next.set(e.pointerId, {
+                pointerId: e.pointerId,
+                currentX: e.clientX,
+                currentY: e.clientY,
+                originNodeId: node.id
+            });
+            return next;
+        });
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!activeTouches.has(e.pointerId)) return;
-    const touch = activeTouches.get(e.pointerId)!;
+    if (!activeCursors.has(e.pointerId)) return;
+    const cursor = activeCursors.get(e.pointerId)!;
     
-    const centerOffset = settings.canvasSize / 2;
-    const spacing = settings.buttonSpacingScale;
-
-    // 1. Calculate Vector from Start to Current
-    const dx = e.clientX - touch.startX;
-    const dy = e.clientY - touch.startY;
-    
-    // 2. Vector-based Bend Logic
-    if (settings.isPitchBendEnabled) {
-        const anchorNode = data.nodes.find(n => n.id === touch.nodeId);
-        if (!anchorNode) return;
-
-        const anchorX = anchorNode.x * spacing + centerOffset;
-        const anchorY = anchorNode.y * spacing + centerOffset;
-
-        // Find neighbors (connected via lines)
-        const connectedLines = data.lines.filter(l => 
-            (l.x1 === anchorNode.x && l.y1 === anchorNode.y) || 
-            (l.x2 === anchorNode.x && l.y2 === anchorNode.y)
-        );
-
-        let bestTarget: LatticeNode | null = null;
-        let bestProjection = 0;
-        let bestDistSq = 0;
-
-        connectedLines.forEach(line => {
-             const isStart = (line.x1 === anchorNode.x && line.y1 === anchorNode.y);
-             const nx = isStart ? line.x2 : line.x1;
-             const ny = isStart ? line.y2 : line.y1;
-             
-             // Visual Vector to neighbor
-             const vx = (nx * spacing + centerOffset) - anchorX;
-             const vy = (ny * spacing + centerOffset) - anchorY;
-             
-             // Dot Product projection
-             // Project drag vector onto neighbor vector
-             const vMagSq = vx*vx + vy*vy;
-             const dot = dx*vx + dy*vy;
-             
-             const projection = dot / vMagSq; // 0 to 1 scalar along the line
-             
-             if (projection > 0 && projection > bestProjection) {
-                 const neighbor = data.nodes.find(n => n.x === nx && n.y === ny);
-                 if (neighbor) {
-                     bestProjection = projection;
-                     bestTarget = neighbor;
-                     bestDistSq = vMagSq;
-                 }
-             }
+    setActiveCursors(prev => {
+        const next = new Map(prev);
+        next.set(e.pointerId, {
+            ...cursor,
+            currentX: e.clientX,
+            currentY: e.clientY
         });
+        return next;
+    });
 
-        // 3. Apply Bend or Handoff
-        if (bestTarget && bestTarget.id) {
-            // Cap at 1.0 (arrived at neighbor)
-            const amount = Math.min(1.0, bestProjection);
-            
-            // Calculate frequency: Geometric interpolation
-            // F = F_start * (F_target / F_start) ^ amount
-            const ratioRatio = bestTarget.ratio / anchorNode.ratio;
-            const currentRatio = anchorNode.ratio * Math.pow(ratioRatio, amount);
-            
-            audioEngine.glideVoice(e.pointerId, currentRatio, 0.02); // Fast glide for bend responsiveness
+    if (settings.isPitchBendEnabled && scrollContainerRef.current) {
+        const centerOffset = settings.canvasSize / 2;
+        const scrollLeft = scrollContainerRef.current.scrollLeft;
+        const scrollTop = scrollContainerRef.current.scrollTop;
+        
+        const canvasY = e.clientY + scrollTop;
+        const relY = canvasY - centerOffset;
+        
+        const effectivePitchScale = PITCH_SCALE * settings.buttonSpacingScale;
+        const bentRatio = Math.pow(2, -relY / effectivePitchScale);
+        
+        audioEngine.glideVoice(`cursor-${e.pointerId}`, bentRatio, 0.05);
 
-            // Check for Handoff (Legato / Glissando)
-            // If we are significantly past the midpoint or close to the target, switch anchor
-            if (amount >= 0.95) {
-                 onLimitInteraction(bestTarget.maxPrime);
-                 setLastPlayedCoords(bestTarget.coords);
-                 
-                 // Update touch state to new anchor
-                 setActiveTouches(prev => {
-                     const newMap = new Map(prev);
-                     newMap.set(e.pointerId, {
-                         ...touch,
-                         nodeId: bestTarget!.id,
-                         // Reset start to new node position to allow continuous bending
-                         // We need screen coords of the new node
-                         startX: e.clientX, // Resetting startX/Y to current assumes we are AT the node. 
-                         // But we might be slightly off. Ideally, we snap the 'virtual' start to the node center.
-                         startY: e.clientY,
-                         currentX: e.clientX,
-                         currentY: e.clientY,
-                         targetNodeId: null,
-                         bendAmount: 0
-                     });
-                     return newMap;
-                 });
-            } else {
-                 // Just update visual bend
-                 setActiveTouches(prev => {
-                     const newMap = new Map(prev);
-                     newMap.set(e.pointerId, {
-                         ...touch,
-                         currentX: e.clientX,
-                         currentY: e.clientY,
-                         targetNodeId: bestTarget!.id,
-                         bendAmount: amount
-                     });
-                     return newMap;
-                 });
+        if (settings.isLatchModeEnabled) {
+            const spacing = settings.buttonSpacingScale;
+            
+            for (const node of data.nodes) {
+                const nx = (node.x * spacing + centerOffset) - scrollLeft;
+                const ny = (node.y * spacing + centerOffset) - scrollTop;
+                
+                const radius = (60 * settings.buttonSizeScale) / 2;
+                const dx = e.clientX - nx;
+                const dy = e.clientY - ny;
+                const distSq = dx*dx + dy*dy;
+
+                if (distSq < radius * radius) {
+                    if (!latchedNodes.has(node.id)) {
+                         const originNode = data.nodes.find(n => n.id === cursor.originNodeId);
+                         if (originNode) {
+                             const allowedMaxIndex = settings.latchShellLimit - 2; 
+                             
+                             let isAllowed = true;
+                             if (settings.latchShellLimit === 1) {
+                                 const hDist = getHarmonicDistance(node.coords, originNode.coords);
+                                 if (hDist > 0) isAllowed = false;
+                             } else {
+                                 for(let i=0; i<node.coords.length; i++) {
+                                     const diff = Math.abs(node.coords[i] - originNode.coords[i]);
+                                     if (diff > 0 && i > allowedMaxIndex) {
+                                         isAllowed = false;
+                                         break;
+                                     }
+                                 }
+                             }
+
+                             if (isAllowed) {
+                                 latchOn(node.id, node.ratio, cursor.originNodeId);
+                             }
+                         }
+                    }
+                }
             }
-        } else {
-            // No valid target, stick to anchor (or minor wobble)
-            setActiveTouches(prev => {
-                 const newMap = new Map(prev);
-                 newMap.set(e.pointerId, {
-                     ...touch,
-                     currentX: e.clientX,
-                     currentY: e.clientY,
-                     targetNodeId: null,
-                     bendAmount: 0
-                 });
-                 return newMap;
-             });
         }
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    const touch = activeTouches.get(e.pointerId);
-    
-    // --- Momentum Logic ---
-    // If momentum enabled, latch the note at its CURRENT pitch (even if bent)
-    if (settings.isMomentumEnabled && touch) {
-         // Latch the anchor node
-         // If bent halfway, maybe we should latch the target? 
-         // For now, latch the current Anchor (which updates on handoff)
-         const nodeToLatch = touch.nodeId;
-         
-         setLatchedVoices(prev => {
-            const newMap = new Map(prev);
-            newMap.set(nodeToLatch, e.pointerId);
-            return newMap;
-         });
-
-         // Voice keeps running, remove touch tracker
-         setActiveTouches(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(e.pointerId);
-            return newMap;
-         });
-    } else {
-        audioEngine.stopVoice(e.pointerId);
-        setActiveTouches(prev => {
-          const newMap = new Map(prev);
-          newMap.delete(e.pointerId);
-          return newMap;
+    if (activeCursors.has(e.pointerId)) {
+        audioEngine.stopVoice(`cursor-${e.pointerId}`);
+        setActiveCursors(prev => {
+            const next = new Map(prev);
+            next.delete(e.pointerId);
+            return next;
         });
+    }
+
+    if (!settings.isLatchModeEnabled) {
+        const cursor = activeCursors.get(e.pointerId);
+        if (cursor) {
+             if (latchedNodes.has(cursor.originNodeId)) {
+                 setLatchedNodes(prev => {
+                     const next = new Map(prev);
+                     next.delete(cursor.originNodeId);
+                     audioEngine.stopVoice(`node-${cursor.originNodeId}`);
+                     return next;
+                 });
+             }
+        }
     }
   };
 
   const getColor = (limit: number): string => settings.colors[limit] || '#64748b';
 
   const baseSize = 60 * settings.buttonSizeScale;
-  const touches: ActiveTouch[] = Array.from(activeTouches.values());
+  const cursors: ActiveCursor[] = Array.from(activeCursors.values());
   const centerOffset = settings.canvasSize / 2;
   const spacing = settings.buttonSpacingScale;
   
-  const activeNodeIds = new Set([...touches.map(t => t.nodeId), ...latchedVoices.keys()]);
+  const activeNodes = data.nodes.filter(n => latchedNodes.has(n.id));
 
   return (
     <div 
@@ -274,14 +291,12 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
         style={{ touchAction: 'none' }}
     >
         <div 
-            ref={contentRef}
             className="relative"
             style={{ 
                 width: settings.canvasSize, 
                 height: settings.canvasSize,
             }}
         >
-            {/* SVG Layer for Lines */}
             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
                 {data.lines.map(line => {
                     const x1 = line.x1 * spacing + centerOffset;
@@ -290,51 +305,62 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
                     const y2 = line.y2 * spacing + centerOffset;
                     const color = getColor(line.limit);
                     
-                    // Only show lines connected to active/focused nodes or high level grid
-                    // To avoid clutter with the vertical layout
+                    const n1 = data.nodes.find(n => Math.abs(n.x - line.x1) < 0.1 && Math.abs(n.y - line.y1) < 0.1);
+                    const n2 = data.nodes.find(n => Math.abs(n.x - line.x2) < 0.1 && Math.abs(n.y - line.y2) < 0.1);
                     
+                    let lineOpacity = 0.1;
+                    let lineWidth = line.limit === 1 ? 4 : 2;
+
+                    if (n1 && n2) {
+                        const n1Active = latchedNodes.has(n1.id);
+                        const n2Active = latchedNodes.has(n2.id);
+
+                        if (n1Active && n2Active) {
+                             lineOpacity = 1.0;
+                             lineWidth = 6;
+                        } else if (n1Active || n2Active) {
+                             lineOpacity = 0.6;
+                             lineWidth = 3;
+                        } else if (settings.isVoiceLeadingEnabled && activeNodes.length > 0) {
+                             lineOpacity = 0.05;
+                        }
+                    }
+
                     return (
                         <line 
                             key={line.id}
                             x1={x1} y1={y1} x2={x2} y2={y2}
                             stroke={color}
-                            strokeWidth={line.limit === 1 ? 4 : 2} // Thicker for Octaves
-                            strokeOpacity={line.limit === 1 ? 0.4 : 0.2}
-                            strokeDasharray={line.limit === 1 ? "5,5" : "0"} // Dashed for Octaves
+                            strokeWidth={lineWidth}
+                            strokeOpacity={lineOpacity}
+                            strokeDasharray={line.limit === 1 ? "5,5" : "0"} 
                         />
                     );
                 })}
                 
-                {/* Active Pitch Bend Lines (Straight) */}
-                {touches.map(touch => {
-                    if (!touch.targetNodeId || !touch.nodeId) return null;
-                    const startNode = data.nodes.find(n => n.id === touch.nodeId);
-                    const targetNode = data.nodes.find(n => n.id === touch.targetNodeId);
-                    if (!startNode || !targetNode) return null;
-                    
-                    const x1 = startNode.x * spacing + centerOffset;
-                    const y1 = startNode.y * spacing + centerOffset;
-                    const x2 = targetNode.x * spacing + centerOffset;
-                    const y2 = targetNode.y * spacing + centerOffset;
-                    
+                {cursors.map(cursor => {
+                    const node = data.nodes.find(n => n.id === cursor.originNodeId);
+                    if (!node) return null;
+                    const nx = node.x * spacing + centerOffset;
+                    const ny = node.y * spacing + centerOffset;
+                    const cx = cursor.currentX + (scrollContainerRef.current?.scrollLeft || 0);
+                    const cy = cursor.currentY + (scrollContainerRef.current?.scrollTop || 0);
                     return (
-                        <line 
-                           key={`bend-${touch.id}`}
-                           x1={x1} y1={y1} x2={x2} y2={y2}
+                         <line 
+                           key={`drag-${cursor.pointerId}`}
+                           x1={nx} y1={ny} x2={cx} y2={cy}
                            stroke="white"
-                           strokeWidth={4}
-                           strokeOpacity={0.6 + (touch.bendAmount * 0.4)}
-                        />
+                           strokeWidth={2}
+                           strokeOpacity={0.5}
+                         />
                     );
                 })}
             </svg>
 
-            {/* Nodes Layer */}
             {data.nodes.map((node) => {
-                const activeTouch = touches.find(t => t.nodeId === node.id);
-                const isLatched = latchedVoices.has(node.id);
-                const isActive = !!activeTouch || isLatched;
-                const isTarget = touches.some(t => t.targetNodeId === node.id);
+                const isLatched = latchedNodes.has(node.id);
+                const isHovered = cursors.some(c => c.originNodeId === node.id); 
+                const isActive = isLatched || isHovered;
                 
                 const left = node.x * spacing + centerOffset;
                 const top = node.y * spacing + centerOffset;
@@ -344,28 +370,57 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
                 const background = `linear-gradient(to bottom, ${cTop} 50%, ${cBottom} 50%)`;
 
                 const layerIndex = settings.layerOrder.indexOf(node.maxPrime);
-                const zIndex = isActive ? 100 : (10 + layerIndex);
+                const zIndex = isActive ? 80 : (10 + layerIndex);
 
                 let scale = 1.0;
                 let opacity = 0.95;
                 
-                if (settings.isVoiceLeadingEnabled) {
-                  const dist = getHarmonicDistance(node.coords, lastPlayedCoords);
-                  
-                  // Modify distance check: Include Pitch Proximity?
-                  // For now, stick to harmonic distance + active state
-                  if (!isActive && !isTarget) {
-                    const falloff = settings.voiceLeadingStrength; 
-                    const visibility = Math.max(0.25, 1 - (dist * falloff));
-                    scale = Math.max(0.4, visibility);
-                    opacity = Math.max(0.15, visibility);
-                  } else {
-                    scale = 1.2; 
-                    opacity = 1.0;
-                  }
+                if (settings.isVoiceLeadingEnabled && activeNodes.length > 0) {
+                    if (isActive) {
+                        scale = 1.3;
+                        opacity = 1.0;
+                    } else {
+                        // Unified Voice Leading Logic
+                        // Check if node is within the current "Harmonic Reach" (Latch Limit)
+                        const allowedMaxIndex = settings.latchShellLimit - 2; 
+                        let isCompatible = false;
+                        let minDist = Infinity;
+                        
+                        for (const activeNode of activeNodes) {
+                             let valid = true;
+                             if (settings.latchShellLimit === 1) {
+                                 const hDist = getHarmonicDistance(node.coords, activeNode.coords);
+                                 if (hDist > 0) valid = false;
+                             } else {
+                                 for(let i=0; i<node.coords.length; i++) {
+                                     const diff = Math.abs(node.coords[i] - activeNode.coords[i]);
+                                     if (diff > 0 && i > allowedMaxIndex) {
+                                         valid = false;
+                                         break;
+                                     }
+                                 }
+                             }
+                            
+                             if (valid) {
+                                isCompatible = true;
+                                const d = getHarmonicDistance(node.coords, activeNode.coords);
+                                if (d < minDist) minDist = d;
+                             }
+                        }
+
+                        if (!isCompatible) {
+                            opacity = 0.15; 
+                            scale = 0.4;
+                        } else {
+                             const falloff = settings.voiceLeadingStrength; 
+                             const visibility = Math.max(0.15, 1 - (minDist * falloff));
+                             scale = Math.max(0.4, 0.5 + (visibility * 0.5));
+                             opacity = visibility;
+                        }
+                    }
                 } else {
-                    scale = (isActive || isTarget) ? 1.2 : 1.0;
-                    opacity = (isActive || isTarget) ? 1.0 : 0.95;
+                    scale = isActive ? 1.3 : 1.0;
+                    opacity = isActive ? 1.0 : 0.95;
                 }
 
                 return (
@@ -380,10 +435,10 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
                             background: background,
                             borderRadius: settings.buttonShape,
                             transform: `translate(-50%, -50%) scale(${scale})`,
-                            boxShadow: isActive ? `0 0 35px white` : '0 4px 6px rgba(0,0,0,0.6)',
+                            boxShadow: isLatched ? `0 0 35px white` : (isHovered ? `0 0 15px white` : '0 4px 6px rgba(0,0,0,0.6)'),
                             zIndex: zIndex,
                             opacity: opacity,
-                            border: isLatched ? '3px solid white' : (isActive ? '2px solid white' : '2px solid rgba(255,255,255,0.3)'),
+                            border: isLatched ? '3px solid white' : (isHovered ? '2px solid rgba(255,255,255,0.8)' : '2px solid rgba(255,255,255,0.3)'),
                             filter: isActive ? 'brightness(1.3)' : 'none'
                         }}
                         onPointerDown={(e) => handlePointerDown(e, node)}
@@ -402,6 +457,6 @@ const TonalityDiamond: React.FC<Props> = ({ settings, audioEngine, onLimitIntera
         </div>
     </div>
   );
-};
+});
 
 export default TonalityDiamond;
