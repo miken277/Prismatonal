@@ -23,15 +23,24 @@ interface ActiveCursor {
 
 const PITCH_SCALE = 200; // Pixels per octave, matches LatticeService
 
+// Map prime limits to their coordinate index in the coords array
+const LIMIT_TO_INDEX: {[key: number]: number} = {
+    3: 0,
+    5: 1,
+    7: 2,
+    11: 3,
+    13: 4
+};
+
 const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, audioEngine, onLimitInteraction }, ref) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
   
-  // Track latched nodes: Key = NodeID, Value = OriginNodeID (The note that caused the latch)
+  // Track latched nodes
   const [latchedNodes, setLatchedNodes] = useState<Map<string, string>>(new Map());
   
-  // Track active pointers (cursors) for bending and "drawing"
+  // Track active pointers
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   
   const [hasCentered, setHasCentered] = useState(false);
@@ -61,8 +70,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
 
         next.forEach((originId, nodeId) => {
             const node = visibleNodeMap.get(nodeId);
-            
-            // Check 1: Is the node still visible/existent in the new grid?
             if (!node) {
                 audioEngine.stopVoice(`node-${nodeId}`);
                 next.delete(nodeId);
@@ -70,7 +77,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                 return;
             }
 
-            // Check 2: Latch Limit Constraint (Unified Logic)
             if (originId !== nodeId) {
                  const originNode = visibleNodeMap.get(originId);
                  if (!originNode) {
@@ -285,9 +291,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   const activeNodes = data.nodes.filter(n => latchedNodes.has(n.id));
 
   // Rainbow Generation
-  // To ensure a continuous, vibrant rainbow we use multiple stops rather than a single 0-360 interpolation.
   const rainbowPeriod = PITCH_SCALE * spacing;
-  
   let rainbowBackgroundFixed: string | undefined = undefined;
   
   if (settings.isRainbowModeEnabled) {
@@ -296,11 +300,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
       for (let i = 0; i <= steps; i++) {
           const pct = i / steps;
           const px = pct * rainbowPeriod;
-          // Calculate hue: Start at offset, cycle once (360) over the period.
           const hue = (settings.rainbowOffset + i * 60); 
           stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${px.toFixed(1)}px`);
       }
-      // Use repeating-linear-gradient with explicit stops
       rainbowBackgroundFixed = `repeating-linear-gradient(to bottom, ${stops.join(', ')})`;
   }
   
@@ -318,44 +320,104 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                 background: rainbowBackgroundFixed,
             }}
         >
+            <style>{`
+              @keyframes flowAnimation {
+                to { stroke-dashoffset: -40; }
+              }
+              .animate-flow {
+                animation: flowAnimation ${settings.voiceLeadingAnimationSpeed}s linear infinite;
+              }
+            `}</style>
+            
             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
                 {data.lines.map(line => {
-                    const x1 = line.x1 * spacing + centerOffset;
-                    const y1 = line.y1 * spacing + centerOffset;
-                    const x2 = line.x2 * spacing + centerOffset;
-                    const y2 = line.y2 * spacing + centerOffset;
-                    const color = getColor(line.limit);
+                    let x1 = line.x1 * spacing + centerOffset;
+                    let y1 = line.y1 * spacing + centerOffset;
+                    let x2 = line.x2 * spacing + centerOffset;
+                    let y2 = line.y2 * spacing + centerOffset;
                     
                     const n1 = data.nodes.find(n => Math.abs(n.x - line.x1) < 0.1 && Math.abs(n.y - line.y1) < 0.1);
                     const n2 = data.nodes.find(n => Math.abs(n.x - line.x2) < 0.1 && Math.abs(n.y - line.y2) < 0.1);
                     
+                    if (!n1 || !n2) return null;
+
+                    const limitColor = getColor(line.limit);
+                    
+                    let strokeColor = limitColor;
                     let lineOpacity = 0.1;
                     let lineWidth = line.limit === 1 ? 4 : 2;
+                    let isVoiceLeadingActive = false;
+                    let lineStyle = {};
 
-                    if (n1 && n2) {
-                        const n1Active = latchedNodes.has(n1.id);
-                        const n2Active = latchedNodes.has(n2.id);
+                    const n1Active = latchedNodes.has(n1.id);
+                    const n2Active = latchedNodes.has(n2.id);
 
-                        if (n1Active && n2Active) {
-                             lineOpacity = 1.0;
-                             lineWidth = 6;
-                        } else if (n1Active || n2Active) {
-                             lineOpacity = 0.6;
-                             lineWidth = 3;
-                        } else if (settings.isVoiceLeadingEnabled && activeNodes.length > 0) {
-                             lineOpacity = 0.05;
+                    if (n1Active && n2Active) {
+                        // Voice Leading Connection Active
+                        lineOpacity = 1.0;
+                        lineWidth = 5;
+                        strokeColor = limitColor; // Keep limit color
+                        isVoiceLeadingActive = true;
+                        
+                        // Brighten effect for active lines
+                        lineStyle = { 
+                            filter: `brightness(1.5) drop-shadow(0 0 5px ${limitColor})` 
+                        };
+                        
+                        // Directional Logic
+                        // Determine flow direction based on coordinate magnitude on the prime axis
+                        const axisIndex = LIMIT_TO_INDEX[line.limit];
+                        if (axisIndex !== undefined) {
+                            const c1 = n1.coords[axisIndex];
+                            const c2 = n2.coords[axisIndex];
+                            
+                            // Default: Low -> High (e.g. 1/1 -> 3/2)
+                            let swap = c1 > c2;
+                            
+                            // Handle Inversion setting
+                            if (settings.voiceLeadingReverseDir) {
+                                swap = !swap;
+                            }
+
+                            if (swap) {
+                                // Swap coordinates to reverse SVG draw direction
+                                const tempX = x1; const tempY = y1;
+                                x1 = x2; y1 = y2;
+                                x2 = tempX; y2 = tempY;
+                            }
                         }
+
+                    } else if (n1Active || n2Active) {
+                        lineOpacity = 0.6;
+                        lineWidth = 3;
+                    } else if (settings.isVoiceLeadingEnabled && activeNodes.length > 0) {
+                        lineOpacity = 0.05;
                     }
 
                     return (
-                        <line 
-                            key={line.id}
-                            x1={x1} y1={y1} x2={x2} y2={y2}
-                            stroke={color}
-                            strokeWidth={lineWidth}
-                            strokeOpacity={lineOpacity}
-                            strokeDasharray={line.limit === 1 ? "5,5" : "0"} 
-                        />
+                        <g key={line.id}>
+                            {/* Base Line - Colored */}
+                            <line 
+                                x1={x1} y1={y1} x2={x2} y2={y2}
+                                stroke={strokeColor}
+                                strokeWidth={lineWidth}
+                                strokeOpacity={lineOpacity}
+                                strokeDasharray={line.limit === 1 ? "5,5" : "0"} 
+                                style={lineStyle}
+                            />
+                            {/* Animation Overlay - White moving pulses */}
+                            {isVoiceLeadingActive && settings.isVoiceLeadingAnimationEnabled && (
+                                <line 
+                                    x1={x1} y1={y1} x2={x2} y2={y2}
+                                    stroke="white"
+                                    strokeWidth={lineWidth * 0.6}
+                                    strokeOpacity={0.8}
+                                    strokeLinecap="round"
+                                    strokeDasharray="5 35" // "moving bright pulses" - short dash, long gap
+                                    className="animate-flow"
+                                />
+                            )}
+                        </g>
                     );
                 })}
                 
@@ -398,7 +460,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                 
                 if (settings.isVoiceLeadingEnabled && activeNodes.length > 0) {
                     if (isActive) {
-                        scale = 1.3;
+                        scale = settings.latchedZoomScale;
                         opacity = 1.0;
                     } else {
                         // Unified Voice Leading Logic
@@ -439,29 +501,29 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                         }
                     }
                 } else {
-                    scale = isActive ? 1.3 : 1.0;
+                    scale = isActive ? settings.latchedZoomScale : 1.0;
                     opacity = isActive ? 1.0 : 0.95;
                 }
 
                 // Colored Illumination calculation
                 let boxShadowColor = 'white';
                 let borderColor = isLatched ? 'white' : (isHovered ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.3)');
-                
+                let borderStyle = isLatched ? '3px solid white' : (isHovered ? '2px solid rgba(255,255,255,0.8)' : '2px solid rgba(255,255,255,0.3)');
+
                 if (settings.isColoredIlluminationEnabled) {
-                     // The background gradient repeats every `rainbowPeriod`.
-                     // The gradient starts at 0px (top) with hue = offset.
-                     // At Y = top, the hue has progressed by (top / period) * 360.
-                     
-                     // We use standard mod logic. Since `top` can be effectively any positive value (canvas is large),
-                     // and CSS repeating-linear-gradient handles the tiling, we math it:
-                     
                      const phase = (top % rainbowPeriod) / rainbowPeriod;
                      const hue = (settings.rainbowOffset + phase * 360) % 360;
+                     // Use settings saturation or max if rainbow mode off, but usually settings makes sense if consistent
+                     const sat = settings.isRainbowModeEnabled ? settings.rainbowSaturation : 100;
                      
-                     if (isLatched || isHovered) {
-                         // High saturation/lightness for the "Illumination" effect
-                         boxShadowColor = `hsl(${hue}, 100%, 70%)`;
-                         borderColor = `hsl(${hue}, 100%, 80%)`;
+                     // Visible active color for Outline
+                     const activeColor = `hsl(${hue}, ${sat}%, 60%)`;
+                     
+                     if (isActive) {
+                        borderColor = activeColor;
+                        // Tight matching shadow, not diffuse glow
+                        boxShadowColor = activeColor;
+                        borderStyle = `4px solid ${borderColor}`;
                      }
                 }
 
@@ -477,11 +539,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                             background: background,
                             borderRadius: settings.buttonShape,
                             transform: `translate(-50%, -50%) scale(${scale})`,
-                            boxShadow: isLatched ? `0 0 35px ${boxShadowColor}` : (isHovered ? `0 0 15px ${boxShadowColor}` : '0 4px 6px rgba(0,0,0,0.6)'),
+                            boxShadow: isActive ? `0 0 10px ${boxShadowColor}` : '0 4px 6px rgba(0,0,0,0.6)',
                             zIndex: zIndex,
                             opacity: opacity,
-                            border: settings.isColoredIlluminationEnabled && (isLatched || isHovered) ? `3px solid ${borderColor}` : (isLatched ? '3px solid white' : (isHovered ? '2px solid rgba(255,255,255,0.8)' : '2px solid rgba(255,255,255,0.3)')),
-                            filter: isActive ? 'brightness(1.3)' : 'none'
+                            border: borderStyle,
+                            filter: isActive ? 'brightness(1.1)' : 'none'
                         }}
                         onPointerDown={(e) => handlePointerDown(e, node)}
                         onPointerMove={handlePointerMove}

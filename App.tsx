@@ -46,53 +46,6 @@ const App: React.FC = () => {
     diamondRef.current?.clearLatches();
   };
 
-  // XML Handlers
-  const saveSettingsToXML = () => {
-    const data = {
-      settings,
-      preset,
-    };
-    const xml = `
-      <PrismaTonalConfig>
-        <Settings>${JSON.stringify(settings)}</Settings>
-        <Preset>${JSON.stringify(preset)}</Preset>
-      </PrismaTonalConfig>
-    `;
-    const blob = new Blob([xml], { type: 'text/xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'prismatonal_config.xml';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const loadSettingsFromXML = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      // Basic extraction (Assuming valid format from save)
-      try {
-        // Regex hack for simplicity in this demo environment, ideally use DOMParser
-        const settingsMatch = text.match(/<Settings>(.*?)<\/Settings>/);
-        const presetMatch = text.match(/<Preset>(.*?)<\/Preset>/);
-        
-        if (settingsMatch && settingsMatch[1]) {
-           const parsedSettings = JSON.parse(settingsMatch[1]);
-           // Ensure colors are merged correctly to avoid missing keys
-           setSettings({ ...parsedSettings, colors: { ...DEFAULT_COLORS, ...parsedSettings.colors } });
-        }
-        if (presetMatch && presetMatch[1]) {
-           setPreset(JSON.parse(presetMatch[1]));
-        }
-        setIsSettingsOpen(false);
-      } catch (err) {
-        alert("Failed to parse XML config file.");
-      }
-    };
-    reader.readAsText(file);
-  };
-
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
       
@@ -143,8 +96,6 @@ const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         updateSettings={setSettings}
-        onSave={saveSettingsToXML}
-        onLoad={loadSettingsFromXML}
       />
 
       <SynthControls 

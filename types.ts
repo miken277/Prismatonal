@@ -41,12 +41,18 @@ export interface AppSettings {
   isVoiceLeadingEnabled: boolean;
   voiceLeadingStrength: number; // 0 to 1, higher means stricter falloff
   
+  // Voice Leading Visuals
+  isVoiceLeadingAnimationEnabled: boolean;
+  voiceLeadingReverseDir: boolean; // Reverse the direction of the flow animation
+  voiceLeadingAnimationSpeed: number; // seconds
+  
   // Momentum is deprecated/greyed out in favor of Latch Mode
   isMomentumEnabled: boolean; 
 
   // Latch Settings
   isLatchModeEnabled: boolean;
   latchShellLimit: number; // 1 = Octaves, 2 = Fifths, etc.
+  latchedZoomScale: number; // Scale factor for active nodes (1.0 to 2.0)
 
   buttonSizeScale: number; // 0.5 to 2.0
   buttonSpacingScale: number; // 0.5 to 5.0
@@ -70,13 +76,29 @@ export interface AppSettings {
 export interface SynthPreset {
   id: number;
   name: string;
+  // Osc 1
   waveform: WaveformType;
+  // Osc 2
+  osc2Waveform: WaveformType;
+  osc2Detune: number; // Cents
+  osc2Mix: number; // 0 (Silent) to 1 (Full)
+  
+  // Envelopes
   attack: number;
   decay: number;
   sustain: number;
   release: number;
   gain: number;
+  
+  // Filter
   filterCutoff: number; // Hz
+  filterResonance: number; // Q factor
+
+  // LFO
+  lfoRate: number; // Hz
+  lfoDepth: number; // Amount
+  lfoTarget: 'none' | 'pitch' | 'filter' | 'tremolo';
+  
   reverbMix: number; // 0 to 1
 }
 

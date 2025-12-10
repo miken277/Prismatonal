@@ -7,12 +7,9 @@ interface Props {
   onClose: () => void;
   settings: AppSettings;
   updateSettings: (s: AppSettings) => void;
-  onSave: () => void;
-  onLoad: (file: File) => void;
 }
 
-const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings, onSave, onLoad }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'behavior' | 'color'>('general');
 
   if (!isOpen) return null;
@@ -237,19 +234,56 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
                 <div className="space-y-6">
                     <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1">Visual Feedback</h3>
+                    
+                    <div>
+                        <label className="block text-sm font-semibold mb-2">Latched Zoom ({settings.latchedZoomScale.toFixed(1)}x)</label>
+                        <input 
+                            type="range" min="1.0" max="2.0" step="0.1" 
+                            value={settings.latchedZoomScale}
+                            onChange={(e) => handleChange('latchedZoomScale', parseFloat(e.target.value))}
+                            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                        />
+                    </div>
+
                     <div>
                         <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-indigo-500/30">
                             <input type="checkbox" checked={settings.isVoiceLeadingEnabled} onChange={(e) => handleChange('isVoiceLeadingEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
                             <span className="font-semibold text-indigo-300">Voice Leading Lines</span>
                         </label>
-                        <div className={`transition-opacity ${settings.isVoiceLeadingEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
-                            <label className="block text-xs mb-1 text-slate-400">Falloff Strength</label>
-                             <input 
-                                type="range" min="0.1" max="1.0" step="0.05" 
-                                value={settings.voiceLeadingStrength}
-                                onChange={(e) => handleChange('voiceLeadingStrength', parseFloat(e.target.value))}
-                                className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                            />
+                        <div className={`space-y-4 pl-4 border-l-2 border-slate-700 transition-opacity ${settings.isVoiceLeadingEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                            <div>
+                                <label className="block text-xs mb-1 text-slate-400">Falloff Strength</label>
+                                <input 
+                                    type="range" min="0.1" max="1.0" step="0.05" 
+                                    value={settings.voiceLeadingStrength}
+                                    onChange={(e) => handleChange('voiceLeadingStrength', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="flex items-center space-x-2 mb-2">
+                                   <input type="checkbox" checked={settings.isVoiceLeadingAnimationEnabled} onChange={(e) => handleChange('isVoiceLeadingAnimationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600" />
+                                   <span className="text-xs text-indigo-300">Animate Connections</span>
+                                </label>
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div className="col-span-2">
+                                    <label className="flex items-center space-x-2 mb-2 cursor-pointer">
+                                       <input type="checkbox" checked={settings.voiceLeadingReverseDir} onChange={(e) => handleChange('voiceLeadingReverseDir', e.target.checked)} className="w-4 h-4 rounded border-slate-600" />
+                                       <span className="text-xs text-slate-300">Reverse Direction</span>
+                                    </label>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <label className="block text-xs mb-1 text-slate-400">Speed</label>
+                                    <input 
+                                        type="range" min="0.5" max="5.0" step="0.5" 
+                                        value={settings.voiceLeadingAnimationSpeed}
+                                        onChange={(e) => handleChange('voiceLeadingAnimationSpeed', parseFloat(e.target.value))}
+                                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                                    />
+                                  </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -276,6 +310,13 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                              </div>
                            </div>
                         ))}
+                      </div>
+
+                      <div className="mt-8 bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
+                        <p className="text-xs text-slate-400">
+                            <strong>Voice Leading Visuals:</strong> <br/>
+                            Active lines now glow brightly in their limit color. Dashed pulses move along the line to indicate direction.
+                        </p>
                       </div>
                   </div>
 
@@ -336,7 +377,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                             <input type="checkbox" checked={settings.isColoredIlluminationEnabled} onChange={(e) => handleChange('isColoredIlluminationEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-pink-500 focus:ring-pink-500" />
                             <div>
                                 <span className="font-bold text-white block">Colored Illumination</span>
-                                <span className="text-xs text-slate-400">Node glow matches rainbow pitch color</span>
+                                <span className="text-xs text-slate-400">Node outline uses pitch-rainbow color when latched</span>
                             </div>
                         </label>
                        </div>
@@ -345,26 +386,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                </div>
             )}
         </div>
-
-        {/* Persistence Actions */}
-        <div className="p-6 border-t border-slate-700 bg-slate-800 flex gap-4">
-          <button onClick={onSave} className="flex-1 bg-green-600 hover:bg-green-700 py-2 rounded font-semibold transition shadow-lg">
-            Export Config
-          </button>
-          <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-slate-600 hover:bg-slate-700 py-2 rounded font-semibold transition shadow-lg">
-            Import Config
-          </button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            className="hidden" 
-            accept=".xml" 
-            onChange={(e) => {
-              if (e.target.files?.[0]) onLoad(e.target.files[0]);
-            }} 
-          />
-        </div>
-
       </div>
     </div>
   );

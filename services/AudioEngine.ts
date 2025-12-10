@@ -9,9 +9,17 @@ class AudioEngine {
   private reverbGain: GainNode | null = null;
   private dryGain: GainNode | null = null;
   
-  // Changed key to string to support 'node-ID' and 'cursor-ID'
-  private voices: Map<string, { osc: OscillatorNode; gain: GainNode; filter: BiquadFilterNode; startRatio: number }> = new Map();
-  private maxPolyphony: number = 10;
+  // Voice map stores the graph for each active note
+  private voices: Map<string, { 
+    osc1: OscillatorNode; 
+    osc2: OscillatorNode; 
+    lfo: OscillatorNode;
+    gain: GainNode; 
+    filter: BiquadFilterNode; 
+    startRatio: number 
+  }> = new Map();
+  
+  private maxPolyphony: number = 12;
   private activePreset: SynthPreset;
 
   constructor(preset: SynthPreset) {
@@ -92,49 +100,89 @@ class AudioEngine {
     this.init();
     if (!this.ctx || !this.dryGain || !this.reverbGain) return;
 
-    // Check if voice already exists (restart it)
+    // Restart logic
     if (this.voices.has(id)) {
         this.stopVoice(id, true);
     }
 
     // Voice stealing
     if (this.voices.size >= this.maxPolyphony) {
-      // Find the oldest voice (first key) and kill it
       const firstKey = this.voices.keys().next().value;
-      if (firstKey !== undefined) this.stopVoice(firstKey, true); // True = immediate
+      if (firstKey !== undefined) this.stopVoice(firstKey, true); 
     }
 
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    const now = this.ctx.currentTime;
+    const baseFreq = BASE_FREQUENCY * ratio;
+    
+    // --- Audio Graph Construction ---
+    
+    const masterVoiceGain = this.ctx.createGain(); // Envelope applied here
     const filter = this.ctx.createBiquadFilter();
+    
+    // Oscillator 1
+    const osc1 = this.ctx.createOscillator();
+    osc1.type = this.activePreset.waveform;
+    osc1.frequency.value = baseFreq;
 
-    osc.type = this.activePreset.waveform;
-    osc.frequency.value = BASE_FREQUENCY * ratio;
+    // Oscillator 2
+    const osc2 = this.ctx.createOscillator();
+    osc2.type = this.activePreset.osc2Waveform;
+    // Calculate Detune frequency
+    // cents to ratio: 2^(cents/1200)
+    const detuneMultiplier = Math.pow(2, this.activePreset.osc2Detune / 1200);
+    osc2.frequency.value = baseFreq * detuneMultiplier;
+    
+    const osc2Gain = this.ctx.createGain();
+    osc2Gain.gain.value = this.activePreset.osc2Mix;
 
-    // Filter
+    // LFO
+    const lfo = this.ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = this.activePreset.lfoRate;
+    const lfoGain = this.ctx.createGain();
+    lfoGain.gain.value = this.activePreset.lfoDepth;
+
+    // Connections
+    osc1.connect(filter);
+    
+    osc2.connect(osc2Gain);
+    osc2Gain.connect(filter);
+
+    // Filter Settings
     filter.type = 'lowpass';
     filter.frequency.value = this.activePreset.filterCutoff;
-    filter.Q.value = 1;
+    filter.Q.value = this.activePreset.filterResonance;
 
-    // Envelope Attack
-    const now = this.ctx.currentTime;
+    filter.connect(masterVoiceGain);
     
-    // Gain Envelope
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(this.activePreset.gain, now + this.activePreset.attack);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, this.activePreset.gain * this.activePreset.sustain), now + this.activePreset.attack + this.activePreset.decay);
+    // LFO Routing
+    if (this.activePreset.lfoTarget === 'pitch') {
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc1.frequency);
+        lfoGain.connect(osc2.frequency);
+    } else if (this.activePreset.lfoTarget === 'filter') {
+        lfo.connect(lfoGain);
+        lfoGain.connect(filter.frequency);
+    } else if (this.activePreset.lfoTarget === 'tremolo') {
+        lfo.connect(lfoGain);
+        lfoGain.connect(masterVoiceGain.gain);
+    }
 
-    // Connect Graph
-    osc.connect(filter);
-    filter.connect(gain);
-    
-    // Fan out to Dry and Wet busses
-    gain.connect(this.dryGain);
-    gain.connect(this.reverbGain);
+    // Output Routing
+    masterVoiceGain.connect(this.dryGain);
+    masterVoiceGain.connect(this.reverbGain);
 
-    osc.start();
+    // --- Envelope Control ---
+    masterVoiceGain.gain.setValueAtTime(0, now);
+    masterVoiceGain.gain.linearRampToValueAtTime(this.activePreset.gain, now + this.activePreset.attack);
+    masterVoiceGain.gain.exponentialRampToValueAtTime(Math.max(0.001, this.activePreset.gain * this.activePreset.sustain), now + this.activePreset.attack + this.activePreset.decay);
 
-    this.voices.set(id, { osc, gain, filter, startRatio: ratio });
+    // Start Oscillators
+    osc1.start(now);
+    osc2.start(now);
+    lfo.start(now);
+
+    this.voices.set(id, { osc1, osc2, lfo, gain: masterVoiceGain, filter, startRatio: ratio });
   }
 
   public stopVoice(id: string, immediate: boolean = false) {
@@ -150,23 +198,26 @@ class AudioEngine {
       
       voice.gain.gain.exponentialRampToValueAtTime(0.001, now + releaseTime);
       
-      voice.osc.stop(now + releaseTime + 0.1);
+      // Cleanup schedule
+      const stopTime = now + releaseTime + 0.1;
+      voice.osc1.stop(stopTime);
+      voice.osc2.stop(stopTime);
+      voice.lfo.stop(stopTime);
+
       setTimeout(() => {
-        voice.osc.disconnect();
-        voice.gain.disconnect();
-        voice.filter.disconnect();
+        // Disconnect everything to avoid memory leaks
+        try {
+            voice.osc1.disconnect();
+            voice.osc2.disconnect();
+            voice.lfo.disconnect();
+            voice.gain.disconnect();
+            voice.filter.disconnect();
+        } catch(e) {
+            // ignore disconnect errors if already disconnected
+        }
       }, (releaseTime + 0.2) * 1000);
 
       this.voices.delete(id);
-    }
-  }
-
-  public bendVoice(id: string, detuneCents: number) {
-    const voice = this.voices.get(id);
-    if (voice && this.ctx) {
-      const multiplier = Math.pow(2, detuneCents / 1200);
-      const baseFreq = BASE_FREQUENCY * voice.startRatio;
-      voice.osc.frequency.setTargetAtTime(baseFreq * multiplier, this.ctx.currentTime, 0.05);
     }
   }
 
@@ -174,9 +225,11 @@ class AudioEngine {
     const voice = this.voices.get(id);
     if (voice && this.ctx) {
        const newFreq = BASE_FREQUENCY * newRatio;
-       voice.osc.frequency.setTargetAtTime(newFreq, this.ctx.currentTime, glideTime);
-       // We update startRatio so subsequent bends are relative to the new note? 
-       // Actually, standard glissando replaces the base frequency.
+       voice.osc1.frequency.setTargetAtTime(newFreq, this.ctx.currentTime, glideTime);
+       
+       const detuneMultiplier = Math.pow(2, this.activePreset.osc2Detune / 1200);
+       voice.osc2.frequency.setTargetAtTime(newFreq * detuneMultiplier, this.ctx.currentTime, glideTime);
+       
        voice.startRatio = newRatio; 
     }
   }
@@ -184,15 +237,14 @@ class AudioEngine {
   public stopAll() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    // Hard Panic: Disconnect everything immediately
     this.voices.forEach((voice) => {
         try {
             voice.gain.gain.cancelScheduledValues(now);
             voice.gain.gain.setValueAtTime(0, now);
-            voice.osc.stop();
-            voice.osc.disconnect();
+            voice.osc1.stop();
+            voice.osc2.stop();
+            voice.lfo.stop();
             voice.gain.disconnect();
-            voice.filter.disconnect();
         } catch (e) {
             console.error("Error stopping voice in panic", e);
         }
