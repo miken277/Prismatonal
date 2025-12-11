@@ -24,18 +24,32 @@ export interface LimitColorMap {
 }
 
 export interface AppSettings {
-  latticeShells: number; // 1 to 5
-  enabledLimits: {
-    7: boolean;
-    11: boolean;
-    13: boolean;
+  // Individual depths (Steps from center)
+  limitDepths: {
+    3: number;
+    5: number;
+    7: number;
+    11: number;
+    13: number;
   };
-  // Visible toggle for lower limits
+
+  // Individual complexity limits (Max Numerator/Denominator per axis)
+  limitComplexities: {
+    3: number;
+    5: number;
+    7: number;
+    11: number;
+    13: number;
+  };
+  
+  // Increase Depth Settings
+  showIncreaseDepthButton: boolean;
+  centerResetsDepth: boolean;
+
+  // Visible toggle for lower limits (View only)
   hiddenLimits: number[]; 
   
   layerOrder: number[]; // Array of limit numbers, index 0 = back, last index = front
-  
-  maxND: number; // Complexity limit: Maximum Numerator or Denominator
   
   // Audio Settings
   baseFrequency: number; // Hz for 1/1
@@ -109,6 +123,11 @@ export interface SynthPreset {
   delayMix: number; // 0 to 1
   delayTime: number; // Seconds
   delayFeedback: number; // 0 to 0.95
+
+  // Dynamics (Compressor/Limiter)
+  compressorThreshold: number; // dB (-60 to 0)
+  compressorRatio: number; // 1 to 20
+  compressorRelease: number; // seconds
 }
 
 export interface LatticeNode {

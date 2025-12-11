@@ -1,6 +1,7 @@
 
 import React, { useRef, useState } from 'react';
 import { AppSettings, ButtonShape } from '../types';
+import { DEFAULT_COLORS } from '../constants';
 
 interface Props {
   isOpen: boolean;
@@ -18,12 +19,22 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
     updateSettings({ ...settings, [key]: value });
   };
 
-  const handleLimitToggle = (limit: 7 | 11 | 13) => {
+  const handleLimitDepthChange = (limit: 3 | 5 | 7 | 11 | 13, val: number) => {
     updateSettings({
       ...settings,
-      enabledLimits: {
-        ...settings.enabledLimits,
-        [limit]: !settings.enabledLimits[limit]
+      limitDepths: {
+        ...settings.limitDepths,
+        [limit]: val
+      }
+    });
+  };
+
+  const handleLimitComplexityChange = (limit: 3 | 5 | 7 | 11 | 13, val: number) => {
+    updateSettings({
+      ...settings,
+      limitComplexities: {
+        ...settings.limitComplexities,
+        [limit]: val
       }
     });
   };
@@ -33,6 +44,47 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
       ...settings,
       colors: { ...settings.colors, [limit]: color }
     });
+  };
+
+  const resetColors = () => {
+    updateSettings({ ...settings, colors: { ...DEFAULT_COLORS } });
+  };
+
+  const hslToHex = (h: number, s: number, l: number) => {
+    l /= 100;
+    const a = s * Math.min(l, 1 - l) / 100;
+    const f = (n: number) => {
+      const k = (n + h / 30) % 12;
+      const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+      return Math.round(255 * color).toString(16).padStart(2, '0');
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+  };
+
+  const pairLimitColors = () => {
+     const ratios: {[key: number]: number} = {
+         1: 1,
+         3: 1.5,
+         5: 1.25,
+         7: 7/8,
+         11: 11/8,
+         13: 13/8
+     };
+
+     const newColors = { ...settings.colors };
+     const offset = settings.rainbowOffset;
+     
+     Object.keys(ratios).forEach(k => {
+         const key = parseInt(k);
+         const ratio = ratios[key];
+         const shift = -Math.log2(ratio) * 360;
+         let hue = (offset + shift) % 360;
+         if (hue < 0) hue += 360;
+         
+         newColors[key] = hslToHex(hue, 70, 60); 
+     });
+
+     updateSettings({ ...settings, colors: newColors });
   };
 
   const canvasSizes = Array.from({length: 15}, (_, i) => 1000 + i * 500);
@@ -90,64 +142,55 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                           </div>
                       </div>
 
-                      <div>
-                          <label className="block text-sm font-semibold mb-2">Lattice Depth (Shells)</label>
-                          <div className="flex items-center gap-4">
-                              <input 
-                                  type="range" min="1" max="5" step="1" 
-                                  value={settings.latticeShells}
-                                  onChange={(e) => handleChange('latticeShells', parseInt(e.target.value))}
-                                  className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                              />
-                              <span className="text-xl font-bold min-w-[2ch]">{settings.latticeShells}</span>
-                          </div>
+                      <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
+                          <label className="block text-sm font-semibold text-slate-300">Lattice Depths (Coordinate Bounds)</label>
+                          <p className="text-[10px] text-slate-500 mb-2">Controls how many steps outward from the center are generated for each axis.</p>
+                          
+                          {[3, 5, 7, 11, 13].map(limit => (
+                              <div key={limit} className="flex items-center gap-3">
+                                  <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
+                                  <input 
+                                      type="range" min="0" max="6" step="1" 
+                                      value={settings.limitDepths[limit as 3|5|7|11|13]}
+                                      onChange={(e) => handleLimitDepthChange(limit as any, parseInt(e.target.value))}
+                                      className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                                  />
+                                  <span className="text-xs font-mono w-4 text-right">{settings.limitDepths[limit as 3|5|7|11|13]}</span>
+                              </div>
+                          ))}
                       </div>
 
-                      <div>
-                          <label className="block text-sm font-semibold mb-2">Complexity Limit (Max N/D)</label>
-                          <div className="flex items-center gap-4">
-                              <input 
-                                  type="range" min="100" max="10000" step="100" 
-                                  value={settings.maxND}
-                                  onChange={(e) => handleChange('maxND', parseInt(e.target.value))}
-                                  className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                              />
-                              <span className="text-sm font-bold min-w-[4ch]">{settings.maxND}</span>
+                       <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
+                          <label className="block text-sm font-semibold text-slate-300">Lattice Complexity (Max N/D)</label>
+                          <p className="text-[10px] text-slate-500 mb-2">Controls the maximum Numerator or Denominator allowed for a node generated by extending this axis.</p>
+                          
+                          {[3, 5, 7, 11, 13].map(limit => (
+                              <div key={`comp-${limit}`} className="flex items-center gap-3">
+                                  <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
+                                  <input 
+                                      type="range" min="100" max="10000" step="100" 
+                                      value={settings.limitComplexities[limit as 3|5|7|11|13]}
+                                      onChange={(e) => handleLimitComplexityChange(limit as any, parseInt(e.target.value))}
+                                      className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                                  />
+                                  <span className="text-[10px] font-mono w-8 text-right">{settings.limitComplexities[limit as 3|5|7|11|13]}</span>
+                              </div>
+                          ))}
+                      </div>
+
+                      <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
+                          <label className="block text-sm font-semibold text-slate-300">Increase Depth</label>
+                          <div className="space-y-2">
+                             <label className="flex items-center space-x-2">
+                                <input type="checkbox" checked={settings.showIncreaseDepthButton} onChange={(e) => handleChange('showIncreaseDepthButton', e.target.checked)} className="rounded border-slate-600 bg-slate-700" />
+                                <span className="text-xs text-slate-300">Show Increase Depth Button</span>
+                             </label>
+                             <label className="flex items-center space-x-2">
+                                <input type="checkbox" checked={settings.centerResetsDepth} onChange={(e) => handleChange('centerResetsDepth', e.target.checked)} className="rounded border-slate-600 bg-slate-700" />
+                                <span className="text-xs text-slate-300">Center Display resets depth</span>
+                             </label>
                           </div>
                       </div>
-                      
-                      <div className="space-y-2">
-                        <span className="block text-sm font-semibold">Enabled Limits</span>
-                        <div className="flex flex-col gap-2">
-                            <label className="flex items-center space-x-3 bg-slate-900/50 p-2 rounded cursor-pointer border border-transparent hover:border-slate-600 transition">
-                                <input 
-                                    type="checkbox" 
-                                    checked={settings.enabledLimits[7]} 
-                                    onChange={() => handleLimitToggle(7)}
-                                    className="w-5 h-5 rounded border-slate-600 text-green-500 focus:ring-green-500"
-                                />
-                                <span>7-Limit (Septimal)</span>
-                            </label>
-                            <label className="flex items-center space-x-3 bg-slate-900/50 p-2 rounded cursor-pointer border border-transparent hover:border-slate-600 transition">
-                                <input 
-                                    type="checkbox" 
-                                    checked={settings.enabledLimits[11]} 
-                                    onChange={() => handleLimitToggle(11)}
-                                    className="w-5 h-5 rounded border-slate-600 text-purple-500 focus:ring-purple-500"
-                                />
-                                <span>11-Limit (Undecimal)</span>
-                            </label>
-                            <label className="flex items-center space-x-3 bg-slate-900/50 p-2 rounded cursor-pointer border border-transparent hover:border-slate-600 transition">
-                                <input 
-                                    type="checkbox" 
-                                    checked={settings.enabledLimits[13]} 
-                                    onChange={() => handleLimitToggle(13)}
-                                    className="w-5 h-5 rounded border-slate-600 text-orange-500 focus:ring-orange-500"
-                                />
-                                <span>13-Limit (Tridecimal)</span>
-                            </label>
-                        </div>
-                    </div>
                   </div>
 
                   <div className="space-y-6">
@@ -155,7 +198,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       
                       <div>
                           <label className="block text-sm font-semibold mb-2">
-                            Lattice X-Stretch: {(settings.latticeAspectRatio < 1.0 ? 'Stretched' : (settings.latticeAspectRatio > 1.0 ? 'Squished' : 'Normal'))} ({settings.latticeAspectRatio}x)
+                            Lattice X-Stretch: {(settings.latticeAspectRatio < 1.0 ? 'Wide' : (settings.latticeAspectRatio > 1.0 ? 'Narrow' : 'Normal'))} ({settings.latticeAspectRatio})
                           </label>
                           <input 
                               type="range" min="0.5" max="2.0" step="0.1" 
@@ -257,9 +300,9 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                   </div>
 
                   <div className="text-sm">
-                     <label className="flex items-center space-x-2">
-                       <input type="checkbox" checked={settings.isPitchBendEnabled} onChange={(e) => handleChange('isPitchBendEnabled', e.target.checked)} />
-                       <span>Pitch Bend Animations</span>
+                     <label className="flex items-center space-x-2 cursor-pointer">
+                       <input type="checkbox" checked={settings.isPitchBendEnabled} onChange={(e) => handleChange('isPitchBendEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
+                       <span>Enable Pitch Bend (Drag)</span>
                      </label>
                   </div>
                 </div>
@@ -352,13 +395,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                            </div>
                         ))}
                       </div>
-
-                      <div className="mt-8 bg-slate-900/50 p-4 rounded-lg border border-slate-700/50">
-                        <p className="text-xs text-slate-400">
-                            <strong>Voice Leading Visuals:</strong> <br/>
-                            Active lines now glow brightly in their limit color. Dashed pulses move along the line to indicate direction.
-                        </p>
-                      </div>
                   </div>
 
                   <div className="space-y-6">
@@ -367,7 +403,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                         <label className="flex items-center space-x-3 mb-4 cursor-pointer">
                             <input type="checkbox" checked={settings.isRainbowModeEnabled} onChange={(e) => handleChange('isRainbowModeEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-pink-500 focus:ring-pink-500" />
-                            <span className="font-bold text-white">Enable Vertical Rainbow</span>
+                            <span className="font-bold text-white">Enable Rainbow Background</span>
                         </label>
                         
                         <div className={`space-y-4 ${settings.isRainbowModeEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'} transition-opacity`}>
@@ -413,7 +449,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         </div>
                       </div>
 
-                       <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
+                       <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-700 space-y-3">
                          <label className="flex items-center space-x-3 cursor-pointer">
                             <input type="checkbox" checked={settings.isColoredIlluminationEnabled} onChange={(e) => handleChange('isColoredIlluminationEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-pink-500 focus:ring-pink-500" />
                             <div>
@@ -421,6 +457,21 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                 <span className="text-xs text-slate-400">Node outline uses pitch-rainbow color when latched</span>
                             </div>
                         </label>
+                        
+                        <button 
+                            onClick={resetColors}
+                            className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors border border-slate-500/50 mb-2"
+                        >
+                            Default Colors
+                        </button>
+
+                        <button 
+                            onClick={pairLimitColors}
+                            className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors border border-slate-500/50"
+                        >
+                            Pair Limit Colors with Background
+                        </button>
+                        <p className="text-[10px] text-slate-400 mt-1">Updates Limit Colors to match the background hue at 1/1, 3/2, 5/4, etc.</p>
                        </div>
 
                   </div>

@@ -7,6 +7,7 @@ import AudioEngine from '../services/AudioEngine';
 export interface TonalityDiamondHandle {
   clearLatches: () => void;
   centerView: () => void;
+  increaseDepth: () => void;
 }
 
 interface Props {
@@ -44,6 +45,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   // Track active pointers
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   
+  // Track the origins for depth generation (Array of coordinate arrays)
+  const [depthOrigins, setDepthOrigins] = useState<number[][]>([[0,0,0,0,0]]);
+  
+  // Track last touched node for Increasing Depth
+  const [lastTouchedNodeCoords, setLastTouchedNodeCoords] = useState<number[] | null>(null);
+
   const [hasCentered, setHasCentered] = useState(false);
 
   // Expose methods to parent
@@ -52,6 +59,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
       setLatchedNodes(new Map()); // Visual clear
     },
     centerView: () => {
+        if (settings.centerResetsDepth) {
+            setDepthOrigins([[0,0,0,0,0]]);
+            setLastTouchedNodeCoords(null);
+        }
+
         if (scrollContainerRef.current) {
             const center = settings.canvasSize / 2;
             const viewportW = scrollContainerRef.current.clientWidth;
@@ -59,30 +71,37 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
             scrollContainerRef.current.scrollLeft = center - viewportW / 2;
             scrollContainerRef.current.scrollTop = center - viewportH / 2;
         }
+    },
+    increaseDepth: () => {
+        if (lastTouchedNodeCoords) {
+            setDepthOrigins(prev => {
+                // Check if already exists to prevent dupes in array
+                const exists = prev.some(o => o.every((val, i) => val === lastTouchedNodeCoords[i]));
+                if (exists) return prev;
+                return [...prev, [...lastTouchedNodeCoords]];
+            });
+        }
     }
   }));
 
   useEffect(() => {
-    const result = generateLattice(settings);
+    // Pass the depthOrigins array to generation service
+    const result = generateLattice(settings, depthOrigins);
     
-    // Strict Filtering Logic
+    // Strict Filtering Logic based on hiddenLimits for VISIBILITY
     const visibleNodes = result.nodes.filter(n => {
-        // Limit 3 (Index 0): Hide if settings say hide 3 AND node has a 3-component
-        if (settings.hiddenLimits.includes(3) && n.coords[0] !== 0) return false;
-        
-        // Limit 5 (Index 1): Hide if settings say hide 5 AND node has a 5-component
-        if (settings.hiddenLimits.includes(5) && n.coords[1] !== 0) return false;
-        
-        // Note: 7, 11, 13 are handled by enabledLimits in generation, preventing creation.
-        // Limit 1 is always enabled.
-        
+        // Check all hidden limits
+        for (const limit of settings.hiddenLimits) {
+            const idx = LIMIT_TO_INDEX[limit];
+            if (idx !== undefined && n.coords[idx] !== 0) return false;
+        }
         return true;
     });
 
     const visibleLines = result.lines.filter(l => !settings.hiddenLimits.includes(l.limit));
     
     setData({ nodes: visibleNodes, lines: visibleLines });
-  }, [settings]);
+  }, [settings, depthOrigins]);
 
   // Reactive Delatching Logic
   useEffect(() => {
@@ -187,7 +206,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
     onLimitInteraction(node.maxPrime);
+    setLastTouchedNodeCoords(node.coords);
     
+    // Toggle Logic
     if (settings.isLatchModeEnabled) {
         toggleLatch(node.id, node.ratio);
     } else {
@@ -197,18 +218,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
     if (settings.isPitchBendEnabled) {
         const cursorId = `cursor-${e.pointerId}`;
         audioEngine.startVoice(cursorId, node.ratio, settings.baseFrequency);
-        
-        setActiveCursors(prev => {
-            const next = new Map(prev);
-            next.set(e.pointerId, {
-                pointerId: e.pointerId,
-                currentX: e.clientX,
-                currentY: e.clientY,
-                originNodeId: node.id
-            });
-            return next;
-        });
     }
+    
+    setActiveCursors(prev => {
+        const next = new Map(prev);
+        next.set(e.pointerId, {
+            pointerId: e.pointerId,
+            currentX: e.clientX,
+            currentY: e.clientY,
+            originNodeId: node.id
+        });
+        return next;
+    });
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -242,6 +263,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
             const spacing = settings.buttonSpacingScale;
             
             for (const node of data.nodes) {
+                // BUG FIX: Ignore the node we started on to prevent re-triggering logic during micro-movements
+                if (node.id === cursor.originNodeId) continue;
+
                 const nx = (node.x * spacing + centerOffset) - scrollLeft;
                 const ny = (node.y * spacing + centerOffset) - scrollTop;
                 
@@ -272,6 +296,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
 
                              if (isAllowed) {
                                  latchOn(node.id, node.ratio, cursor.originNodeId);
+                                 setLastTouchedNodeCoords(node.coords);
                              }
                          }
                     }
@@ -372,6 +397,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                     let x2 = line.x2 * spacing + centerOffset;
                     let y2 = line.y2 * spacing + centerOffset;
                     
+                    // Culling: Do not render lines outside the canvas bounds
+                    if (x1 < 0 || x1 > settings.canvasSize || y1 < 0 || y1 > settings.canvasSize ||
+                        x2 < 0 || x2 > settings.canvasSize || y2 < 0 || y2 > settings.canvasSize) {
+                        return null;
+                    }
+
                     const n1 = data.nodes.find(n => Math.abs(n.x - line.x1) < 0.1 && Math.abs(n.y - line.y1) < 0.1);
                     const n2 = data.nodes.find(n => Math.abs(n.x - line.x2) < 0.1 && Math.abs(n.y - line.y2) < 0.1);
                     
@@ -476,12 +507,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
             </svg>
 
             {data.nodes.map((node) => {
+                const left = node.x * spacing + centerOffset;
+                const top = node.y * spacing + centerOffset;
+
+                // Culling: If the node is outside the canvas area, do not render.
+                if (left < -50 || left > settings.canvasSize + 50 || top < -50 || top > settings.canvasSize + 50) {
+                    return null;
+                }
+
                 const isLatched = latchedNodes.has(node.id);
                 const isHovered = cursors.some(c => c.originNodeId === node.id); 
                 const isActive = isLatched || isHovered;
-                
-                const left = node.x * spacing + centerOffset;
-                const top = node.y * spacing + centerOffset;
                 
                 const cTop = getColor(node.limitTop);
                 const cBottom = getColor(node.limitBottom);

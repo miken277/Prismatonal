@@ -14,9 +14,6 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
   const isVisible = (limit: number) => {
     // 1-Limit is always visible
     if (limit === 1) return true;
-    if (limit === 7) return settings.enabledLimits[7];
-    if (limit === 11) return settings.enabledLimits[11];
-    if (limit === 13) return settings.enabledLimits[13];
     return !settings.hiddenLimits.includes(limit);
   };
 
@@ -24,19 +21,7 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
     // Prevent hiding 1-Limit
     if (limit === 1) return;
 
-    // For 7, 11, 13, we toggle 'enabledLimits' which affects generation (structure)
-    if (limit === 7 || limit === 11 || limit === 13) {
-      updateSettings({
-        ...settings,
-        enabledLimits: {
-          ...settings.enabledLimits,
-          [limit]: !settings.enabledLimits[limit as 7 | 11 | 13]
-        }
-      });
-      return;
-    }
-
-    // For 3, 5 we toggle 'hiddenLimits' which affects strict filtering
+    // Toggle 'hiddenLimits' which affects strict filtering
     const isHidden = settings.hiddenLimits.includes(limit);
     let newHidden = [...settings.hiddenLimits];
     if (isHidden) {
@@ -70,7 +55,7 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
               onClick={() => toggleVisibility(limit)}
               disabled={isLocked}
               className={`w-6 h-6 flex items-center justify-center rounded text-xs transition-colors ${visible ? (isLocked ? 'text-slate-500 cursor-default opacity-50' : 'text-white') : 'text-slate-600'} hover:bg-white/10`}
-              title={isLocked ? "1-Limit is always enabled" : `Toggle ${limit}-Limit`}
+              title={isLocked ? "1-Limit is always visible" : `Toggle ${limit}-Limit Visibility`}
             >
                {visible ? (
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">

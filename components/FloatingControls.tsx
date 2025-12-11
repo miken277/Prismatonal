@@ -6,14 +6,16 @@ interface Props {
   setVolume: (v: number) => void;
   onPanic: () => void;
   onCenter: () => void;
+  onIncreaseDepth: () => void;
+  showIncreaseDepthButton: boolean;
   pitchOffLocked: boolean;
   volumeLocked: boolean;
 }
 
-const FloatingControls: React.FC<Props> = ({ volume, setVolume, onPanic, onCenter, pitchOffLocked, volumeLocked }) => {
+const FloatingControls: React.FC<Props> = ({ volume, setVolume, onPanic, onCenter, onIncreaseDepth, showIncreaseDepthButton, pitchOffLocked, volumeLocked }) => {
   const [panicPos, setPanicPos] = useState({ x: window.innerWidth - 120, y: window.innerHeight - 100 });
   const [volPos, setVolPos] = useState({ x: window.innerWidth / 2 - 100, y: window.innerHeight - 80 });
-  const [centerPos, setCenterPos] = useState({ x: window.innerWidth / 2 - 25, y: 100 }); // Top center default
+  const [centerPos, setCenterPos] = useState({ x: 20, y: window.innerHeight - 80 }); // Bottom left default
   
   const handleDrag = (e: React.PointerEvent, setPos: any, locked: boolean) => {
     if (locked) return;
@@ -73,6 +75,24 @@ const FloatingControls: React.FC<Props> = ({ volume, setVolume, onPanic, onCente
           <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
         </svg>
       </button>
+
+      {/* Increase Depth Button */}
+      {showIncreaseDepthButton && (
+        <button
+          className={`absolute w-12 h-12 rounded bg-blue-600/20 border-2 border-blue-500 flex items-center justify-center text-blue-500 font-bold backdrop-blur hover:bg-blue-600/40 active:bg-blue-600 active:text-white transition-all shadow-[0_0_15px_rgba(59,130,246,0.4)] cursor-move`}
+          style={{ left: centerPos.x + 60, top: centerPos.y, zIndex: 150 }}
+          onClick={onIncreaseDepth}
+          // Intentionally allowing drag with the same handler variable to move them together loosely or just reusing handler for simplicity
+          // Ideally they should move as a group but separate is requested "add another control... right next to it"
+          onPointerDown={(e) => handleDrag(e, setCenterPos, false)} 
+          title="Increase Depth from Selection"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" fill="none" />
+          </svg>
+        </button>
+      )}
     </>
   );
 };

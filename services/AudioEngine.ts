@@ -40,19 +40,18 @@ class AudioEngine {
       });
       
       // Limiter (DynamicsCompressor)
-      // Placed at the very end to catch peaks
       this.limiter = this.ctx.createDynamicsCompressor();
-      this.limiter.threshold.value = -1.0; // Start compressing just below clipping
+      this.limiter.threshold.value = -1.0; 
       this.limiter.knee.value = 10;
-      this.limiter.ratio.value = 20; // High ratio = Limiting
-      this.limiter.attack.value = 0.001; // Fast attack to catch transients
+      this.limiter.ratio.value = 20; 
+      this.limiter.attack.value = 0.005; 
       this.limiter.release.value = 0.2;
       this.limiter.connect(this.ctx.destination);
 
       // Master Gain
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = this.currentMasterVol; 
-      this.masterGain.connect(this.limiter); // Connect to limiter instead of destination
+      this.masterGain.connect(this.limiter); 
 
       // --- FX Bus Setup ---
 
@@ -103,6 +102,18 @@ class AudioEngine {
       if (this.delayNode) this.delayNode.delayTime.setTargetAtTime(this.activePreset.delayTime, now, ramp);
       if (this.delayFeedbackGain) this.delayFeedbackGain.gain.setTargetAtTime(this.activePreset.delayFeedback, now, ramp);
       
+      // Update Dynamics (Compressor/Limiter)
+      if (this.limiter) {
+          // Default to sensible values if preset lacks new fields (during migration/dev)
+          const thresh = this.activePreset.compressorThreshold ?? -1.0;
+          const ratio = this.activePreset.compressorRatio ?? 20;
+          const release = this.activePreset.compressorRelease ?? 0.2;
+
+          this.limiter.threshold.setTargetAtTime(thresh, now, ramp);
+          this.limiter.ratio.setTargetAtTime(ratio, now, ramp);
+          this.limiter.release.setTargetAtTime(release, now, ramp);
+      }
+
       // Dry attenuation
       if (this.dryGain) this.dryGain.gain.setTargetAtTime(Math.max(0.5, 1.0 - (this.activePreset.reverbMix * 0.3)), now, ramp);
   }

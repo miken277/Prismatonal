@@ -11,17 +11,27 @@ export const DEFAULT_COLORS: LimitColorMap = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  latticeShells: 3,
-  enabledLimits: {
-    7: false,
-    11: false,
-    13: false,
+  limitDepths: {
+    3: 3,
+    5: 2,
+    7: 1,
+    11: 1,
+    13: 1,
   },
-  hiddenLimits: [],
+  limitComplexities: {
+    3: 1000,
+    5: 1000,
+    7: 500,
+    11: 500,
+    13: 500,
+  },
+  
+  showIncreaseDepthButton: true,
+  centerResetsDepth: false,
+
+  hiddenLimits: [7, 11, 13],
   // Order from back to front.
   layerOrder: [13, 11, 7, 5, 3, 1], 
-  
-  maxND: 2048, // Common sense limit for complexity
   
   baseFrequency: 196.00, // G3
 
@@ -35,28 +45,28 @@ export const DEFAULT_SETTINGS: AppSettings = {
   
   isMomentumEnabled: false, // Disabled by default
   
-  isLatchModeEnabled: false,
+  isLatchModeEnabled: true, // Enabled by default per request
   latchShellLimit: 5, // Default allows reasonable complexity to be latched
   latchedZoomScale: 1.3,
 
-  buttonSizeScale: 1.0,
-  buttonSpacingScale: 1.5, // Slightly wider default
-  latticeAspectRatio: 1.0,
-  canvasSize: 2000, // Default 2000px
+  buttonSizeScale: 0.8, // Reduced from 1.0 per request
+  buttonSpacingScale: 1.5, 
+  latticeAspectRatio: 0.7, // "Wide" default per request
+  canvasSize: 2000, 
   buttonShape: ButtonShape.CIRCLE,
   colors: { ...DEFAULT_COLORS },
   isPitchBendEnabled: true,
   isPitchSnapEnabled: true,
-  polyphony: 10, // Higher polyphony
+  polyphony: 10,
   pitchOffLocked: false,
   volumeLocked: false,
 
   // Rainbow Defaults
-  isRainbowModeEnabled: false,
-  rainbowSaturation: 60,
-  rainbowBrightness: 10,
+  isRainbowModeEnabled: true, // Enabled by default
+  rainbowSaturation: 50, // 50% default
+  rainbowBrightness: 50, // 50% default
   rainbowOffset: 0,
-  isColoredIlluminationEnabled: false,
+  isColoredIlluminationEnabled: true, // Enabled by default per request
 };
 
 export const PRESETS: SynthPreset[] = [
@@ -80,7 +90,10 @@ export const PRESETS: SynthPreset[] = [
     reverbMix: 0.5,
     delayMix: 0.3,
     delayTime: 0.4,
-    delayFeedback: 0.3
+    delayFeedback: 0.3,
+    compressorThreshold: -24,
+    compressorRatio: 12,
+    compressorRelease: 0.25
   },
   {
     id: 2,
@@ -102,7 +115,10 @@ export const PRESETS: SynthPreset[] = [
     reverbMix: 0.6,
     delayMix: 0.4,
     delayTime: 0.35,
-    delayFeedback: 0.4
+    delayFeedback: 0.4,
+    compressorThreshold: -20,
+    compressorRatio: 8,
+    compressorRelease: 0.3
   },
   {
     id: 3,
@@ -124,7 +140,10 @@ export const PRESETS: SynthPreset[] = [
     reverbMix: 0.4,
     delayMix: 0.1,
     delayTime: 0.2,
-    delayFeedback: 0.1
+    delayFeedback: 0.1,
+    compressorThreshold: -15,
+    compressorRatio: 4,
+    compressorRelease: 0.2
   },
   {
     id: 4,
@@ -146,7 +165,10 @@ export const PRESETS: SynthPreset[] = [
     reverbMix: 0.7,
     delayMix: 0.5,
     delayTime: 0.5,
-    delayFeedback: 0.5
+    delayFeedback: 0.5,
+    compressorThreshold: -30,
+    compressorRatio: 10,
+    compressorRelease: 0.5
   },
   {
     id: 5,
@@ -168,7 +190,10 @@ export const PRESETS: SynthPreset[] = [
     reverbMix: 0.3,
     delayMix: 0.2,
     delayTime: 0.25,
-    delayFeedback: 0.2
+    delayFeedback: 0.2,
+    compressorThreshold: -12,
+    compressorRatio: 12,
+    compressorRelease: 0.1
   },
   {
     id: 6,
@@ -190,7 +215,10 @@ export const PRESETS: SynthPreset[] = [
     reverbMix: 0.5,
     delayMix: 0.4,
     delayTime: 0.3,
-    delayFeedback: 0.4
+    delayFeedback: 0.4,
+    compressorThreshold: -18,
+    compressorRatio: 6,
+    compressorRelease: 0.3
   },
   {
     id: 7,
@@ -212,7 +240,10 @@ export const PRESETS: SynthPreset[] = [
     reverbMix: 0.1,
     delayMix: 0.0,
     delayTime: 0.1,
-    delayFeedback: 0
+    delayFeedback: 0,
+    compressorThreshold: -10,
+    compressorRatio: 20,
+    compressorRelease: 0.1
   },
   {
     id: 8,
@@ -234,7 +265,10 @@ export const PRESETS: SynthPreset[] = [
     reverbMix: 0.8,
     delayMix: 0.6,
     delayTime: 0.7,
-    delayFeedback: 0.6
+    delayFeedback: 0.6,
+    compressorThreshold: -25,
+    compressorRatio: 5,
+    compressorRelease: 0.8
   }
 ];
 

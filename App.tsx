@@ -50,6 +50,10 @@ const App: React.FC = () => {
       diamondRef.current?.centerView();
   };
 
+  const handleIncreaseDepth = () => {
+      diamondRef.current?.increaseDepth();
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
       
@@ -86,6 +90,8 @@ const App: React.FC = () => {
         setVolume={setMasterVolume}
         onPanic={handlePanic}
         onCenter={handleCenter}
+        onIncreaseDepth={handleIncreaseDepth}
+        showIncreaseDepthButton={settings.showIncreaseDepthButton}
         pitchOffLocked={settings.pitchOffLocked}
         volumeLocked={settings.volumeLocked}
       />

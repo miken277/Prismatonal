@@ -111,6 +111,22 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
                          <input type="range" min="0" max="0.9" step="0.01" value={preset.delayFeedback} onChange={(e) => update('delayFeedback', parseFloat(e.target.value))} className="w-full h-1 bg-teal-600 rounded appearance-none" />
                     </div>
                 </div>
+
+                <div className="pt-2 border-t border-slate-700/50 space-y-3">
+                     <h4 className="text-xs font-bold text-slate-400">Dynamics (Compressor/Limiter)</h4>
+                     <div>
+                         <label className="flex justify-between text-xs mb-1"><span>Threshold</span> <span>{preset.compressorThreshold}dB</span></label>
+                         <input type="range" min="-60" max="0" step="1" value={preset.compressorThreshold} onChange={(e) => update('compressorThreshold', parseFloat(e.target.value))} className="w-full h-1 bg-red-600 rounded appearance-none" />
+                     </div>
+                     <div>
+                         <label className="flex justify-between text-xs mb-1"><span>Ratio</span> <span>1:{preset.compressorRatio}</span></label>
+                         <input type="range" min="1" max="20" step="0.5" value={preset.compressorRatio} onChange={(e) => update('compressorRatio', parseFloat(e.target.value))} className="w-full h-1 bg-red-600 rounded appearance-none" />
+                     </div>
+                     <div>
+                         <label className="flex justify-between text-xs mb-1"><span>Release</span> <span>{preset.compressorRelease}s</span></label>
+                         <input type="range" min="0.01" max="1.0" step="0.01" value={preset.compressorRelease} onChange={(e) => update('compressorRelease', parseFloat(e.target.value))} className="w-full h-1 bg-red-600 rounded appearance-none" />
+                     </div>
+                </div>
             </div>
             
             <div className="p-3 bg-slate-900/50 rounded border border-slate-700">
