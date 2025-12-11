@@ -173,6 +173,11 @@ export const generateLattice = (settings: AppSettings): { nodes: LatticeNode[], 
           x += data.coords[3] * X_VECTORS[11];
           x += data.coords[4] * X_VECTORS[13];
           
+          // Apply Aspect Ratio Stretch/Squish
+          // If Ratio is 2.0 (Squished), we divide X by 2.
+          // If Ratio is 0.5 (Stretched), we divide X by 0.5 (Multiply by 2).
+          x = x * (1.0 / settings.latticeAspectRatio);
+
           const PITCH_SCALE = 200; // Pixels per octave
           const y = -(Math.log2(absoluteRatio) * PITCH_SCALE);
 

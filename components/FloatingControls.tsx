@@ -5,13 +5,15 @@ interface Props {
   volume: number;
   setVolume: (v: number) => void;
   onPanic: () => void;
+  onCenter: () => void;
   pitchOffLocked: boolean;
   volumeLocked: boolean;
 }
 
-const FloatingControls: React.FC<Props> = ({ volume, setVolume, onPanic, pitchOffLocked, volumeLocked }) => {
+const FloatingControls: React.FC<Props> = ({ volume, setVolume, onPanic, onCenter, pitchOffLocked, volumeLocked }) => {
   const [panicPos, setPanicPos] = useState({ x: window.innerWidth - 120, y: window.innerHeight - 100 });
   const [volPos, setVolPos] = useState({ x: window.innerWidth / 2 - 100, y: window.innerHeight - 80 });
+  const [centerPos, setCenterPos] = useState({ x: window.innerWidth / 2 - 25, y: 100 }); // Top center default
   
   const handleDrag = (e: React.PointerEvent, setPos: any, locked: boolean) => {
     if (locked) return;
@@ -57,6 +59,19 @@ const FloatingControls: React.FC<Props> = ({ volume, setVolume, onPanic, pitchOf
         onPointerDown={(e) => handleDrag(e, setPanicPos, pitchOffLocked)}
       >
         Off
+      </button>
+
+      {/* Center View Button */}
+      <button
+        className={`absolute w-12 h-12 rounded bg-yellow-600/20 border-2 border-yellow-500 flex items-center justify-center text-yellow-500 font-bold backdrop-blur hover:bg-yellow-600/40 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.4)] cursor-move`}
+        style={{ left: centerPos.x, top: centerPos.y, zIndex: 150 }}
+        onClick={onCenter}
+        onPointerDown={(e) => handleDrag(e, setCenterPos, false)}
+        title="Center Display"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+        </svg>
       </button>
     </>
   );

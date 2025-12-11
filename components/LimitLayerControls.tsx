@@ -11,7 +11,19 @@ const LIMITS = [1, 3, 5, 7, 11, 13];
 
 const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
   
+  const isVisible = (limit: number) => {
+    // 1-Limit is always visible
+    if (limit === 1) return true;
+    if (limit === 7) return settings.enabledLimits[7];
+    if (limit === 11) return settings.enabledLimits[11];
+    if (limit === 13) return settings.enabledLimits[13];
+    return !settings.hiddenLimits.includes(limit);
+  };
+
   const toggleVisibility = (limit: number) => {
+    // Prevent hiding 1-Limit
+    if (limit === 1) return;
+
     // For 7, 11, 13, we toggle 'enabledLimits' which affects generation (structure)
     if (limit === 7 || limit === 11 || limit === 13) {
       updateSettings({
@@ -24,7 +36,7 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
       return;
     }
 
-    // For 1, 3, 5 we toggle 'hiddenLimits' which affects visual rendering
+    // For 3, 5 we toggle 'hiddenLimits' which affects strict filtering
     const isHidden = settings.hiddenLimits.includes(limit);
     let newHidden = [...settings.hiddenLimits];
     if (isHidden) {
@@ -41,28 +53,24 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
     updateSettings({ ...settings, layerOrder: newOrder });
   };
 
-  const isVisible = (limit: number) => {
-    if (limit === 7) return settings.enabledLimits[7];
-    if (limit === 11) return settings.enabledLimits[11];
-    if (limit === 13) return settings.enabledLimits[13];
-    return !settings.hiddenLimits.includes(limit);
-  };
-  
   return (
     <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex flex-col gap-3 z-40 bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50">
       {LIMITS.map(limit => {
         const visible = isVisible(limit);
         const color = settings.colors[limit];
-        // Check if this limit is currently at the top of the stack
         const isTop = settings.layerOrder[settings.layerOrder.length - 1] === limit;
+        
+        // 1-Limit cannot be toggled off
+        const isLocked = limit === 1;
 
         return (
           <div key={limit} className="flex items-center gap-2 group">
             {/* Visibility Toggle */}
             <button 
               onClick={() => toggleVisibility(limit)}
-              className={`w-6 h-6 flex items-center justify-center rounded text-xs transition-colors ${visible ? 'text-white' : 'text-slate-600'} hover:bg-white/10`}
-              title={`Toggle ${limit}-Limit`}
+              disabled={isLocked}
+              className={`w-6 h-6 flex items-center justify-center rounded text-xs transition-colors ${visible ? (isLocked ? 'text-slate-500 cursor-default opacity-50' : 'text-white') : 'text-slate-600'} hover:bg-white/10`}
+              title={isLocked ? "1-Limit is always enabled" : `Toggle ${limit}-Limit`}
             >
                {visible ? (
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">

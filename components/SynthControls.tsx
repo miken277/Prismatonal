@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { SynthPreset, WaveformType } from '../types';
 import { PRESETS } from '../constants';
@@ -91,9 +92,24 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
                     <label className="flex justify-between text-xs mb-1"><span>Resonance (Q)</span> <span>{preset.filterResonance.toFixed(1)}</span></label>
                     <input type="range" min="0" max="20" step="0.1" value={preset.filterResonance} onChange={(e) => update('filterResonance', parseFloat(e.target.value))} className="w-full h-1 bg-yellow-600 rounded appearance-none" />
                 </div>
-                <div>
-                    <label className="flex justify-between text-xs mb-1"><span>Reverb Mix</span> <span>{(preset.reverbMix * 100).toFixed(0)}%</span></label>
-                    <input type="range" min="0" max="1" step="0.01" value={preset.reverbMix} onChange={(e) => update('reverbMix', parseFloat(e.target.value))} className="w-full h-1 bg-blue-600 rounded appearance-none" />
+                
+                <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-700/50">
+                    <div>
+                         <label className="flex justify-between text-xs mb-1"><span>Reverb</span> <span>{(preset.reverbMix * 100).toFixed(0)}%</span></label>
+                         <input type="range" min="0" max="1" step="0.01" value={preset.reverbMix} onChange={(e) => update('reverbMix', parseFloat(e.target.value))} className="w-full h-1 bg-blue-600 rounded appearance-none" />
+                    </div>
+                    <div>
+                         <label className="flex justify-between text-xs mb-1"><span>Delay Mix</span> <span>{(preset.delayMix * 100).toFixed(0)}%</span></label>
+                         <input type="range" min="0" max="1" step="0.01" value={preset.delayMix} onChange={(e) => update('delayMix', parseFloat(e.target.value))} className="w-full h-1 bg-teal-600 rounded appearance-none" />
+                    </div>
+                    <div>
+                         <label className="flex justify-between text-xs mb-1"><span>Delay Time</span> <span>{preset.delayTime.toFixed(2)}s</span></label>
+                         <input type="range" min="0" max="2" step="0.05" value={preset.delayTime} onChange={(e) => update('delayTime', parseFloat(e.target.value))} className="w-full h-1 bg-teal-600 rounded appearance-none" />
+                    </div>
+                    <div>
+                         <label className="flex justify-between text-xs mb-1"><span>Feedback</span> <span>{(preset.delayFeedback * 100).toFixed(0)}%</span></label>
+                         <input type="range" min="0" max="0.9" step="0.01" value={preset.delayFeedback} onChange={(e) => update('delayFeedback', parseFloat(e.target.value))} className="w-full h-1 bg-teal-600 rounded appearance-none" />
+                    </div>
                 </div>
             </div>
             
@@ -112,7 +128,7 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
                     </div>
                     <div>
                         <label className="flex justify-between text-xs mb-1"><span>Depth</span> <span>{preset.lfoDepth}</span></label>
-                        <input type="range" min="0" max="1000" step="10" value={preset.lfoDepth} onChange={(e) => update('lfoDepth', parseFloat(e.target.value))} className="w-full h-1 bg-pink-500 rounded appearance-none" />
+                        <input type="range" min="0" max="100" step="1" value={preset.lfoDepth} onChange={(e) => update('lfoDepth', parseFloat(e.target.value))} className="w-full h-1 bg-pink-500 rounded appearance-none" />
                     </div>
                 </div>
             </div>

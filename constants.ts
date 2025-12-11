@@ -23,12 +23,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   
   maxND: 2048, // Common sense limit for complexity
   
+  baseFrequency: 196.00, // G3
+
   isVoiceLeadingEnabled: true, 
   voiceLeadingStrength: 0.3, 
   
   isVoiceLeadingAnimationEnabled: true,
   voiceLeadingReverseDir: false,
   voiceLeadingAnimationSpeed: 2.0,
+  voiceLeadingGlowAmount: 0.5,
   
   isMomentumEnabled: false, // Disabled by default
   
@@ -38,7 +41,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
   buttonSizeScale: 1.0,
   buttonSpacingScale: 1.5, // Slightly wider default
-  canvasSize: 4000, // Large canvas for scrolling
+  latticeAspectRatio: 1.0,
+  canvasSize: 2000, // Default 2000px
   buttonShape: ButtonShape.CIRCLE,
   colors: { ...DEFAULT_COLORS },
   isPitchBendEnabled: true,
@@ -62,18 +66,21 @@ export const PRESETS: SynthPreset[] = [
     waveform: WaveformType.TRIANGLE,
     osc2Waveform: WaveformType.SINE,
     osc2Detune: -12,
-    osc2Mix: 0.5,
-    attack: 0.6,
+    osc2Mix: 0.6,
+    attack: 0.8,
     decay: 0.5,
     sustain: 0.8,
     release: 1.5,
-    gain: 0.35,
-    filterCutoff: 800,
+    gain: 0.5, 
+    filterCutoff: 1200,
     filterResonance: 1,
     lfoRate: 0.5,
-    lfoDepth: 50,
+    lfoDepth: 10, // Subtle filter movement
     lfoTarget: 'filter',
-    reverbMix: 0.5
+    reverbMix: 0.5,
+    delayMix: 0.3,
+    delayTime: 0.4,
+    delayFeedback: 0.3
   },
   {
     id: 2,
@@ -81,37 +88,43 @@ export const PRESETS: SynthPreset[] = [
     waveform: WaveformType.SINE,
     osc2Waveform: WaveformType.SINE,
     osc2Detune: 700, // A 5th up
-    osc2Mix: 0.3,
+    osc2Mix: 0.4,
     attack: 0.1,
     decay: 2.0,
     sustain: 0.4,
     release: 3.0,
-    gain: 0.3,
+    gain: 0.45,
     filterCutoff: 3000,
     filterResonance: 0,
     lfoRate: 4,
-    lfoDepth: 10,
+    lfoDepth: 3, // Subtle Pitch Vibrato (3Hz)
     lfoTarget: 'pitch',
-    reverbMix: 0.6
+    reverbMix: 0.6,
+    delayMix: 0.4,
+    delayTime: 0.35,
+    delayFeedback: 0.4
   },
   {
     id: 3,
     name: "Warm Strings",
     waveform: WaveformType.SAWTOOTH,
     osc2Waveform: WaveformType.SAWTOOTH,
-    osc2Detune: 12,
-    osc2Mix: 0.5,
+    osc2Detune: 10,
+    osc2Mix: 0.4,
     attack: 0.8,
     decay: 1.0,
-    sustain: 0.6,
+    sustain: 0.7,
     release: 1.2,
-    gain: 0.25,
-    filterCutoff: 1500,
-    filterResonance: 2,
+    gain: 0.35, // Sawtooth is loud
+    filterCutoff: 1800,
+    filterResonance: 0.5,
     lfoRate: 3,
-    lfoDepth: 10,
+    lfoDepth: 20, // Moderate tremolo
     lfoTarget: 'tremolo',
-    reverbMix: 0.4
+    reverbMix: 0.4,
+    delayMix: 0.1,
+    delayTime: 0.2,
+    delayFeedback: 0.1
   },
   {
     id: 4,
@@ -120,17 +133,20 @@ export const PRESETS: SynthPreset[] = [
     osc2Waveform: WaveformType.TRIANGLE,
     osc2Detune: 5,
     osc2Mix: 0.6,
-    attack: 1.5,
+    attack: 2.0,
     decay: 1.0,
     sustain: 1.0,
-    release: 2.0,
-    gain: 0.3,
-    filterCutoff: 600,
-    filterResonance: 5,
+    release: 2.5,
+    gain: 0.45,
+    filterCutoff: 800,
+    filterResonance: 2,
     lfoRate: 0.2,
-    lfoDepth: 400,
+    lfoDepth: 40, // Deeper filter sweep
     lfoTarget: 'filter',
-    reverbMix: 0.7
+    reverbMix: 0.7,
+    delayMix: 0.5,
+    delayTime: 0.5,
+    delayFeedback: 0.5
   },
   {
     id: 5,
@@ -143,16 +159,83 @@ export const PRESETS: SynthPreset[] = [
     decay: 0.2,
     sustain: 0.6,
     release: 0.4,
-    gain: 0.25,
-    filterCutoff: 2500,
-    filterResonance: 4,
+    gain: 0.3, // Square is loud
+    filterCutoff: 3500,
+    filterResonance: 2,
     lfoRate: 6,
-    lfoDepth: 15,
+    lfoDepth: 4, // Fast vibrato
     lfoTarget: 'pitch',
-    reverbMix: 0.3
+    reverbMix: 0.3,
+    delayMix: 0.2,
+    delayTime: 0.25,
+    delayFeedback: 0.2
+  },
+  {
+    id: 6,
+    name: "Crystal Keys",
+    waveform: WaveformType.TRIANGLE,
+    osc2Waveform: WaveformType.SINE,
+    osc2Detune: 1200, // Octave up
+    osc2Mix: 0.3,
+    attack: 0.01,
+    decay: 1.5,
+    sustain: 0.1,
+    release: 2.0,
+    gain: 0.5,
+    filterCutoff: 2500,
+    filterResonance: 0,
+    lfoRate: 2,
+    lfoDepth: 15, // Subtle tremolo
+    lfoTarget: 'tremolo',
+    reverbMix: 0.5,
+    delayMix: 0.4,
+    delayTime: 0.3,
+    delayFeedback: 0.4
+  },
+  {
+    id: 7,
+    name: "Massive Bass",
+    waveform: WaveformType.SAWTOOTH,
+    osc2Waveform: WaveformType.SQUARE,
+    osc2Detune: -12,
+    osc2Mix: 0.8,
+    attack: 0.1,
+    decay: 0.4,
+    sustain: 0.9,
+    release: 0.3,
+    gain: 0.35,
+    filterCutoff: 400,
+    filterResonance: 3,
+    lfoRate: 1,
+    lfoDepth: 5, 
+    lfoTarget: 'filter',
+    reverbMix: 0.1,
+    delayMix: 0.0,
+    delayTime: 0.1,
+    delayFeedback: 0
+  },
+  {
+    id: 8,
+    name: "Sci-Fi Ambience",
+    waveform: WaveformType.SINE,
+    osc2Waveform: WaveformType.SQUARE,
+    osc2Detune: 23, // Distinct beating
+    osc2Mix: 0.2,
+    attack: 1.0,
+    decay: 2.0,
+    sustain: 0.7,
+    release: 4.0,
+    gain: 0.4,
+    filterCutoff: 1500,
+    filterResonance: 5,
+    lfoRate: 0.1,
+    lfoDepth: 60, // Slow deep filter movement
+    lfoTarget: 'filter',
+    reverbMix: 0.8,
+    delayMix: 0.6,
+    delayTime: 0.7,
+    delayFeedback: 0.6
   }
 ];
 
 export const DEFAULT_PRESET = PRESETS[0];
-
-export const BASE_FREQUENCY = 196.00; // G3

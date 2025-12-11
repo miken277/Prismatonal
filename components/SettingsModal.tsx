@@ -35,6 +35,8 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
     });
   };
 
+  const canvasSizes = Array.from({length: 15}, (_, i) => 1000 + i * 500);
+
   return (
     <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center backdrop-blur-sm">
       <div className="bg-slate-800 rounded-xl w-[95%] max-w-4xl max-h-[90vh] overflow-hidden text-slate-200 shadow-2xl border border-slate-700 flex flex-col">
@@ -76,10 +78,23 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       <h3 className="font-semibold text-blue-400 border-b border-slate-700 pb-1">Grid Structure</h3>
                       
                       <div>
+                          <label className="block text-sm font-semibold mb-2">Base Frequency (1/1)</label>
+                          <div className="flex items-center gap-4">
+                              <input 
+                                  type="range" min="20" max="15000" step="1" 
+                                  value={settings.baseFrequency}
+                                  onChange={(e) => handleChange('baseFrequency', parseFloat(e.target.value))}
+                                  className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                              />
+                              <span className="text-sm font-mono min-w-[5ch]">{settings.baseFrequency}Hz</span>
+                          </div>
+                      </div>
+
+                      <div>
                           <label className="block text-sm font-semibold mb-2">Lattice Depth (Shells)</label>
                           <div className="flex items-center gap-4">
                               <input 
-                                  type="range" min="1" max="20" step="1" 
+                                  type="range" min="1" max="5" step="1" 
                                   value={settings.latticeShells}
                                   onChange={(e) => handleChange('latticeShells', parseInt(e.target.value))}
                                   className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
@@ -137,6 +152,24 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
                   <div className="space-y-6">
                       <h3 className="font-semibold text-blue-400 border-b border-slate-700 pb-1">Display</h3>
+                      
+                      <div>
+                          <label className="block text-sm font-semibold mb-2">
+                            Lattice X-Stretch: {(settings.latticeAspectRatio < 1.0 ? 'Stretched' : (settings.latticeAspectRatio > 1.0 ? 'Squished' : 'Normal'))} ({settings.latticeAspectRatio}x)
+                          </label>
+                          <input 
+                              type="range" min="0.5" max="2.0" step="0.1" 
+                              value={settings.latticeAspectRatio}
+                              onChange={(e) => handleChange('latticeAspectRatio', parseFloat(e.target.value))}
+                              className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                          />
+                          <div className="flex justify-between text-[10px] text-slate-500 px-1 mt-1">
+                            <span>Wide (0.5)</span>
+                            <span>Normal (1.0)</span>
+                            <span>Narrow (2.0)</span>
+                          </div>
+                      </div>
+
                       <div>
                           <label className="block text-sm font-semibold mb-2">Button Spacing ({settings.buttonSpacingScale.toFixed(1)}x)</label>
                           <input 
@@ -175,10 +208,9 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                             onChange={(e) => handleChange('canvasSize', parseInt(e.target.value))}
                             className="w-full bg-slate-700 border border-slate-600 rounded p-2 text-white"
                         >
-                            <option value={3000}>Small (3000px)</option>
-                            <option value={4000}>Medium (4000px)</option>
-                            <option value={6000}>Large (6000px)</option>
-                            <option value={8000}>Extra Large (8000px)</option>
+                            {canvasSizes.map(size => (
+                                <option key={size} value={size}>{size}px</option>
+                            ))}
                         </select>
                     </div>
                   </div>
@@ -272,6 +304,15 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                        <input type="checkbox" checked={settings.voiceLeadingReverseDir} onChange={(e) => handleChange('voiceLeadingReverseDir', e.target.checked)} className="w-4 h-4 rounded border-slate-600" />
                                        <span className="text-xs text-slate-300">Reverse Direction</span>
                                     </label>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <label className="block text-xs mb-1 text-slate-400">Glow Width</label>
+                                    <input 
+                                        type="range" min="0.0" max="1.0" step="0.01" 
+                                        value={settings.voiceLeadingGlowAmount}
+                                        onChange={(e) => handleChange('voiceLeadingGlowAmount', parseFloat(e.target.value))}
+                                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                                    />
                                   </div>
                                   <div className="col-span-2">
                                     <label className="block text-xs mb-1 text-slate-400">Speed</label>

@@ -46,6 +46,10 @@ const App: React.FC = () => {
     diamondRef.current?.clearLatches();
   };
 
+  const handleCenter = () => {
+      diamondRef.current?.centerView();
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
       
@@ -81,6 +85,7 @@ const App: React.FC = () => {
         volume={masterVolume}
         setVolume={setMasterVolume}
         onPanic={handlePanic}
+        onCenter={handleCenter}
         pitchOffLocked={settings.pitchOffLocked}
         volumeLocked={settings.volumeLocked}
       />

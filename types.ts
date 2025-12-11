@@ -24,7 +24,7 @@ export interface LimitColorMap {
 }
 
 export interface AppSettings {
-  latticeShells: number; // 1 to 20
+  latticeShells: number; // 1 to 5
   enabledLimits: {
     7: boolean;
     11: boolean;
@@ -37,6 +37,9 @@ export interface AppSettings {
   
   maxND: number; // Complexity limit: Maximum Numerator or Denominator
   
+  // Audio Settings
+  baseFrequency: number; // Hz for 1/1
+
   // Voice Leading / Focus Mode
   isVoiceLeadingEnabled: boolean;
   voiceLeadingStrength: number; // 0 to 1, higher means stricter falloff
@@ -45,6 +48,7 @@ export interface AppSettings {
   isVoiceLeadingAnimationEnabled: boolean;
   voiceLeadingReverseDir: boolean; // Reverse the direction of the flow animation
   voiceLeadingAnimationSpeed: number; // seconds
+  voiceLeadingGlowAmount: number; // 0.0 to 1.0 (Controls width/intensity of the lobe)
   
   // Momentum is deprecated/greyed out in favor of Latch Mode
   isMomentumEnabled: boolean; 
@@ -56,6 +60,7 @@ export interface AppSettings {
 
   buttonSizeScale: number; // 0.5 to 2.0
   buttonSpacingScale: number; // 0.5 to 5.0
+  latticeAspectRatio: number; // 0.5 (Stretched X) to 2.0 (Squished X)
   canvasSize: number; // Width/Height of the scrollable area in pixels (e.g. 3000, 5000)
   buttonShape: ButtonShape;
   colors: LimitColorMap;
@@ -96,10 +101,14 @@ export interface SynthPreset {
 
   // LFO
   lfoRate: number; // Hz
-  lfoDepth: number; // Amount
+  lfoDepth: number; // Amount 0-100
   lfoTarget: 'none' | 'pitch' | 'filter' | 'tremolo';
   
+  // Effects
   reverbMix: number; // 0 to 1
+  delayMix: number; // 0 to 1
+  delayTime: number; // Seconds
+  delayFeedback: number; // 0 to 0.95
 }
 
 export interface LatticeNode {

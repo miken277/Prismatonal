@@ -6,6 +6,7 @@ import AudioEngine from '../services/AudioEngine';
 
 export interface TonalityDiamondHandle {
   clearLatches: () => void;
+  centerView: () => void;
 }
 
 interface Props {
@@ -49,13 +50,37 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   useImperativeHandle(ref, () => ({
     clearLatches: () => {
       setLatchedNodes(new Map()); // Visual clear
+    },
+    centerView: () => {
+        if (scrollContainerRef.current) {
+            const center = settings.canvasSize / 2;
+            const viewportW = scrollContainerRef.current.clientWidth;
+            const viewportH = scrollContainerRef.current.clientHeight;
+            scrollContainerRef.current.scrollLeft = center - viewportW / 2;
+            scrollContainerRef.current.scrollTop = center - viewportH / 2;
+        }
     }
   }));
 
   useEffect(() => {
     const result = generateLattice(settings);
-    const visibleNodes = result.nodes.filter(n => !settings.hiddenLimits.includes(n.maxPrime));
+    
+    // Strict Filtering Logic
+    const visibleNodes = result.nodes.filter(n => {
+        // Limit 3 (Index 0): Hide if settings say hide 3 AND node has a 3-component
+        if (settings.hiddenLimits.includes(3) && n.coords[0] !== 0) return false;
+        
+        // Limit 5 (Index 1): Hide if settings say hide 5 AND node has a 5-component
+        if (settings.hiddenLimits.includes(5) && n.coords[1] !== 0) return false;
+        
+        // Note: 7, 11, 13 are handled by enabledLimits in generation, preventing creation.
+        // Limit 1 is always enabled.
+        
+        return true;
+    });
+
     const visibleLines = result.lines.filter(l => !settings.hiddenLimits.includes(l.limit));
+    
     setData({ nodes: visibleNodes, lines: visibleLines });
   }, [settings]);
 
@@ -140,7 +165,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
             audioEngine.stopVoice(`node-${nodeId}`);
         } else {
             newMap.set(nodeId, nodeId);
-            audioEngine.startVoice(`node-${nodeId}`, ratio);
+            audioEngine.startVoice(`node-${nodeId}`, ratio, settings.baseFrequency);
         }
         return newMap;
     });
@@ -151,7 +176,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
           if (prev.has(nodeId)) return prev; 
           const newMap = new Map(prev);
           newMap.set(nodeId, originId);
-          audioEngine.startVoice(`node-${nodeId}`, ratio);
+          audioEngine.startVoice(`node-${nodeId}`, ratio, settings.baseFrequency);
           return newMap;
       });
   };
@@ -171,7 +196,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
 
     if (settings.isPitchBendEnabled) {
         const cursorId = `cursor-${e.pointerId}`;
-        audioEngine.startVoice(cursorId, node.ratio);
+        audioEngine.startVoice(cursorId, node.ratio, settings.baseFrequency);
         
         setActiveCursors(prev => {
             const next = new Map(prev);
@@ -211,7 +236,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
         const effectivePitchScale = PITCH_SCALE * settings.buttonSpacingScale;
         const bentRatio = Math.pow(2, -relY / effectivePitchScale);
         
-        audioEngine.glideVoice(`cursor-${e.pointerId}`, bentRatio, 0.05);
+        audioEngine.glideVoice(`cursor-${e.pointerId}`, bentRatio, settings.baseFrequency, 0.05);
 
         if (settings.isLatchModeEnabled) {
             const spacing = settings.buttonSpacingScale;
@@ -322,7 +347,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
         >
             <style>{`
               @keyframes flowAnimation {
-                to { stroke-dashoffset: -40; }
+                to { stroke-dashoffset: -100; }
               }
               .animate-flow {
                 animation: flowAnimation ${settings.voiceLeadingAnimationSpeed}s linear infinite;
@@ -330,6 +355,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
             `}</style>
             
             <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
+                {/* Glow Filter Definition */}
+                <defs>
+                   <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                      <feGaussianBlur stdDeviation={settings.voiceLeadingGlowAmount * 4} result="coloredBlur"/>
+                      <feMerge>
+                         <feMergeNode in="coloredBlur"/>
+                         <feMergeNode in="SourceGraphic"/>
+                      </feMerge>
+                   </filter>
+                </defs>
+
                 {data.lines.map(line => {
                     let x1 = line.x1 * spacing + centerOffset;
                     let y1 = line.y1 * spacing + centerOffset;
@@ -365,22 +401,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                         };
                         
                         // Directional Logic
-                        // Determine flow direction based on coordinate magnitude on the prime axis
                         const axisIndex = LIMIT_TO_INDEX[line.limit];
                         if (axisIndex !== undefined) {
                             const c1 = n1.coords[axisIndex];
                             const c2 = n2.coords[axisIndex];
                             
-                            // Default: Low -> High (e.g. 1/1 -> 3/2)
+                            // Default: Low -> High
                             let swap = c1 > c2;
-                            
-                            // Handle Inversion setting
-                            if (settings.voiceLeadingReverseDir) {
-                                swap = !swap;
-                            }
+                            if (settings.voiceLeadingReverseDir) swap = !swap;
 
                             if (swap) {
-                                // Swap coordinates to reverse SVG draw direction
                                 const tempX = x1; const tempY = y1;
                                 x1 = x2; y1 = y2;
                                 x2 = tempX; y2 = tempY;
@@ -394,6 +424,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                         lineOpacity = 0.05;
                     }
 
+                    // Calculate Glow/Lobe parameters
+                    const glowWidthMultiplier = 1 + (settings.voiceLeadingGlowAmount * 3); // 1x to 4x
+                    const animStrokeWidth = lineWidth * glowWidthMultiplier; 
+
                     return (
                         <g key={line.id}>
                             {/* Base Line - Colored */}
@@ -405,15 +439,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                                 strokeDasharray={line.limit === 1 ? "5,5" : "0"} 
                                 style={lineStyle}
                             />
-                            {/* Animation Overlay - White moving pulses */}
+                            {/* Animation Overlay - Moving Glowing Lobes */}
                             {isVoiceLeadingActive && settings.isVoiceLeadingAnimationEnabled && (
                                 <line 
                                     x1={x1} y1={y1} x2={x2} y2={y2}
                                     stroke="white"
-                                    strokeWidth={lineWidth * 0.6}
-                                    strokeOpacity={0.8}
-                                    strokeLinecap="round"
-                                    strokeDasharray="5 35" // "moving bright pulses" - short dash, long gap
+                                    strokeWidth={animStrokeWidth}
+                                    strokeOpacity={0.9}
+                                    strokeLinecap="round" 
+                                    strokeDasharray={`0 100`} // Dots with long gaps
+                                    filter="url(#glow)"
                                     className="animate-flow"
                                 />
                             )}
