@@ -1,5 +1,5 @@
 
-import { AppSettings, ButtonShape, LimitColorMap, SynthPreset, WaveformType } from './types';
+import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, SynthPreset, WaveformType } from './types';
 
 export const DEFAULT_COLORS: LimitColorMap = {
   1: '#EF4444', // Red (Unity)
@@ -8,6 +8,23 @@ export const DEFAULT_COLORS: LimitColorMap = {
   7: '#22C55E', // Green (7-Limit)
   11: '#A855F7', // Purple (11-Limit)
   13: '#F97316', // Orange (13-Limit)
+};
+
+// Generate empty chord slots A-Z + 6 more to make 32
+const generateChordSlots = (): ChordDefinition[] => {
+  const slots: ChordDefinition[] = [];
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456";
+  for (let i = 0; i < 32; i++) {
+    slots.push({
+      id: alphabet[i],
+      label: alphabet[i],
+      color: '#3B82F6', // Default blue
+      nodes: [],
+      visible: false,
+      position: { x: 0, y: 0 } // Positions will be managed dynamically if 0,0
+    });
+  }
+  return slots;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -28,6 +45,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   
   showIncreaseDepthButton: true,
   centerResetsDepth: false,
+
+  savedChords: generateChordSlots(),
+  chordShortcutSizeScale: 0.6,
+  chordsAlwaysRelatch: false,
+
+  // Chord Slide Defaults
+  isChordSlideEnabled: true,
+  chordSlideTrigger: 1,
+  fixLatchedChords: false,
 
   hiddenLimits: [7, 11, 13],
   // Order from back to front.

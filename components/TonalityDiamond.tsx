@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef } from 'react';
-import { AppSettings, LatticeNode, LatticeLine } from '../types';
+import { AppSettings, LatticeNode, LatticeLine, ChordDefinition } from '../types';
 import { generateLattice, getHarmonicDistance } from '../services/LatticeService';
 import AudioEngine from '../services/AudioEngine';
 
@@ -8,12 +8,14 @@ export interface TonalityDiamondHandle {
   clearLatches: () => void;
   centerView: () => void;
   increaseDepth: () => void;
+  getLatchedNodes: () => LatticeNode[];
 }
 
 interface Props {
   settings: AppSettings;
   audioEngine: AudioEngine;
   onLimitInteraction: (limit: number) => void;
+  activeChordIds: string[];
 }
 
 interface ActiveCursor {
@@ -34,13 +36,16 @@ const LIMIT_TO_INDEX: {[key: number]: number} = {
     13: 4
 };
 
-const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, audioEngine, onLimitInteraction }, ref) => {
+const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, audioEngine, onLimitInteraction, activeChordIds }, ref) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
   
-  // Track latched nodes
-  const [latchedNodes, setLatchedNodes] = useState<Map<string, string>>(new Map());
+  // Track manually latched nodes (clicked by user)
+  const [manualLatchedNodes, setManualLatchedNodes] = useState<Map<string, string>>(new Map());
+  
+  // Track the actual effective latched nodes (manual + chords)
+  const [effectiveLatchedNodes, setEffectiveLatchedNodes] = useState<Map<string, string>>(new Map());
   
   // Track active pointers
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
@@ -52,11 +57,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   const [lastTouchedNodeCoords, setLastTouchedNodeCoords] = useState<number[] | null>(null);
 
   const [hasCentered, setHasCentered] = useState(false);
+  
+  const prevActiveChordIds = useRef<string[]>([]);
+  
+  // Chord Slide State Refs
+  const chordTouchMap = useRef<Map<string, Set<number>>>(new Map()); // chordId -> Set<pointerId>
+  const chordDriverMap = useRef<Map<string, { pointerId: number, startY: number }>>(new Map());
 
   // Expose methods to parent
   useImperativeHandle(ref, () => ({
     clearLatches: () => {
-      setLatchedNodes(new Map()); // Visual clear
+      setManualLatchedNodes(new Map()); // Visual clear
     },
     centerView: () => {
         if (settings.centerResetsDepth) {
@@ -81,6 +92,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                 return [...prev, [...lastTouchedNodeCoords]];
             });
         }
+    },
+    getLatchedNodes: () => {
+        // Return full node objects for currently effective latches
+        const nodes: LatticeNode[] = [];
+        effectiveLatchedNodes.forEach((_, id) => {
+            const node = data.nodes.find(n => n.id === id);
+            if (node) nodes.push(node);
+        });
+        return nodes;
     }
   }));
 
@@ -103,9 +123,120 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
     setData({ nodes: visibleNodes, lines: visibleLines });
   }, [settings, depthOrigins]);
 
-  // Reactive Delatching Logic
+  // Combine Manual Latches + Active Chords to determine Effective Latches
   useEffect(() => {
-    setLatchedNodes(prev => {
+    const newEffective = new Map<string, string>(manualLatchedNodes);
+    const addedFromChords = new Set<string>();
+
+    activeChordIds.forEach(chordId => {
+        const chordDef = settings.savedChords.find(c => c.id === chordId);
+        if (chordDef) {
+            chordDef.nodes.forEach(n => {
+                // If it's not already manually latched, add it.
+                // If it IS manually latched, it stays.
+                if (!newEffective.has(n.id)) {
+                    newEffective.set(n.id, n.id); // Self-sourced for chords
+                    addedFromChords.add(n.id);
+                }
+            });
+        }
+    });
+    
+    // Check if we need to force relatch due to chord activation with "Always Relatch" setting
+    if (settings.chordsAlwaysRelatch) {
+         // Find which chords are NEW
+         const newChords = activeChordIds.filter(id => !prevActiveChordIds.current.includes(id));
+         if (newChords.length > 0) {
+             // For each new chord, force restart of its notes
+             newChords.forEach(chordId => {
+                 const chordDef = settings.savedChords.find(c => c.id === chordId);
+                 if (chordDef) {
+                     chordDef.nodes.forEach(n => {
+                        // Even if it's already playing, force restart
+                        const fullNode = data.nodes.find(dn => dn.id === n.id);
+                        if (fullNode) {
+                            audioEngine.startVoice(`node-${n.id}`, fullNode.ratio, settings.baseFrequency);
+                        }
+                     });
+                 }
+             });
+         }
+    }
+
+    setEffectiveLatchedNodes(newEffective);
+    prevActiveChordIds.current = activeChordIds;
+    
+  }, [manualLatchedNodes, activeChordIds, settings.savedChords, settings.chordsAlwaysRelatch, data.nodes, audioEngine, settings.baseFrequency]);
+
+
+  // Audio Sync Effect - Syncs Audio Engine to Effective Latched Nodes
+  useEffect(() => {
+    // We only need to start voices that are NEW in the effective set
+    // And stop voices that are GONE from the effective set
+    // Existing voices persist (unless forced by the specific Relatch logic above)
+
+    // Note: The `manualLatchedNodes` logic below for delatching checks harmonic distance.
+    // We should run that check on the MANUAL set only, or effective?
+    // Usually momentum/latch checks happen on user interaction.
+    // Here we just sync the engine state to the map.
+    
+    // However, we can't easily know *which* voices are currently playing in a stateless way
+    // without tracking them. But AudioEngine tracks them.
+    // AudioEngine.startVoice() is idempotent-ish (restarts if called), so we should avoid calling it if already playing.
+    // But we don't know if it's playing here easily. 
+    
+    // Instead of doing a full diff here (which might conflict with the Force Relatch logic),
+    // we can rely on the fact that `setEffectiveLatchedNodes` updates state, and we can iterate
+    // over the *changes* if we tracked previous effective. 
+    // But since `manualLatchedNodes` updates via `toggleLatch`, we already trigger audio there for manual.
+    // We only need to handle the CHORD additions/removals here?
+    
+    // ACTUALLY: The safest way is to let this effect manage ALL voice states to ensure consistency.
+    // But `toggleLatch` provides immediate feedback.
+    // Let's rely on specific diffing.
+    
+    // We need a ref to track what WE think is playing to diff against.
+  }, [effectiveLatchedNodes]); 
+  
+  // We need to actually play the notes.
+  // The `toggleLatch` function plays notes immediately.
+  // The `Chord` effect above sets effective nodes but doesn't play them (except for forced relatch).
+  // We need an effect that starts/stops voices when `effectiveLatchedNodes` changes.
+  
+  const prevEffectiveRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+      const current = effectiveLatchedNodes;
+      const prev = prevEffectiveRef.current;
+
+      // Start new notes
+      current.forEach((originId, nodeId) => {
+          if (!prev.has(nodeId)) {
+               const node = data.nodes.find(n => n.id === nodeId);
+               if (node) {
+                   audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency);
+               }
+          }
+      });
+
+      // Stop removed notes
+      prev.forEach((_, nodeId) => {
+          if (!current.has(nodeId)) {
+              audioEngine.stopVoice(`node-${nodeId}`);
+          }
+      });
+
+      prevEffectiveRef.current = current;
+  }, [effectiveLatchedNodes, data.nodes, settings.baseFrequency, audioEngine]);
+
+
+  // Reactive Delatching Logic (Only applies to manual latches usually, but let's apply to effective for consistent physics?)
+  // Actually, if a note is held by a CHORD, it should probably stay even if it violates harmonic reach of a manual latch?
+  // "Chords should automatically latch all the notes... If latch mode is disabled, it will only disable automatic latching, not chords"
+  // This implies Chords are absolute.
+  // So we only prune `manualLatchedNodes`.
+  useEffect(() => {
+    setManualLatchedNodes(prev => {
         const next = new Map<string, string>(prev);
         let changed = false;
 
@@ -114,8 +245,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
 
         next.forEach((originId, nodeId) => {
             const node = visibleNodeMap.get(nodeId);
+            // If node disappeared from view
             if (!node) {
-                audioEngine.stopVoice(`node-${nodeId}`);
+                // Don't stop voice here, let the effectiveNodes effect handle it
                 next.delete(nodeId);
                 changed = true;
                 return;
@@ -124,7 +256,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
             if (originId !== nodeId) {
                  const originNode = visibleNodeMap.get(originId);
                  if (!originNode) {
-                     audioEngine.stopVoice(`node-${nodeId}`);
                      next.delete(nodeId);
                      changed = true;
                      return;
@@ -146,7 +277,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                  }
 
                  if (!isAllowed) {
-                     audioEngine.stopVoice(`node-${nodeId}`);
                      next.delete(nodeId);
                      changed = true;
                  }
@@ -155,7 +285,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
 
         return changed ? next : prev;
     });
-  }, [settings, data.nodes, audioEngine]);
+  }, [settings, data.nodes]); // Removed audioEngine from deps, handled by sync effect
 
 
   useLayoutEffect(() => {
@@ -175,27 +305,33 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   }, [settings.polyphony, audioEngine]);
 
   // --- Logic Helpers ---
+  
+  const getActiveChordsForNode = (nodeId: string) => {
+    return settings.savedChords.filter(c => 
+        activeChordIds.includes(c.id) && c.nodes.some(n => n.id === nodeId)
+    );
+  };
 
   const toggleLatch = (nodeId: string, ratio: number) => {
-    setLatchedNodes(prev => {
+    setManualLatchedNodes(prev => {
         const newMap = new Map(prev);
         if (newMap.has(nodeId)) {
             newMap.delete(nodeId);
-            audioEngine.stopVoice(`node-${nodeId}`);
+            // Don't stop voice immediately here, let the sync effect do it
+            // Unless we want instant feedback. 
+            // The sync effect runs after render, which is fast enough.
         } else {
             newMap.set(nodeId, nodeId);
-            audioEngine.startVoice(`node-${nodeId}`, ratio, settings.baseFrequency);
         }
         return newMap;
     });
   };
 
   const latchOn = (nodeId: string, ratio: number, originId: string) => {
-      setLatchedNodes(prev => {
+      setManualLatchedNodes(prev => {
           if (prev.has(nodeId)) return prev; 
           const newMap = new Map(prev);
           newMap.set(nodeId, originId);
-          audioEngine.startVoice(`node-${nodeId}`, ratio, settings.baseFrequency);
           return newMap;
       });
   };
@@ -208,6 +344,55 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
     onLimitInteraction(node.maxPrime);
     setLastTouchedNodeCoords(node.coords);
     
+    // Track active cursors always to ensure move events fire
+    setActiveCursors(prev => {
+        const next = new Map(prev);
+        next.set(e.pointerId, {
+            pointerId: e.pointerId,
+            currentX: e.clientX,
+            currentY: e.clientY,
+            originNodeId: node.id
+        });
+        return next;
+    });
+    
+    // --- Chord Slide Logic Check ---
+    let suppressStandardInteraction = false;
+    const activeChordsForNode = getActiveChordsForNode(node.id);
+
+    if (settings.isChordSlideEnabled && activeChordsForNode.length > 0) {
+        activeChordsForNode.forEach(chord => {
+            let touches = chordTouchMap.current.get(chord.id);
+            if (!touches) {
+                touches = new Set();
+                chordTouchMap.current.set(chord.id, touches);
+            }
+            touches.add(e.pointerId);
+            
+            const count = touches.size;
+            
+            if (count >= settings.chordSlideTrigger) {
+                 // Trigger Slide Mode
+                 suppressStandardInteraction = true;
+                 
+                 // Assign driver if none exists
+                 if (!chordDriverMap.current.has(chord.id)) {
+                     chordDriverMap.current.set(chord.id, { 
+                         pointerId: e.pointerId, 
+                         startY: e.clientY 
+                     });
+                 }
+            } else if (settings.fixLatchedChords) {
+                 // Suppress interaction because not enough fingers yet
+                 suppressStandardInteraction = true;
+            }
+        });
+    }
+
+    if (suppressStandardInteraction) {
+       return; 
+    }
+
     // Toggle Logic
     if (settings.isLatchModeEnabled) {
         toggleLatch(node.id, node.ratio);
@@ -219,17 +404,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
         const cursorId = `cursor-${e.pointerId}`;
         audioEngine.startVoice(cursorId, node.ratio, settings.baseFrequency);
     }
-    
-    setActiveCursors(prev => {
-        const next = new Map(prev);
-        next.set(e.pointerId, {
-            pointerId: e.pointerId,
-            currentX: e.clientX,
-            currentY: e.clientY,
-            originNodeId: node.id
-        });
-        return next;
-    });
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -245,6 +419,38 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
         });
         return next;
     });
+    
+    // --- Chord Slide Move Logic ---
+    let isDrivingChord = false;
+    if (settings.isChordSlideEnabled) {
+        chordDriverMap.current.forEach((driver, chordId) => {
+            if (driver.pointerId === e.pointerId) {
+                isDrivingChord = true;
+                
+                // Calculate bend
+                const centerOffset = settings.canvasSize / 2;
+                const effectivePitchScale = PITCH_SCALE * settings.buttonSpacingScale;
+                
+                const deltaY = e.clientY - driver.startY;
+                const bendRatio = Math.pow(2, -deltaY / effectivePitchScale);
+                
+                // Apply to ALL nodes in chord
+                const chordDef = settings.savedChords.find(c => c.id === chordId);
+                if (chordDef) {
+                    chordDef.nodes.forEach(cn => {
+                         // We are bending the actual latched voices, not cursor voices
+                         const fullNode = data.nodes.find(n => n.id === cn.id);
+                         if (fullNode) {
+                            const newRatio = fullNode.ratio * bendRatio;
+                            audioEngine.glideVoice(`node-${cn.id}`, newRatio, settings.baseFrequency, 0.05);
+                         }
+                    });
+                }
+            }
+        });
+    }
+
+    if (isDrivingChord) return;
 
     if (settings.isPitchBendEnabled && scrollContainerRef.current) {
         const centerOffset = settings.canvasSize / 2;
@@ -275,7 +481,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                 const distSq = dx*dx + dy*dy;
 
                 if (distSq < radius * radius) {
-                    if (!latchedNodes.has(node.id)) {
+                    // Similar Chord Slide fix check for latching new notes via drag
+                    // The prompt implies "Chord slide... interprets touching... one of the chord nodes".
+                    // It doesn't explicitly disable latching OTHER nodes if dragging from a chord node,
+                    // but if we are in slide mode, we probably shouldn't latch other stuff.
+                    // However, we returned early if `isDrivingChord` was true.
+                    
+                    if (!manualLatchedNodes.has(node.id)) {
                          const originNode = data.nodes.find(n => n.id === cursor.originNodeId);
                          if (originNode) {
                              const allowedMaxIndex = settings.latchShellLimit - 2; 
@@ -307,6 +519,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    // Clean up Active Cursors
     if (activeCursors.has(e.pointerId)) {
         audioEngine.stopVoice(`cursor-${e.pointerId}`);
         setActiveCursors(prev => {
@@ -315,15 +528,44 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
             return next;
         });
     }
+    
+    // Clean up Chord Touches & Slide Drivers
+    if (settings.isChordSlideEnabled) {
+        chordTouchMap.current.forEach((touches, chordId) => {
+            if (touches.has(e.pointerId)) {
+                touches.delete(e.pointerId);
+                
+                // If this was a driver, stop sliding and snap back
+                const driver = chordDriverMap.current.get(chordId);
+                if (driver && driver.pointerId === e.pointerId) {
+                    chordDriverMap.current.delete(chordId);
+                    
+                    // Snap back chord voices
+                    const chordDef = settings.savedChords.find(c => c.id === chordId);
+                    if (chordDef) {
+                        chordDef.nodes.forEach(cn => {
+                             const fullNode = data.nodes.find(n => n.id === cn.id);
+                             if (fullNode) {
+                                // Snap back to original ratio
+                                audioEngine.glideVoice(`node-${cn.id}`, fullNode.ratio, settings.baseFrequency, 0.1);
+                             }
+                        });
+                    }
+                    
+                    // Optional: If other fingers remain, could reassign driver? 
+                    // Prompt implies "only use the first detected finger", so if first leaves, maybe we stop.
+                }
+            }
+        });
+    }
 
     if (!settings.isLatchModeEnabled) {
         const cursor = activeCursors.get(e.pointerId);
         if (cursor) {
-             if (latchedNodes.has(cursor.originNodeId)) {
-                 setLatchedNodes(prev => {
+             if (manualLatchedNodes.has(cursor.originNodeId)) {
+                 setManualLatchedNodes(prev => {
                      const next = new Map(prev);
                      next.delete(cursor.originNodeId);
-                     audioEngine.stopVoice(`node-${cursor.originNodeId}`);
                      return next;
                  });
              }
@@ -338,7 +580,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
   const centerOffset = settings.canvasSize / 2;
   const spacing = settings.buttonSpacingScale;
   
-  const activeNodes = data.nodes.filter(n => latchedNodes.has(n.id));
+  const activeNodes = data.nodes.filter(n => effectiveLatchedNodes.has(n.id));
 
   // Rainbow Generation
   const rainbowPeriod = PITCH_SCALE * spacing;
@@ -416,8 +658,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                     let isVoiceLeadingActive = false;
                     let lineStyle = {};
 
-                    const n1Active = latchedNodes.has(n1.id);
-                    const n2Active = latchedNodes.has(n2.id);
+                    const n1Active = effectiveLatchedNodes.has(n1.id);
+                    const n2Active = effectiveLatchedNodes.has(n2.id);
 
                     if (n1Active && n2Active) {
                         // Voice Leading Connection Active
@@ -515,7 +757,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                     return null;
                 }
 
-                const isLatched = latchedNodes.has(node.id);
+                const isLatched = effectiveLatchedNodes.has(node.id);
                 const isHovered = cursors.some(c => c.originNodeId === node.id); 
                 const isActive = isLatched || isHovered;
                 

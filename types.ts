@@ -23,6 +23,22 @@ export interface LimitColorMap {
   [key: number]: string;
 }
 
+export interface ChordNode {
+  id: string; // Coordinate key
+  n: number;
+  d: number;
+  // Minimal data needed to reconstruct/identify
+}
+
+export interface ChordDefinition {
+  id: string; // "A", "B", etc.
+  label: string;
+  color: string;
+  nodes: ChordNode[];
+  visible: boolean; // Is shortcut on screen?
+  position: { x: number; y: number }; // Screen position of shortcut
+}
+
 export interface AppSettings {
   // Individual depths (Steps from center)
   limitDepths: {
@@ -46,6 +62,16 @@ export interface AppSettings {
   showIncreaseDepthButton: boolean;
   centerResetsDepth: boolean;
 
+  // Chords
+  savedChords: ChordDefinition[];
+  chordShortcutSizeScale: number; // 0.33 to 1.0 relative to main buttons
+  chordsAlwaysRelatch: boolean; // If true, activating a chord re-triggers notes even if playing
+  
+  // Chord Slide Settings
+  isChordSlideEnabled: boolean;
+  chordSlideTrigger: 1 | 2 | 3; // Number of fingers to trigger
+  fixLatchedChords: boolean; // If true, ignore interactions below trigger count
+
   // Visible toggle for lower limits (View only)
   hiddenLimits: number[]; 
   
@@ -60,8 +86,8 @@ export interface AppSettings {
   
   // Voice Leading Visuals
   isVoiceLeadingAnimationEnabled: boolean;
-  voiceLeadingReverseDir: boolean; // Reverse the direction of the flow animation
   voiceLeadingAnimationSpeed: number; // seconds
+  voiceLeadingReverseDir: boolean; // Reverse the direction of the flow animation
   voiceLeadingGlowAmount: number; // 0.0 to 1.0 (Controls width/intensity of the lobe)
   
   // Momentum is deprecated/greyed out in favor of Latch Mode

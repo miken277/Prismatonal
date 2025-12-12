@@ -1,6 +1,6 @@
 
 import React, { useRef, useState } from 'react';
-import { AppSettings, ButtonShape } from '../types';
+import { AppSettings, ButtonShape, ChordDefinition } from '../types';
 import { DEFAULT_COLORS } from '../constants';
 
 interface Props {
@@ -44,6 +44,12 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
       ...settings,
       colors: { ...settings.colors, [limit]: color }
     });
+  };
+  
+  const updateChord = (index: number, field: keyof ChordDefinition, value: any) => {
+      const newChords = [...settings.savedChords];
+      newChords[index] = { ...newChords[index], [field]: value };
+      updateSettings({ ...settings, savedChords: newChords });
   };
 
   const resetColors = () => {
@@ -110,7 +116,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
              onClick={() => setActiveTab('behavior')}
              className={`flex-1 py-3 font-semibold transition ${activeTab === 'behavior' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
            >
-             Behavior
+             Behavior & Chords
            </button>
            <button 
              onClick={() => setActiveTab('color')}
@@ -371,6 +377,108 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         </div>
                     </div>
                 </div>
+
+                {/* --- CHORD EDITOR SECTION --- */}
+                <div className="col-span-1 md:col-span-2 space-y-4 pt-6 mt-6 border-t border-slate-700">
+                    <h3 className="font-semibold text-green-400 border-b border-slate-700 pb-1">Chords Configuration</h3>
+                    
+                    <div className="flex gap-4">
+                        <div className="flex-1">
+                            <label className="block text-sm font-semibold mb-2">Chord Shortcut Size ({settings.chordShortcutSizeScale.toFixed(2)}x)</label>
+                            <input 
+                                type="range" min="0.33" max="1.0" step="0.01" 
+                                value={settings.chordShortcutSizeScale}
+                                onChange={(e) => handleChange('chordShortcutSizeScale', parseFloat(e.target.value))}
+                                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                            />
+                        </div>
+                        <div className="flex-1 flex flex-col justify-end space-y-2">
+                            <label className="flex items-center space-x-2 cursor-pointer">
+                               <input type="checkbox" checked={settings.chordsAlwaysRelatch} onChange={(e) => handleChange('chordsAlwaysRelatch', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-green-500 focus:ring-green-500" />
+                               <span className="text-sm font-semibold text-slate-300">Chords always relatch all notes</span>
+                            </label>
+
+                            {/* Chord Slide Settings */}
+                            <div className="p-2 bg-slate-900/50 rounded border border-blue-500/30">
+                                <label className="flex items-center space-x-2 mb-2 cursor-pointer">
+                                   <input type="checkbox" checked={settings.isChordSlideEnabled} onChange={(e) => handleChange('isChordSlideEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-blue-500 focus:ring-blue-500" />
+                                   <span className="font-semibold text-blue-300">Enable Chord Slide</span>
+                                </label>
+                                <div className={`space-y-2 pl-6 transition-opacity ${settings.isChordSlideEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Chord slide trigger fingers</label>
+                                        <div className="flex gap-2">
+                                            {[1, 2, 3].map(n => (
+                                                <button 
+                                                    key={n}
+                                                    onClick={() => handleChange('chordSlideTrigger', n)}
+                                                    className={`px-3 py-1 text-xs rounded border ${settings.chordSlideTrigger === n ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
+                                                >
+                                                    {n}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <label className="flex items-center space-x-2 cursor-pointer pt-1">
+                                       <input type="checkbox" checked={settings.fixLatchedChords} onChange={(e) => handleChange('fixLatchedChords', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-blue-400" />
+                                       <div className="leading-tight">
+                                           <span className="text-xs font-bold text-slate-300 block">Fix latched chords</span>
+                                           <span className="text-[10px] text-slate-500 block">Prevents interaction unless trigger count met</span>
+                                       </div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-900/50 rounded-lg border border-slate-700 overflow-hidden">
+                        <div className="grid grid-cols-[40px_40px_60px_100px_1fr] gap-2 p-2 bg-slate-800 text-xs font-bold text-slate-400 border-b border-slate-700">
+                            <div className="text-center">Slot</div>
+                            <div className="text-center">Show</div>
+                            <div className="text-center">Color</div>
+                            <div>Label</div>
+                            <div>Nodes (Ratios)</div>
+                        </div>
+                        <div className="max-h-64 overflow-y-auto">
+                            {settings.savedChords.map((chord, index) => (
+                                <div key={chord.id} className="grid grid-cols-[40px_40px_60px_100px_1fr] gap-2 p-2 border-b border-slate-700/50 items-center hover:bg-slate-800/50 transition-colors">
+                                    <div className="text-center font-mono font-bold text-slate-500">{chord.id}</div>
+                                    <div className="text-center">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={chord.visible} 
+                                            onChange={(e) => updateChord(index, 'visible', e.target.checked)}
+                                            className="rounded border-slate-600 bg-slate-700 text-blue-500"
+                                        />
+                                    </div>
+                                    <div className="flex justify-center">
+                                        <input 
+                                            type="color" 
+                                            value={chord.color} 
+                                            onChange={(e) => updateChord(index, 'color', e.target.value)}
+                                            className="w-6 h-6 rounded cursor-pointer bg-transparent border-none"
+                                        />
+                                    </div>
+                                    <div>
+                                        <input 
+                                            type="text" 
+                                            value={chord.label} 
+                                            onChange={(e) => updateChord(index, 'label', e.target.value)}
+                                            className="w-full bg-transparent border-b border-slate-600 focus:border-blue-500 outline-none text-xs"
+                                        />
+                                    </div>
+                                    <div className="text-xs text-slate-400 font-mono truncate">
+                                        {chord.nodes.length > 0 
+                                            ? chord.nodes.map(n => `${n.n}/${n.d}`).join(', ') 
+                                            : <span className="text-slate-600 italic">Empty</span>
+                                        }
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
               </div>
             )}
 

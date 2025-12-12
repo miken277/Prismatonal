@@ -6,13 +6,14 @@ import SynthControls from './components/SynthControls';
 import FloatingControls from './components/FloatingControls';
 import LimitLayerControls from './components/LimitLayerControls';
 import AudioEngine from './services/AudioEngine';
-import { AppSettings, SynthPreset } from './types';
+import { AppSettings, SynthPreset, ChordDefinition, LatticeNode } from './types';
 import { DEFAULT_COLORS, DEFAULT_SETTINGS, DEFAULT_PRESET } from './constants';
 
 const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [preset, setPreset] = useState<SynthPreset>(DEFAULT_PRESET);
   const [masterVolume, setMasterVolume] = useState(0.8);
+  const [activeChordIds, setActiveChordIds] = useState<string[]>([]);
   
   // Modals
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -44,6 +45,7 @@ const App: React.FC = () => {
   const handlePanic = () => {
     engineRef.current.stopAll();
     diamondRef.current?.clearLatches();
+    setActiveChordIds([]);
   };
 
   const handleCenter = () => {
@@ -52,6 +54,59 @@ const App: React.FC = () => {
 
   const handleIncreaseDepth = () => {
       diamondRef.current?.increaseDepth();
+  };
+
+  const handleAddChord = () => {
+      if (diamondRef.current) {
+          const latchedNodes = diamondRef.current.getLatchedNodes();
+          if (latchedNodes.length === 0) return;
+
+          // Find first empty slot or just the next available that isn't visible?
+          // Strategy: Find first slot with 0 nodes.
+          let slotIndex = settings.savedChords.findIndex(c => c.nodes.length === 0);
+          
+          // If all full, maybe overwrite the first non-visible one? Or just don't add.
+          if (slotIndex === -1) {
+              // Try finding one that isn't visible
+               slotIndex = settings.savedChords.findIndex(c => !c.visible);
+          }
+          
+          if (slotIndex !== -1) {
+              const newChords = [...settings.savedChords];
+              
+              // Simplify nodes for storage
+              const simplifiedNodes = latchedNodes.map(n => ({
+                  id: n.id,
+                  n: n.n,
+                  d: n.d
+                  // Don't need full coords/ratio for storage if we just need ID/label, 
+                  // but coords are useful for reconstruction if IDs change (unlikely here)
+                  // The type requires: id, n, d.
+              }));
+
+              newChords[slotIndex] = {
+                  ...newChords[slotIndex],
+                  nodes: simplifiedNodes,
+                  visible: true,
+                  // Position will be handled by FloatingControls default placement logic if 0,0
+                  // Or we could calculate it here if we knew where the Add button is. 
+                  // Leaving as 0,0 triggers the auto-placement in FloatingControls.
+                  position: { x: 0, y: 0 } 
+              };
+
+              setSettings(prev => ({ ...prev, savedChords: newChords }));
+          }
+      }
+  };
+
+  const toggleChord = (id: string) => {
+      setActiveChordIds(prev => {
+          if (prev.includes(id)) {
+              return prev.filter(c => c !== id);
+          } else {
+              return [...prev, id];
+          }
+      });
   };
 
   return (
@@ -82,6 +137,7 @@ const App: React.FC = () => {
         settings={settings} 
         audioEngine={engineRef.current} 
         onLimitInteraction={handleLimitInteraction}
+        activeChordIds={activeChordIds}
       />
 
       {/* Floating UI */}
@@ -91,6 +147,11 @@ const App: React.FC = () => {
         onPanic={handlePanic}
         onCenter={handleCenter}
         onIncreaseDepth={handleIncreaseDepth}
+        onAddChord={handleAddChord}
+        toggleChord={toggleChord}
+        activeChordIds={activeChordIds}
+        savedChords={settings.savedChords}
+        chordShortcutSizeScale={settings.chordShortcutSizeScale}
         showIncreaseDepthButton={settings.showIncreaseDepthButton}
         pitchOffLocked={settings.pitchOffLocked}
         volumeLocked={settings.volumeLocked}
