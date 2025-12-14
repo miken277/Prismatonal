@@ -174,7 +174,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                               <div key={`comp-${limit}`} className="flex items-center gap-3">
                                   <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
                                   <input 
-                                      type="range" min="100" max="10000" step="100" 
+                                      type="range" min="10" max="10000" step="10" 
                                       value={settings.limitComplexities[limit as 3|5|7|11|13]}
                                       onChange={(e) => handleLimitComplexityChange(limit as any, parseInt(e.target.value))}
                                       className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
@@ -202,6 +202,23 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                   <div className="space-y-6">
                       <h3 className="font-semibold text-blue-400 border-b border-slate-700 pb-1">Display</h3>
                       
+                       <div className="mb-4">
+                        <label className="flex items-center space-x-3 cursor-pointer p-3 bg-slate-700/50 rounded-lg border border-yellow-500/30 hover:bg-slate-700/80 transition">
+                            <input 
+                                type="checkbox" 
+                                checked={settings.uiUnlocked} 
+                                onChange={(e) => handleChange('uiUnlocked', e.target.checked)} 
+                                className="w-5 h-5 rounded border-slate-600 text-yellow-500 focus:ring-yellow-500" 
+                            />
+                            <div>
+                                <span className={`font-bold block ${settings.uiUnlocked ? 'text-yellow-400' : 'text-slate-300'}`}>
+                                    Unlock UI elements
+                                </span>
+                                <span className="text-[10px] text-slate-400">Enable dragging of buttons and controls</span>
+                            </div>
+                        </label>
+                       </div>
+
                       <div>
                           <label className="block text-sm font-semibold mb-2">
                             Lattice X-Stretch: {(settings.latticeAspectRatio < 1.0 ? 'Wide' : (settings.latticeAspectRatio > 1.0 ? 'Narrow' : 'Normal'))} ({settings.latticeAspectRatio})
@@ -397,37 +414,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                <input type="checkbox" checked={settings.chordsAlwaysRelatch} onChange={(e) => handleChange('chordsAlwaysRelatch', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-green-500 focus:ring-green-500" />
                                <span className="text-sm font-semibold text-slate-300">Chords always relatch all notes</span>
                             </label>
-
-                            {/* Chord Slide Settings */}
-                            <div className="p-2 bg-slate-900/50 rounded border border-blue-500/30">
-                                <label className="flex items-center space-x-2 mb-2 cursor-pointer">
-                                   <input type="checkbox" checked={settings.isChordSlideEnabled} onChange={(e) => handleChange('isChordSlideEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-blue-500 focus:ring-blue-500" />
-                                   <span className="font-semibold text-blue-300">Enable Chord Slide</span>
-                                </label>
-                                <div className={`space-y-2 pl-6 transition-opacity ${settings.isChordSlideEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Chord slide trigger fingers</label>
-                                        <div className="flex gap-2">
-                                            {[1, 2, 3].map(n => (
-                                                <button 
-                                                    key={n}
-                                                    onClick={() => handleChange('chordSlideTrigger', n)}
-                                                    className={`px-3 py-1 text-xs rounded border ${settings.chordSlideTrigger === n ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
-                                                >
-                                                    {n}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <label className="flex items-center space-x-2 cursor-pointer pt-1">
-                                       <input type="checkbox" checked={settings.fixLatchedChords} onChange={(e) => handleChange('fixLatchedChords', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-blue-400" />
-                                       <div className="leading-tight">
-                                           <span className="text-xs font-bold text-slate-300 block">Fix latched chords</span>
-                                           <span className="text-[10px] text-slate-500 block">Prevents interaction unless trigger count met</span>
-                                       </div>
-                                    </label>
-                                </div>
-                            </div>
                         </div>
                     </div>
 

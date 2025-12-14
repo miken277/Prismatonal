@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef } from 'react';
-import { AppSettings, LatticeNode, LatticeLine, ChordDefinition } from '../types';
+import { AppSettings, LatticeNode, LatticeLine, GenerationOrigin, ButtonShape } from '../types';
 import { generateLattice, getHarmonicDistance } from '../services/LatticeService';
 import AudioEngine from '../services/AudioEngine';
 
@@ -16,250 +16,269 @@ interface Props {
   audioEngine: AudioEngine;
   onLimitInteraction: (limit: number) => void;
   activeChordIds: string[];
+  uiUnlocked: boolean;
 }
 
 interface ActiveCursor {
   pointerId: number;
   currentX: number;
   currentY: number;
-  originNodeId: string; // The node where the touch started
+  originNodeId: string; 
 }
 
-const PITCH_SCALE = 200; // Pixels per octave, matches LatticeService
+// Helper to lighten color for gradient center (0.0 to 1.0 amount, where 1.0 is white)
+const lightenColor = (color: string, amount: number) => {
+    if (color.startsWith('#') && color.length === 7) {
+        const r = parseInt(color.slice(1, 3), 16);
+        const g = parseInt(color.slice(3, 5), 16);
+        const b = parseInt(color.slice(5, 7), 16);
 
-// Map prime limits to their coordinate index in the coords array
-const LIMIT_TO_INDEX: {[key: number]: number} = {
-    3: 0,
-    5: 1,
-    7: 2,
-    11: 3,
-    13: 4
+        const nr = Math.round(r + (255 - r) * amount);
+        const ng = Math.round(g + (255 - g) * amount);
+        const nb = Math.round(b + (255 - b) * amount);
+
+        return `#${((1 << 24) + (nr << 16) + (ng << 8) + nb).toString(16).slice(1)}`;
+    }
+    return color;
 };
 
-const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, audioEngine, onLimitInteraction, activeChordIds }, ref) => {
+// --- SPATIAL HASH SYSTEM ---
+class SpatialHash {
+  private cellSize: number;
+  private cells: Map<string, LatticeNode[]>;
+
+  constructor(cellSize: number) {
+    this.cellSize = cellSize;
+    this.cells = new Map();
+  }
+
+  key(x: number, y: number) {
+    const cx = Math.floor(x / this.cellSize);
+    const cy = Math.floor(y / this.cellSize);
+    return `${cx},${cy}`;
+  }
+
+  insert(node: LatticeNode, x: number, y: number) {
+    const k = this.key(x, y);
+    if (!this.cells.has(k)) this.cells.set(k, []);
+    this.cells.get(k)!.push(node);
+  }
+
+  query(x: number, y: number): LatticeNode[] {
+    const results: LatticeNode[] = [];
+    const cx = Math.floor(x / this.cellSize);
+    const cy = Math.floor(y / this.cellSize);
+
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        const k = `${cx + i},${cy + j}`;
+        const cell = this.cells.get(k);
+        if (cell) {
+          for (let n = 0; n < cell.length; n++) {
+            results.push(cell[n]);
+          }
+        }
+      }
+    }
+    return results;
+  }
+  
+  clear() {
+    this.cells.clear();
+  }
+}
+
+const PITCH_SCALE = 200;
+const LIMIT_TO_INDEX: {[key: number]: number} = { 3: 0, 5: 1, 7: 2, 11: 3, 13: 4 };
+
+const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) => {
+  const { settings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked } = props;
+
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationFrameRef = useRef<number>(0);
   
+  // Data State
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
+  const [spatialHash] = useState(() => new SpatialHash(150)); 
   
-  // Track manually latched nodes (clicked by user)
+  // Interaction State
+  const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [manualLatchedNodes, setManualLatchedNodes] = useState<Map<string, string>>(new Map());
-  
-  // Track the actual effective latched nodes (manual + chords)
   const [effectiveLatchedNodes, setEffectiveLatchedNodes] = useState<Map<string, string>>(new Map());
   
-  // Track active pointers
-  const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
+  // Refs for Render Loop (Source of Truth for Animation)
+  const settingsRef = useRef(settings);
+  const dataRef = useRef(data);
+  const activeCursorsRef = useRef(activeCursors);
+  const effectiveLatchedRef = useRef(effectiveLatchedNodes);
   
-  // Track the origins for depth generation (Array of coordinate arrays)
-  const [depthOrigins, setDepthOrigins] = useState<number[][]>([[0,0,0,0,0]]);
-  
-  // Track last touched node for Increasing Depth
-  const [lastTouchedNodeCoords, setLastTouchedNodeCoords] = useState<number[] | null>(null);
+  // NEW: Ref for Cursor Positions to bypass React State during high-freq drag events
+  const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
 
+  // Sync Refs
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => { dataRef.current = data; }, [data]);
+  useEffect(() => { activeCursorsRef.current = activeCursors; }, [activeCursors]);
+  useEffect(() => { effectiveLatchedRef.current = effectiveLatchedNodes; }, [effectiveLatchedNodes]);
+  
+  // Generation State
+  const [depthOrigins, setDepthOrigins] = useState<GenerationOrigin[]>([{coords: [0,0,0,0,0], octave: 0}]);
+  const [lastTouchedNode, setLastTouchedNode] = useState<GenerationOrigin | null>(null);
   const [hasCentered, setHasCentered] = useState(false);
-  
   const prevActiveChordIds = useRef<string[]>([]);
-  
-  // Chord Slide State Refs
-  const chordTouchMap = useRef<Map<string, Set<number>>>(new Map()); // chordId -> Set<pointerId>
-  const chordDriverMap = useRef<Map<string, { pointerId: number, startY: number }>>(new Map());
 
-  // Expose methods to parent
+  // --- External API ---
   useImperativeHandle(ref, () => ({
-    clearLatches: () => {
-      setManualLatchedNodes(new Map()); // Visual clear
-    },
+    clearLatches: () => setManualLatchedNodes(new Map()),
     centerView: () => {
         if (settings.centerResetsDepth) {
-            setDepthOrigins([[0,0,0,0,0]]);
-            setLastTouchedNodeCoords(null);
+            setDepthOrigins([{coords: [0,0,0,0,0], octave: 0}]);
+            setLastTouchedNode(null);
         }
-
-        if (scrollContainerRef.current) {
-            const center = settings.canvasSize / 2;
-            const viewportW = scrollContainerRef.current.clientWidth;
-            const viewportH = scrollContainerRef.current.clientHeight;
-            scrollContainerRef.current.scrollLeft = center - viewportW / 2;
-            scrollContainerRef.current.scrollTop = center - viewportH / 2;
-        }
+        centerScroll();
     },
     increaseDepth: () => {
-        if (lastTouchedNodeCoords) {
+        if (lastTouchedNode) {
             setDepthOrigins(prev => {
-                // Check if already exists to prevent dupes in array
-                const exists = prev.some(o => o.every((val, i) => val === lastTouchedNodeCoords[i]));
+                const exists = prev.some(o => 
+                    o.octave === lastTouchedNode.octave &&
+                    o.coords.every((val, i) => val === lastTouchedNode.coords[i])
+                );
                 if (exists) return prev;
-                return [...prev, [...lastTouchedNodeCoords]];
+                return [...prev, { coords: [...lastTouchedNode.coords], octave: lastTouchedNode.octave }];
             });
         }
     },
     getLatchedNodes: () => {
-        // Return full node objects for currently effective latches
-        const nodes: LatticeNode[] = [];
-        effectiveLatchedNodes.forEach((_, id) => {
-            const node = data.nodes.find(n => n.id === id);
-            if (node) nodes.push(node);
-        });
-        return nodes;
+        return data.nodes.filter(n => effectiveLatchedNodes.has(n.id));
     }
   }));
 
+  const centerScroll = () => {
+      if (scrollContainerRef.current) {
+        const center = settings.canvasSize / 2;
+        const viewportW = scrollContainerRef.current.clientWidth;
+        const viewportH = scrollContainerRef.current.clientHeight;
+        scrollContainerRef.current.scrollLeft = center - viewportW / 2;
+        scrollContainerRef.current.scrollTop = center - viewportH / 2;
+      }
+  };
+
+  useLayoutEffect(() => {
+    if (!hasCentered && scrollContainerRef.current) {
+        centerScroll();
+        setHasCentered(true);
+    }
+  }, [settings.canvasSize]);
+
+  // --- Data Generation ---
   useEffect(() => {
-    // Pass the depthOrigins array to generation service
-    const result = generateLattice(settings, depthOrigins);
-    
-    // Strict Filtering Logic based on hiddenLimits for VISIBILITY
-    const visibleNodes = result.nodes.filter(n => {
-        // Check all hidden limits
-        for (const limit of settings.hiddenLimits) {
-            const idx = LIMIT_TO_INDEX[limit];
-            if (idx !== undefined && n.coords[idx] !== 0) return false;
+    const effectiveSettings = { ...settings, limitDepths: { ...settings.limitDepths } };
+    const hiddenLimits = settings.hiddenLimits as number[]; 
+
+    hiddenLimits.forEach(limit => {
+        if (limit in effectiveSettings.limitDepths) {
+            effectiveSettings.limitDepths[limit as 3|5|7|11|13] = 0;
         }
-        return true;
     });
 
-    const visibleLines = result.lines.filter(l => !settings.hiddenLimits.includes(l.limit));
+    const result = generateLattice(effectiveSettings, depthOrigins);
     
-    setData({ nodes: visibleNodes, lines: visibleLines });
-  }, [settings, depthOrigins]);
+    const visibleNodeIds = new Set(result.nodes.map(n => n.id));
 
-  // Combine Manual Latches + Active Chords to determine Effective Latches
+    const visibleLines = result.lines.filter(l => {
+        if (hiddenLimits.includes(l.limit)) return false;
+        if (!visibleNodeIds.has(l.sourceId) || !visibleNodeIds.has(l.targetId)) return false;
+        return true;
+    });
+    
+    spatialHash.clear();
+    const centerOffset = settings.canvasSize / 2;
+    const spacing = settings.buttonSpacingScale;
+
+    result.nodes.forEach(node => {
+        const x = node.x * spacing + centerOffset;
+        const y = node.y * spacing + centerOffset;
+        spatialHash.insert(node, x, y);
+    });
+
+    setData({ nodes: result.nodes, lines: visibleLines });
+  }, [
+      settings.limitDepths, 
+      settings.limitComplexities, 
+      settings.hiddenLimits,
+      settings.latticeAspectRatio, 
+      depthOrigins, 
+      settings.buttonSpacingScale, 
+      settings.canvasSize
+  ]);
+
+  // --- Logic: Latches & Audio Sync ---
   useEffect(() => {
     const newEffective = new Map<string, string>(manualLatchedNodes);
-    const addedFromChords = new Set<string>();
-
+    
     activeChordIds.forEach(chordId => {
         const chordDef = settings.savedChords.find(c => c.id === chordId);
         if (chordDef) {
             chordDef.nodes.forEach(n => {
-                // If it's not already manually latched, add it.
-                // If it IS manually latched, it stays.
-                if (!newEffective.has(n.id)) {
-                    newEffective.set(n.id, n.id); // Self-sourced for chords
-                    addedFromChords.add(n.id);
-                }
+                if (!newEffective.has(n.id)) newEffective.set(n.id, n.id);
             });
         }
     });
     
-    // Check if we need to force relatch due to chord activation with "Always Relatch" setting
     if (settings.chordsAlwaysRelatch) {
-         // Find which chords are NEW
          const newChords = activeChordIds.filter(id => !prevActiveChordIds.current.includes(id));
          if (newChords.length > 0) {
-             // For each new chord, force restart of its notes
              newChords.forEach(chordId => {
                  const chordDef = settings.savedChords.find(c => c.id === chordId);
                  if (chordDef) {
                      chordDef.nodes.forEach(n => {
-                        // Even if it's already playing, force restart
                         const fullNode = data.nodes.find(dn => dn.id === n.id);
-                        if (fullNode) {
-                            audioEngine.startVoice(`node-${n.id}`, fullNode.ratio, settings.baseFrequency);
-                        }
+                        if (fullNode) audioEngine.startVoice(`node-${n.id}`, fullNode.ratio, settings.baseFrequency);
                      });
                  }
              });
          }
     }
-
+    
     setEffectiveLatchedNodes(newEffective);
     prevActiveChordIds.current = activeChordIds;
-    
-  }, [manualLatchedNodes, activeChordIds, settings.savedChords, settings.chordsAlwaysRelatch, data.nodes, audioEngine, settings.baseFrequency]);
+  }, [manualLatchedNodes, activeChordIds, settings.savedChords, settings.chordsAlwaysRelatch, data.nodes, settings.baseFrequency]);
 
-
-  // Audio Sync Effect - Syncs Audio Engine to Effective Latched Nodes
-  useEffect(() => {
-    // We only need to start voices that are NEW in the effective set
-    // And stop voices that are GONE from the effective set
-    // Existing voices persist (unless forced by the specific Relatch logic above)
-
-    // Note: The `manualLatchedNodes` logic below for delatching checks harmonic distance.
-    // We should run that check on the MANUAL set only, or effective?
-    // Usually momentum/latch checks happen on user interaction.
-    // Here we just sync the engine state to the map.
-    
-    // However, we can't easily know *which* voices are currently playing in a stateless way
-    // without tracking them. But AudioEngine tracks them.
-    // AudioEngine.startVoice() is idempotent-ish (restarts if called), so we should avoid calling it if already playing.
-    // But we don't know if it's playing here easily. 
-    
-    // Instead of doing a full diff here (which might conflict with the Force Relatch logic),
-    // we can rely on the fact that `setEffectiveLatchedNodes` updates state, and we can iterate
-    // over the *changes* if we tracked previous effective. 
-    // But since `manualLatchedNodes` updates via `toggleLatch`, we already trigger audio there for manual.
-    // We only need to handle the CHORD additions/removals here?
-    
-    // ACTUALLY: The safest way is to let this effect manage ALL voice states to ensure consistency.
-    // But `toggleLatch` provides immediate feedback.
-    // Let's rely on specific diffing.
-    
-    // We need a ref to track what WE think is playing to diff against.
-  }, [effectiveLatchedNodes]); 
-  
-  // We need to actually play the notes.
-  // The `toggleLatch` function plays notes immediately.
-  // The `Chord` effect above sets effective nodes but doesn't play them (except for forced relatch).
-  // We need an effect that starts/stops voices when `effectiveLatchedNodes` changes.
-  
+  // Audio Diffing
   const prevEffectiveRef = useRef<Map<string, string>>(new Map());
-
   useEffect(() => {
       const current = effectiveLatchedNodes;
       const prev = prevEffectiveRef.current;
-
-      // Start new notes
+      
       current.forEach((originId, nodeId) => {
           if (!prev.has(nodeId)) {
                const node = data.nodes.find(n => n.id === nodeId);
-               if (node) {
-                   audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency);
-               }
+               if (node) audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency);
           }
       });
-
-      // Stop removed notes
       prev.forEach((_, nodeId) => {
-          if (!current.has(nodeId)) {
-              audioEngine.stopVoice(`node-${nodeId}`);
-          }
+          if (!current.has(nodeId)) audioEngine.stopVoice(`node-${nodeId}`);
       });
 
       prevEffectiveRef.current = current;
-  }, [effectiveLatchedNodes, data.nodes, settings.baseFrequency, audioEngine]);
+  }, [effectiveLatchedNodes, data.nodes, settings.baseFrequency]);
 
-
-  // Reactive Delatching Logic (Only applies to manual latches usually, but let's apply to effective for consistent physics?)
-  // Actually, if a note is held by a CHORD, it should probably stay even if it violates harmonic reach of a manual latch?
-  // "Chords should automatically latch all the notes... If latch mode is disabled, it will only disable automatic latching, not chords"
-  // This implies Chords are absolute.
-  // So we only prune `manualLatchedNodes`.
+  // Reactive Delatching
   useEffect(() => {
-    setManualLatchedNodes(prev => {
+    setManualLatchedNodes((prev: Map<string, string>) => {
         const next = new Map<string, string>(prev);
         let changed = false;
-
-        const visibleNodeMap = new Map<string, LatticeNode>();
-        data.nodes.forEach(n => visibleNodeMap.set(n.id, n));
+        const visibleNodeMap = new Map<string, LatticeNode>(data.nodes.map(n => [n.id, n]));
 
         next.forEach((originId, nodeId) => {
             const node = visibleNodeMap.get(nodeId);
-            // If node disappeared from view
-            if (!node) {
-                // Don't stop voice here, let the effectiveNodes effect handle it
-                next.delete(nodeId);
-                changed = true;
-                return;
-            }
-
+            if (!node) { next.delete(nodeId); changed = true; return; }
+            
             if (originId !== nodeId) {
                  const originNode = visibleNodeMap.get(originId);
-                 if (!originNode) {
-                     next.delete(nodeId);
-                     changed = true;
-                     return;
-                 }
+                 if (!originNode) { next.delete(nodeId); changed = true; return; }
 
                  const allowedMaxIndex = settings.latchShellLimit - 2; 
                  let isAllowed = true;
@@ -269,340 +288,508 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                  } else {
                      for(let i=0; i<node.coords.length; i++) {
                         const diff = Math.abs(node.coords[i] - originNode.coords[i]);
-                        if (diff > 0 && i > allowedMaxIndex) {
-                            isAllowed = false;
-                            break;
-                        }
+                        if (diff > 0 && i > allowedMaxIndex) { isAllowed = false; break; }
                      }
                  }
-
-                 if (!isAllowed) {
-                     next.delete(nodeId);
-                     changed = true;
-                 }
+                 if (!isAllowed) { next.delete(nodeId); changed = true; }
             }
         });
-
         return changed ? next : prev;
     });
-  }, [settings, data.nodes]); // Removed audioEngine from deps, handled by sync effect
-
-
-  useLayoutEffect(() => {
-    if (scrollContainerRef.current && !hasCentered) {
-        const center = settings.canvasSize / 2;
-        const viewportW = scrollContainerRef.current.clientWidth;
-        const viewportH = scrollContainerRef.current.clientHeight;
-
-        scrollContainerRef.current.scrollLeft = center - viewportW / 2;
-        scrollContainerRef.current.scrollTop = center - viewportH / 2;
-        setHasCentered(true);
-    }
-  }, [settings.canvasSize, hasCentered]);
+  }, [settings.latchShellLimit, data.nodes]); 
 
   useEffect(() => {
     audioEngine.setPolyphony(settings.polyphony);
-  }, [settings.polyphony, audioEngine]);
+  }, [settings.polyphony]);
 
-  // --- Logic Helpers ---
-  
-  const getActiveChordsForNode = (nodeId: string) => {
-    return settings.savedChords.filter(c => 
-        activeChordIds.includes(c.id) && c.nodes.some(n => n.id === nodeId)
-    );
-  };
+  // --- Interaction Handlers ---
+  const handlePointerDown = (e: React.PointerEvent) => {
+      if (uiUnlocked || !canvasRef.current) return;
+      e.preventDefault();
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
 
-  const toggleLatch = (nodeId: string, ratio: number) => {
-    setManualLatchedNodes(prev => {
-        const newMap = new Map(prev);
-        if (newMap.has(nodeId)) {
-            newMap.delete(nodeId);
-            // Don't stop voice immediately here, let the sync effect do it
-            // Unless we want instant feedback. 
-            // The sync effect runs after render, which is fast enough.
+      // Update Cursor Position Ref immediately (for instant responsiveness)
+      cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      const candidates = spatialHash.query(x, y);
+      const centerOffset = settings.canvasSize / 2;
+      const spacing = settings.buttonSpacingScale;
+      const radius = (60 * settings.buttonSizeScale) / 2;
+      const radiusSq = radius * radius;
+
+      let hitNode: LatticeNode | null = null;
+      for (const node of candidates) {
+          const nx = node.x * spacing + centerOffset;
+          const ny = node.y * spacing + centerOffset;
+          const dx = x - nx;
+          const dy = y - ny;
+          if (dx*dx + dy*dy < radiusSq) {
+              hitNode = node;
+              break; 
+          }
+      }
+
+      if (hitNode) {
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        
+        // Optimistic UI Update: Update Ref Immediately for instant feedback in render loop
+        const newEffective = new Map(effectiveLatchedRef.current);
+        if (settings.isLatchModeEnabled) {
+             if (newEffective.has(hitNode.id)) newEffective.delete(hitNode.id);
+             else newEffective.set(hitNode.id, hitNode.id);
         } else {
-            newMap.set(nodeId, nodeId);
+             if (!newEffective.has(hitNode.id)) newEffective.set(hitNode.id, hitNode.id);
         }
-        return newMap;
-    });
-  };
+        effectiveLatchedRef.current = newEffective;
 
-  const latchOn = (nodeId: string, ratio: number, originId: string) => {
-      setManualLatchedNodes(prev => {
-          if (prev.has(nodeId)) return prev; 
-          const newMap = new Map(prev);
-          newMap.set(nodeId, originId);
-          return newMap;
-      });
-  };
+        // React State updates
+        onLimitInteraction(hitNode.maxPrime);
+        setLastTouchedNode({ coords: hitNode.coords, octave: hitNode.octave });
 
-  const handlePointerDown = (e: React.PointerEvent, node: LatticeNode) => {
-    e.preventDefault();
-    e.stopPropagation();
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-
-    onLimitInteraction(node.maxPrime);
-    setLastTouchedNodeCoords(node.coords);
-    
-    // Track active cursors always to ensure move events fire
-    setActiveCursors(prev => {
-        const next = new Map(prev);
-        next.set(e.pointerId, {
-            pointerId: e.pointerId,
-            currentX: e.clientX,
-            currentY: e.clientY,
-            originNodeId: node.id
+        setActiveCursors(prev => {
+            const next = new Map(prev);
+            next.set(e.pointerId, {
+                pointerId: e.pointerId,
+                currentX: e.clientX,
+                currentY: e.clientY,
+                originNodeId: hitNode!.id
+            });
+            return next;
         });
-        return next;
-    });
-    
-    // --- Chord Slide Logic Check ---
-    let suppressStandardInteraction = false;
-    const activeChordsForNode = getActiveChordsForNode(node.id);
 
-    if (settings.isChordSlideEnabled && activeChordsForNode.length > 0) {
-        activeChordsForNode.forEach(chord => {
-            let touches = chordTouchMap.current.get(chord.id);
-            if (!touches) {
-                touches = new Set();
-                chordTouchMap.current.set(chord.id, touches);
+        setManualLatchedNodes(prev => {
+            const next = new Map(prev);
+            if (settings.isLatchModeEnabled) {
+                if (next.has(hitNode!.id)) next.delete(hitNode!.id);
+                else next.set(hitNode!.id, hitNode!.id);
+            } else {
+                if (!next.has(hitNode!.id)) next.set(hitNode!.id, hitNode!.id);
             }
-            touches.add(e.pointerId);
-            
-            const count = touches.size;
-            
-            if (count >= settings.chordSlideTrigger) {
-                 // Trigger Slide Mode
-                 suppressStandardInteraction = true;
-                 
-                 // Assign driver if none exists
-                 if (!chordDriverMap.current.has(chord.id)) {
-                     chordDriverMap.current.set(chord.id, { 
-                         pointerId: e.pointerId, 
-                         startY: e.clientY 
-                     });
-                 }
-            } else if (settings.fixLatchedChords) {
-                 // Suppress interaction because not enough fingers yet
-                 suppressStandardInteraction = true;
-            }
+            return next;
         });
-    }
 
-    if (suppressStandardInteraction) {
-       return; 
-    }
-
-    // Toggle Logic
-    if (settings.isLatchModeEnabled) {
-        toggleLatch(node.id, node.ratio);
-    } else {
-        latchOn(node.id, node.ratio, node.id);
-    }
-
-    if (settings.isPitchBendEnabled) {
-        const cursorId = `cursor-${e.pointerId}`;
-        audioEngine.startVoice(cursorId, node.ratio, settings.baseFrequency);
-    }
+        if (settings.isPitchBendEnabled) {
+            audioEngine.startVoice(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency);
+        }
+      }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!activeCursors.has(e.pointerId)) return;
-    const cursor = activeCursors.get(e.pointerId)!;
+    if (uiUnlocked) return;
     
-    setActiveCursors(prev => {
-        const next = new Map(prev);
-        next.set(e.pointerId, {
-            ...cursor,
-            currentX: e.clientX,
-            currentY: e.clientY
-        });
-        return next;
-    });
-    
-    // --- Chord Slide Move Logic ---
-    let isDrivingChord = false;
-    if (settings.isChordSlideEnabled) {
-        chordDriverMap.current.forEach((driver, chordId) => {
-            if (driver.pointerId === e.pointerId) {
-                isDrivingChord = true;
-                
-                // Calculate bend
-                const centerOffset = settings.canvasSize / 2;
-                const effectivePitchScale = PITCH_SCALE * settings.buttonSpacingScale;
-                
-                const deltaY = e.clientY - driver.startY;
-                const bendRatio = Math.pow(2, -deltaY / effectivePitchScale);
-                
-                // Apply to ALL nodes in chord
-                const chordDef = settings.savedChords.find(c => c.id === chordId);
-                if (chordDef) {
-                    chordDef.nodes.forEach(cn => {
-                         // We are bending the actual latched voices, not cursor voices
-                         const fullNode = data.nodes.find(n => n.id === cn.id);
-                         if (fullNode) {
-                            const newRatio = fullNode.ratio * bendRatio;
-                            audioEngine.glideVoice(`node-${cn.id}`, newRatio, settings.baseFrequency, 0.05);
-                         }
-                    });
-                }
-            }
-        });
+    // Check if we are tracking this pointer (it went down on a node)
+    if (!activeCursorsRef.current.has(e.pointerId)) return;
+
+    // PERFORMANCE FIX: Update Position Ref ONLY. Do NOT trigger React setState here.
+    // This removes main-thread bottleneck causing audio glitches and visual lag.
+    cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    const cursor = activeCursorsRef.current.get(e.pointerId)!;
+
+    // Handle Pitch Bend (Audio) directly from event data
+    if (settings.isPitchBendEnabled && scrollContainerRef.current) {
+         const centerOffset = settings.canvasSize / 2;
+         const rect = scrollContainerRef.current.getBoundingClientRect();
+         const canvasY = (e.clientY - rect.top) + scrollContainerRef.current.scrollTop;
+         const relY = canvasY - centerOffset;
+         const effectivePitchScale = PITCH_SCALE * settings.buttonSpacingScale;
+         const bentRatio = Math.pow(2, -relY / effectivePitchScale);
+         
+         audioEngine.glideVoice(`cursor-${e.pointerId}`, bentRatio, settings.baseFrequency, 0.05);
     }
 
-    if (isDrivingChord) return;
+    // Handle Latching (Visual/State)
+    if (settings.isLatchModeEnabled && canvasRef.current) {
+         const canvasRect = canvasRef.current.getBoundingClientRect();
+         const cx = e.clientX - canvasRect.left;
+         const cy = e.clientY - canvasRect.top;
+         
+         const candidates = spatialHash.query(cx, cy);
+         const spacing = settings.buttonSpacingScale;
+         const centerOffset = settings.canvasSize / 2;
+         const radius = (60 * settings.buttonSizeScale) / 2;
+         const radiusSq = radius * radius;
 
-    if (settings.isPitchBendEnabled && scrollContainerRef.current) {
-        const centerOffset = settings.canvasSize / 2;
-        const scrollLeft = scrollContainerRef.current.scrollLeft;
-        const scrollTop = scrollContainerRef.current.scrollTop;
-        
-        const canvasY = e.clientY + scrollTop;
-        const relY = canvasY - centerOffset;
-        
-        const effectivePitchScale = PITCH_SCALE * settings.buttonSpacingScale;
-        const bentRatio = Math.pow(2, -relY / effectivePitchScale);
-        
-        audioEngine.glideVoice(`cursor-${e.pointerId}`, bentRatio, settings.baseFrequency, 0.05);
+         for (const node of candidates) {
+             if (node.id === cursor.originNodeId) continue;
+             const nx = node.x * spacing + centerOffset;
+             const ny = node.y * spacing + centerOffset;
+             const dx = cx - nx;
+             const dy = cy - ny;
+             
+             if (dx*dx + dy*dy < radiusSq) {
+                 setManualLatchedNodes(prev => {
+                     if (prev.has(node.id)) return prev;
+                     
+                     // Compatibility Checks...
+                     const originNode = data.nodes.find(n => n.id === cursor.originNodeId);
+                     if (!originNode) return prev;
 
-        if (settings.isLatchModeEnabled) {
-            const spacing = settings.buttonSpacingScale;
-            
-            for (const node of data.nodes) {
-                // BUG FIX: Ignore the node we started on to prevent re-triggering logic during micro-movements
-                if (node.id === cursor.originNodeId) continue;
-
-                const nx = (node.x * spacing + centerOffset) - scrollLeft;
-                const ny = (node.y * spacing + centerOffset) - scrollTop;
-                
-                const radius = (60 * settings.buttonSizeScale) / 2;
-                const dx = e.clientX - nx;
-                const dy = e.clientY - ny;
-                const distSq = dx*dx + dy*dy;
-
-                if (distSq < radius * radius) {
-                    // Similar Chord Slide fix check for latching new notes via drag
-                    // The prompt implies "Chord slide... interprets touching... one of the chord nodes".
-                    // It doesn't explicitly disable latching OTHER nodes if dragging from a chord node,
-                    // but if we are in slide mode, we probably shouldn't latch other stuff.
-                    // However, we returned early if `isDrivingChord` was true.
-                    
-                    if (!manualLatchedNodes.has(node.id)) {
-                         const originNode = data.nodes.find(n => n.id === cursor.originNodeId);
-                         if (originNode) {
-                             const allowedMaxIndex = settings.latchShellLimit - 2; 
-                             
-                             let isAllowed = true;
-                             if (settings.latchShellLimit === 1) {
-                                 const hDist = getHarmonicDistance(node.coords, originNode.coords);
-                                 if (hDist > 0) isAllowed = false;
-                             } else {
-                                 for(let i=0; i<node.coords.length; i++) {
-                                     const diff = Math.abs(node.coords[i] - originNode.coords[i]);
-                                     if (diff > 0 && i > allowedMaxIndex) {
-                                         isAllowed = false;
-                                         break;
-                                     }
-                                 }
-                             }
-
-                             if (isAllowed) {
-                                 latchOn(node.id, node.ratio, cursor.originNodeId);
-                                 setLastTouchedNodeCoords(node.coords);
-                             }
+                     const allowedMaxIndex = settings.latchShellLimit - 2;
+                     let isAllowed = true;
+                     
+                     if (settings.latchShellLimit === 1) {
+                         if (getHarmonicDistance(node.coords, originNode.coords) > 0) isAllowed = false;
+                     } else {
+                         for(let i=0; i<node.coords.length; i++) {
+                             const diff = Math.abs(node.coords[i] - originNode.coords[i]);
+                             if (diff > 0 && i > allowedMaxIndex) { isAllowed = false; break; }
                          }
-                    }
-                }
-            }
-        }
+                     }
+
+                     if (isAllowed) {
+                         // We found a new node! Update state and refs.
+                         const next = new Map(prev);
+                         next.set(node.id, cursor.originNodeId);
+                         
+                         // Optimistic Update
+                         const eff = new Map(effectiveLatchedRef.current);
+                         eff.set(node.id, cursor.originNodeId);
+                         effectiveLatchedRef.current = eff;
+                         
+                         setLastTouchedNode({ coords: node.coords, octave: node.octave });
+                         return next;
+                     }
+                     return prev;
+                 });
+             }
+         }
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    // Clean up Active Cursors
-    if (activeCursors.has(e.pointerId)) {
+    // Check if valid cursor
+    if (activeCursorsRef.current.has(e.pointerId)) {
         audioEngine.stopVoice(`cursor-${e.pointerId}`);
+        const cursor = activeCursorsRef.current.get(e.pointerId)!;
+        
+        // Cleanup Refs
+        cursorPositionsRef.current.delete(e.pointerId);
+        
         setActiveCursors(prev => {
             const next = new Map(prev);
             next.delete(e.pointerId);
             return next;
         });
-    }
-    
-    // Clean up Chord Touches & Slide Drivers
-    if (settings.isChordSlideEnabled) {
-        chordTouchMap.current.forEach((touches, chordId) => {
-            if (touches.has(e.pointerId)) {
-                touches.delete(e.pointerId);
-                
-                // If this was a driver, stop sliding and snap back
-                const driver = chordDriverMap.current.get(chordId);
-                if (driver && driver.pointerId === e.pointerId) {
-                    chordDriverMap.current.delete(chordId);
-                    
-                    // Snap back chord voices
-                    const chordDef = settings.savedChords.find(c => c.id === chordId);
-                    if (chordDef) {
-                        chordDef.nodes.forEach(cn => {
-                             const fullNode = data.nodes.find(n => n.id === cn.id);
-                             if (fullNode) {
-                                // Snap back to original ratio
-                                audioEngine.glideVoice(`node-${cn.id}`, fullNode.ratio, settings.baseFrequency, 0.1);
-                             }
-                        });
-                    }
-                    
-                    // Optional: If other fingers remain, could reassign driver? 
-                    // Prompt implies "only use the first detected finger", so if first leaves, maybe we stop.
-                }
-            }
-        });
-    }
 
-    if (!settings.isLatchModeEnabled) {
-        const cursor = activeCursors.get(e.pointerId);
-        if (cursor) {
-             if (manualLatchedNodes.has(cursor.originNodeId)) {
-                 setManualLatchedNodes(prev => {
-                     const next = new Map(prev);
-                     next.delete(cursor.originNodeId);
-                     return next;
-                 });
-             }
+        if (!settings.isLatchModeEnabled) {
+             setManualLatchedNodes(prev => {
+                 const next = new Map(prev);
+                 next.delete(cursor.originNodeId);
+                 return next;
+             });
+             // Optimistic cleanup
+             const eff = new Map(effectiveLatchedRef.current);
+             eff.delete(cursor.originNodeId);
+             effectiveLatchedRef.current = eff;
         }
     }
   };
 
-  const getColor = (limit: number): string => settings.colors[limit] || '#64748b';
+  // --- Animation Loop ---
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) return;
 
-  const baseSize = 60 * settings.buttonSizeScale;
-  const cursors: ActiveCursor[] = Array.from(activeCursors.values());
-  const centerOffset = settings.canvasSize / 2;
-  const spacing = settings.buttonSpacingScale;
-  
-  const activeNodes = data.nodes.filter(n => effectiveLatchedNodes.has(n.id));
+    const dpr = window.devicePixelRatio || 1;
 
-  // Rainbow Generation
-  const rainbowPeriod = PITCH_SCALE * spacing;
-  let rainbowBackgroundFixed: string | undefined = undefined;
-  
-  if (settings.isRainbowModeEnabled) {
-      const stops: string[] = [];
-      const steps = 6;
-      for (let i = 0; i <= steps; i++) {
-          const pct = i / steps;
-          const px = pct * rainbowPeriod;
-          const hue = (settings.rainbowOffset + i * 60); 
-          stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${px.toFixed(1)}px`);
-      }
-      rainbowBackgroundFixed = `repeating-linear-gradient(to bottom, ${stops.join(', ')})`;
-  }
-  
+    const render = (time: number) => {
+        // READ LATEST DATA FROM REFS
+        const currentSettings = settingsRef.current;
+        const currentData = dataRef.current;
+        const currentCursors = activeCursorsRef.current;
+        const currentLatched = effectiveLatchedRef.current;
+        
+        const size = currentSettings.canvasSize;
+        
+        if (canvas.width !== size * dpr || canvas.height !== size * dpr) {
+            canvas.width = size * dpr;
+            canvas.height = size * dpr;
+            ctx.scale(dpr, dpr);
+        }
+
+        // Viewport Culling
+        let viewX = 0, viewY = 0, viewW = size, viewH = size;
+        if (scrollContainerRef.current) {
+            viewX = scrollContainerRef.current.scrollLeft;
+            viewY = scrollContainerRef.current.scrollTop;
+            viewW = scrollContainerRef.current.clientWidth;
+            viewH = scrollContainerRef.current.clientHeight;
+        }
+        const pad = 100;
+        
+        ctx.clearRect(viewX, viewY, viewW, viewH);
+
+        const centerOffset = currentSettings.canvasSize / 2;
+        const spacing = currentSettings.buttonSpacingScale;
+        const baseRadius = (60 * currentSettings.buttonSizeScale) / 2;
+        const isDiamond = currentSettings.buttonShape === ButtonShape.DIAMOND;
+        const colorCache = currentSettings.colors;
+
+        // Animation Phase for Voice Leading Lines
+        const animationSpeed = (currentSettings.voiceLeadingAnimationSpeed || 2.0) * 0.33;
+        const rawPhase = (time * 0.001 * animationSpeed);
+        const flowPhase = currentSettings.voiceLeadingReverseDir ? (1.0 - (rawPhase % 1.0)) : (rawPhase % 1.0);
+        
+        ctx.lineCap = 'round';
+
+        // Prepare active node list for voice leading checks
+        const activeNodesList = currentSettings.isVoiceLeadingEnabled 
+            ? currentData.nodes.filter(n => currentLatched.has(n.id)) 
+            : [];
+        const isVoiceLeading = currentSettings.isVoiceLeadingEnabled && activeNodesList.length > 0;
+        const allowedMaxIndex = currentSettings.latchShellLimit - 2;
+
+        // DRAW LINES
+        for (const line of currentData.lines) {
+            const x1 = line.x1 * spacing + centerOffset;
+            const y1 = line.y1 * spacing + centerOffset;
+            const x2 = line.x2 * spacing + centerOffset;
+            const y2 = line.y2 * spacing + centerOffset;
+
+            if (Math.max(x1, x2) < viewX - pad || Math.min(x1, x2) > viewX + viewW + pad ||
+                Math.max(y1, y2) < viewY - pad || Math.min(y1, y2) > viewY + viewH + pad) {
+                continue;
+            }
+
+            const active1 = currentLatched.has(line.sourceId);
+            const active2 = currentLatched.has(line.targetId);
+            const limitColor = colorCache[line.limit] || '#666';
+
+            // Draw Base Line
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+
+            if (active1 && active2) {
+                // Active Line - Solid, Bright, Glowing
+                ctx.lineWidth = 5;
+                ctx.setLineDash([]); 
+                
+                if (currentSettings.isVoiceLeadingAnimationEnabled) {
+                    const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+                    const p = flowPhase;
+                    
+                    const startStop = Math.max(0, p - 0.2);
+                    const endStop = Math.min(1, p + 0.2);
+                    const pulseColor = lightenColor(limitColor, 0.33);
+
+                    grad.addColorStop(0, limitColor);
+                    if (startStop > 0) grad.addColorStop(startStop, limitColor);
+                    grad.addColorStop(p, pulseColor);
+                    if (endStop < 1) grad.addColorStop(endStop, limitColor);
+                    grad.addColorStop(1, limitColor);
+
+                    ctx.strokeStyle = grad;
+                    ctx.shadowColor = limitColor;
+                    ctx.shadowBlur = 15 * currentSettings.voiceLeadingGlowAmount;
+                    ctx.globalAlpha = 1.0;
+                } else {
+                    ctx.strokeStyle = limitColor;
+                    ctx.globalAlpha = 1.0;
+                    ctx.shadowBlur = 0;
+                }
+                
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                ctx.shadowColor = 'transparent';
+
+            } else {
+                ctx.lineWidth = line.limit === 1 ? 4 : 2;
+                ctx.strokeStyle = limitColor;
+                if (isVoiceLeading) ctx.globalAlpha = 0.05; 
+                else ctx.globalAlpha = 0.15;
+                ctx.setLineDash(line.limit === 1 ? [5, 5] : []);
+                ctx.stroke();
+            }
+        }
+
+        // DRAW NODES
+        for (const node of currentData.nodes) {
+            const x = node.x * spacing + centerOffset;
+            const y = node.y * spacing + centerOffset;
+
+            if (x < viewX - pad || x > viewX + viewW + pad || y < viewY - pad || y > viewY + viewH + pad) continue;
+
+            const isLatched = currentLatched.has(node.id);
+            let isHovered = false;
+            // Optimised hover check: Check if cursor ID in state implies hover? 
+            // Actually, we just check existence in state, which is enough to indicate "pressed"
+            // But we specifically need to know if *this* node is the origin.
+            for (const c of currentCursors.values()) {
+                if (c.originNodeId === node.id) { isHovered = true; break; }
+            }
+            
+            const isActive = isLatched || isHovered;
+            let scale = 1.0;
+            let opacity = 0.95;
+
+            if (isVoiceLeading) {
+                 if (isActive) {
+                     scale = currentSettings.latchedZoomScale;
+                     opacity = 1.0;
+                 } else {
+                     let isCompatible = false;
+                     let minDist = Infinity;
+                     
+                     for (const an of activeNodesList) {
+                         if (Math.abs(an.x - node.x) > 2000) continue; 
+
+                         let valid = true;
+                         if (currentSettings.latchShellLimit === 1) {
+                             if (getHarmonicDistance(node.coords, an.coords) > 0) valid = false;
+                         } else {
+                             for(let i=0; i<node.coords.length; i++) {
+                                 const diff = Math.abs(node.coords[i] - an.coords[i]);
+                                 if (diff > 0 && i > allowedMaxIndex) { valid = false; break; }
+                             }
+                         }
+
+                         if (valid) {
+                             isCompatible = true;
+                             const d = getHarmonicDistance(node.coords, an.coords);
+                             if (d < minDist) minDist = d;
+                         }
+                     }
+                     
+                     if (!isCompatible) {
+                         // Modified values: Brighter opacity (0.4 vs 0.1) and Larger scale (0.7 vs 0.5)
+                         opacity = 0.4; 
+                         scale = 0.7;
+                     } else {
+                         const visibility = Math.max(0.2, 1 - (minDist * currentSettings.voiceLeadingStrength));
+                         scale = Math.max(0.5, 0.5 + (visibility * 0.5));
+                         opacity = visibility;
+                     }
+                 }
+            } else {
+                scale = isActive ? currentSettings.latchedZoomScale : 1.0;
+                opacity = isActive ? 1.0 : 0.95;
+            }
+
+            const radius = baseRadius * scale;
+            const cTop = colorCache[node.limitTop] || '#666';
+            const cBottom = colorCache[node.limitBottom] || '#666';
+            
+            ctx.globalAlpha = opacity;
+            ctx.beginPath();
+            if (isDiamond) {
+                ctx.moveTo(x, y - radius);
+                ctx.lineTo(x + radius, y);
+                ctx.lineTo(x, y + radius);
+                ctx.lineTo(x - radius, y);
+                ctx.closePath();
+            } else {
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+            }
+
+            const grad = ctx.createLinearGradient(x, y - radius, x, y + radius);
+            grad.addColorStop(0.45, cTop);
+            grad.addColorStop(0.55, cBottom);
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            // "Selection Aura"
+            if (isActive && currentSettings.isColoredIlluminationEnabled) {
+                 const rainbowPeriod = PITCH_SCALE * spacing;
+                 const phase = (y % rainbowPeriod) / rainbowPeriod;
+                 const hue = (currentSettings.rainbowOffset + phase * 360) % 360;
+                 const sat = currentSettings.isRainbowModeEnabled ? currentSettings.rainbowSaturation : 100;
+                 
+                 ctx.strokeStyle = `hsl(${hue}, ${sat}%, 60%)`;
+                 ctx.lineWidth = 4;
+                 ctx.stroke();
+            } else if (isActive) {
+                 ctx.strokeStyle = 'white';
+                 ctx.lineWidth = 3;
+                 ctx.stroke();
+            }
+
+            if (scale > 0.6) {
+                ctx.fillStyle = 'white';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const fontSize = Math.max(9, Math.min(14, 11 * scale));
+                ctx.font = `bold ${fontSize}px sans-serif`; 
+                
+                ctx.fillText(node.n.toString(), x, y - (radius * 0.3));
+                ctx.beginPath();
+                ctx.moveTo(x - (radius * 0.4), y);
+                ctx.lineTo(x + (radius * 0.4), y);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.stroke();
+                ctx.fillText(node.d.toString(), x, y + (radius * 0.4));
+            }
+        }
+        
+        // Draw User Cursors from Ref for high frame rate smoothness
+        currentCursors.forEach(c => {
+            const node = currentData.nodes.find(n => n.id === c.originNodeId);
+            if(node) {
+                 const nx = node.x * spacing + centerOffset;
+                 const ny = node.y * spacing + centerOffset;
+                 
+                 // Get cursor position directly from Ref (most up to date, bypasses React)
+                 const pos = cursorPositionsRef.current.get(c.pointerId);
+                 if (!pos) return;
+
+                 let cx = 0, cy = 0;
+                 if (scrollContainerRef.current) {
+                     const r = scrollContainerRef.current.getBoundingClientRect();
+                     cx = (pos.x - r.left) + scrollContainerRef.current.scrollLeft;
+                     cy = (pos.y - r.top) + scrollContainerRef.current.scrollTop;
+                 }
+                 
+                 ctx.beginPath();
+                 ctx.moveTo(nx, ny);
+                 ctx.lineTo(cx, cy);
+                 ctx.strokeStyle = 'white';
+                 ctx.lineWidth = 2;
+                 ctx.setLineDash([]);
+                 ctx.globalAlpha = 0.5;
+                 ctx.stroke();
+            }
+        });
+
+        animationFrameRef.current = requestAnimationFrame(render);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(animationFrameRef.current);
+  }, []); // Run once on mount
+
+  // Rainbow Background Style
+  const rainbowBackgroundFixed = (() => {
+    if (settings.isRainbowModeEnabled) {
+        const stops: string[] = [];
+        const steps = 6;
+        const rainbowPeriod = PITCH_SCALE * settings.buttonSpacingScale;
+        for (let i = 0; i <= steps; i++) {
+            const pct = i / steps;
+            const px = pct * rainbowPeriod;
+            const hue = (settings.rainbowOffset + i * 60); 
+            stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${px.toFixed(1)}px`);
+        }
+        return `repeating-linear-gradient(to bottom, ${stops.join(', ')})`;
+    }
+    return undefined;
+  })();
+
   return (
     <div 
         ref={scrollContainerRef}
         className="w-full h-full overflow-auto bg-slate-950 relative"
         style={{ touchAction: 'none' }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onPointerCancel={handlePointerUp}
     >
         <div 
             className="relative"
@@ -610,267 +797,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>(({ settings, au
                 width: settings.canvasSize, 
                 height: settings.canvasSize,
                 background: rainbowBackgroundFixed,
+                pointerEvents: uiUnlocked ? 'none' : 'auto',
             }}
         >
-            <style>{`
-              @keyframes flowAnimation {
-                to { stroke-dashoffset: -100; }
-              }
-              .animate-flow {
-                animation: flowAnimation ${settings.voiceLeadingAnimationSpeed}s linear infinite;
-              }
-            `}</style>
-            
-            <svg className="absolute top-0 left-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
-                {/* Glow Filter Definition */}
-                <defs>
-                   <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-                      <feGaussianBlur stdDeviation={settings.voiceLeadingGlowAmount * 4} result="coloredBlur"/>
-                      <feMerge>
-                         <feMergeNode in="coloredBlur"/>
-                         <feMergeNode in="SourceGraphic"/>
-                      </feMerge>
-                   </filter>
-                </defs>
-
-                {data.lines.map(line => {
-                    let x1 = line.x1 * spacing + centerOffset;
-                    let y1 = line.y1 * spacing + centerOffset;
-                    let x2 = line.x2 * spacing + centerOffset;
-                    let y2 = line.y2 * spacing + centerOffset;
-                    
-                    // Culling: Do not render lines outside the canvas bounds
-                    if (x1 < 0 || x1 > settings.canvasSize || y1 < 0 || y1 > settings.canvasSize ||
-                        x2 < 0 || x2 > settings.canvasSize || y2 < 0 || y2 > settings.canvasSize) {
-                        return null;
-                    }
-
-                    const n1 = data.nodes.find(n => Math.abs(n.x - line.x1) < 0.1 && Math.abs(n.y - line.y1) < 0.1);
-                    const n2 = data.nodes.find(n => Math.abs(n.x - line.x2) < 0.1 && Math.abs(n.y - line.y2) < 0.1);
-                    
-                    if (!n1 || !n2) return null;
-
-                    const limitColor = getColor(line.limit);
-                    
-                    let strokeColor = limitColor;
-                    let lineOpacity = 0.1;
-                    let lineWidth = line.limit === 1 ? 4 : 2;
-                    let isVoiceLeadingActive = false;
-                    let lineStyle = {};
-
-                    const n1Active = effectiveLatchedNodes.has(n1.id);
-                    const n2Active = effectiveLatchedNodes.has(n2.id);
-
-                    if (n1Active && n2Active) {
-                        // Voice Leading Connection Active
-                        lineOpacity = 1.0;
-                        lineWidth = 5;
-                        strokeColor = limitColor; // Keep limit color
-                        isVoiceLeadingActive = true;
-                        
-                        // Brighten effect for active lines
-                        lineStyle = { 
-                            filter: `brightness(1.5) drop-shadow(0 0 5px ${limitColor})` 
-                        };
-                        
-                        // Directional Logic
-                        const axisIndex = LIMIT_TO_INDEX[line.limit];
-                        if (axisIndex !== undefined) {
-                            const c1 = n1.coords[axisIndex];
-                            const c2 = n2.coords[axisIndex];
-                            
-                            // Default: Low -> High
-                            let swap = c1 > c2;
-                            if (settings.voiceLeadingReverseDir) swap = !swap;
-
-                            if (swap) {
-                                const tempX = x1; const tempY = y1;
-                                x1 = x2; y1 = y2;
-                                x2 = tempX; y2 = tempY;
-                            }
-                        }
-
-                    } else if (n1Active || n2Active) {
-                        lineOpacity = 0.6;
-                        lineWidth = 3;
-                    } else if (settings.isVoiceLeadingEnabled && activeNodes.length > 0) {
-                        lineOpacity = 0.05;
-                    }
-
-                    // Calculate Glow/Lobe parameters
-                    const glowWidthMultiplier = 1 + (settings.voiceLeadingGlowAmount * 3); // 1x to 4x
-                    const animStrokeWidth = lineWidth * glowWidthMultiplier; 
-
-                    return (
-                        <g key={line.id}>
-                            {/* Base Line - Colored */}
-                            <line 
-                                x1={x1} y1={y1} x2={x2} y2={y2}
-                                stroke={strokeColor}
-                                strokeWidth={lineWidth}
-                                strokeOpacity={lineOpacity}
-                                strokeDasharray={line.limit === 1 ? "5,5" : "0"} 
-                                style={lineStyle}
-                            />
-                            {/* Animation Overlay - Moving Glowing Lobes */}
-                            {isVoiceLeadingActive && settings.isVoiceLeadingAnimationEnabled && (
-                                <line 
-                                    x1={x1} y1={y1} x2={x2} y2={y2}
-                                    stroke="white"
-                                    strokeWidth={animStrokeWidth}
-                                    strokeOpacity={0.9}
-                                    strokeLinecap="round" 
-                                    strokeDasharray={`0 100`} // Dots with long gaps
-                                    filter="url(#glow)"
-                                    className="animate-flow"
-                                />
-                            )}
-                        </g>
-                    );
-                })}
-                
-                {cursors.map(cursor => {
-                    const node = data.nodes.find(n => n.id === cursor.originNodeId);
-                    if (!node) return null;
-                    const nx = node.x * spacing + centerOffset;
-                    const ny = node.y * spacing + centerOffset;
-                    const cx = cursor.currentX + (scrollContainerRef.current?.scrollLeft || 0);
-                    const cy = cursor.currentY + (scrollContainerRef.current?.scrollTop || 0);
-                    return (
-                         <line 
-                           key={`drag-${cursor.pointerId}`}
-                           x1={nx} y1={ny} x2={cx} y2={cy}
-                           stroke="white"
-                           strokeWidth={2}
-                           strokeOpacity={0.5}
-                         />
-                    );
-                })}
-            </svg>
-
-            {data.nodes.map((node) => {
-                const left = node.x * spacing + centerOffset;
-                const top = node.y * spacing + centerOffset;
-
-                // Culling: If the node is outside the canvas area, do not render.
-                if (left < -50 || left > settings.canvasSize + 50 || top < -50 || top > settings.canvasSize + 50) {
-                    return null;
-                }
-
-                const isLatched = effectiveLatchedNodes.has(node.id);
-                const isHovered = cursors.some(c => c.originNodeId === node.id); 
-                const isActive = isLatched || isHovered;
-                
-                const cTop = getColor(node.limitTop);
-                const cBottom = getColor(node.limitBottom);
-                const background = `linear-gradient(to bottom, ${cTop} 50%, ${cBottom} 50%)`;
-
-                const layerIndex = settings.layerOrder.indexOf(node.maxPrime);
-                const zIndex = isActive ? 80 : (10 + layerIndex);
-
-                let scale = 1.0;
-                let opacity = 0.95;
-                
-                if (settings.isVoiceLeadingEnabled && activeNodes.length > 0) {
-                    if (isActive) {
-                        scale = settings.latchedZoomScale;
-                        opacity = 1.0;
-                    } else {
-                        // Unified Voice Leading Logic
-                        const allowedMaxIndex = settings.latchShellLimit - 2; 
-                        let isCompatible = false;
-                        let minDist = Infinity;
-                        
-                        for (const activeNode of activeNodes) {
-                             let valid = true;
-                             if (settings.latchShellLimit === 1) {
-                                 const hDist = getHarmonicDistance(node.coords, activeNode.coords);
-                                 if (hDist > 0) valid = false;
-                             } else {
-                                 for(let i=0; i<node.coords.length; i++) {
-                                     const diff = Math.abs(node.coords[i] - activeNode.coords[i]);
-                                     if (diff > 0 && i > allowedMaxIndex) {
-                                         valid = false;
-                                         break;
-                                     }
-                                 }
-                             }
-                            
-                             if (valid) {
-                                isCompatible = true;
-                                const d = getHarmonicDistance(node.coords, activeNode.coords);
-                                if (d < minDist) minDist = d;
-                             }
-                        }
-
-                        if (!isCompatible) {
-                            opacity = 0.15; 
-                            scale = 0.4;
-                        } else {
-                             const falloff = settings.voiceLeadingStrength; 
-                             const visibility = Math.max(0.15, 1 - (minDist * falloff));
-                             scale = Math.max(0.4, 0.5 + (visibility * 0.5));
-                             opacity = visibility;
-                        }
-                    }
-                } else {
-                    scale = isActive ? settings.latchedZoomScale : 1.0;
-                    opacity = isActive ? 1.0 : 0.95;
-                }
-
-                // Colored Illumination calculation
-                let boxShadowColor = 'white';
-                let borderColor = isLatched ? 'white' : (isHovered ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.3)');
-                let borderStyle = isLatched ? '3px solid white' : (isHovered ? '2px solid rgba(255,255,255,0.8)' : '2px solid rgba(255,255,255,0.3)');
-
-                if (settings.isColoredIlluminationEnabled) {
-                     const phase = (top % rainbowPeriod) / rainbowPeriod;
-                     const hue = (settings.rainbowOffset + phase * 360) % 360;
-                     // Use settings saturation or max if rainbow mode off, but usually settings makes sense if consistent
-                     const sat = settings.isRainbowModeEnabled ? settings.rainbowSaturation : 100;
-                     
-                     // Visible active color for Outline
-                     const activeColor = `hsl(${hue}, ${sat}%, 60%)`;
-                     
-                     if (isActive) {
-                        borderColor = activeColor;
-                        // Tight matching shadow, not diffuse glow
-                        boxShadowColor = activeColor;
-                        borderStyle = `4px solid ${borderColor}`;
-                     }
-                }
-
-                return (
-                    <div
-                        key={node.id}
-                        className="absolute flex items-center justify-center shadow-md cursor-pointer touch-none select-none transition-transform duration-100 ease-out"
-                        style={{
-                            left: `${left}px`,
-                            top: `${top}px`,
-                            width: `${baseSize}px`,
-                            height: `${baseSize}px`,
-                            background: background,
-                            borderRadius: settings.buttonShape,
-                            transform: `translate(-50%, -50%) scale(${scale})`,
-                            boxShadow: isActive ? `0 0 10px ${boxShadowColor}` : '0 4px 6px rgba(0,0,0,0.6)',
-                            zIndex: zIndex,
-                            opacity: opacity,
-                            border: borderStyle,
-                            filter: isActive ? 'brightness(1.1)' : 'none'
-                        }}
-                        onPointerDown={(e) => handlePointerDown(e, node)}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                        onPointerLeave={handlePointerUp}
-                        onPointerCancel={handlePointerUp}
-                    >
-                        <div className={`flex flex-col w-full h-full text-white font-bold leading-none text-shadow-sm transition-opacity ${scale < 0.6 ? 'opacity-0' : 'opacity-100'}`}>
-                            <span className="flex-1 flex items-center justify-center pt-1" style={{ fontSize: '11px' }}>{node.n}</span>
-                            <span className="flex-1 flex items-center justify-center pb-1 border-t border-white/20" style={{ fontSize: '11px' }}>{node.d}</span>
-                        </div>
-                    </div>
-                );
-            })}
+           <canvas 
+             ref={canvasRef}
+             style={{ width: '100%', height: '100%' }}
+           />
         </div>
     </div>
   );

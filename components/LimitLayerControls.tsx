@@ -1,16 +1,20 @@
 
 import React from 'react';
-import { AppSettings } from '../types';
+import { AppSettings, XYPos } from '../types';
+import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
 
 interface Props {
   settings: AppSettings;
   updateSettings: (s: AppSettings) => void;
+  draggingId: string | null;
+  setDraggingId: (id: string | null) => void;
 }
 
 const LIMITS = [1, 3, 5, 7, 11, 13];
 
-const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
-  
+const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggingId, setDraggingId }) => {
+  const { uiUnlocked, uiPositions } = settings;
+
   const isVisible = (limit: number) => {
     // 1-Limit is always visible
     if (limit === 1) return true;
@@ -38,24 +42,79 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
     updateSettings({ ...settings, layerOrder: newOrder });
   };
 
+  // Drag Handler
+  const handleDrag = (e: React.PointerEvent) => {
+    if (!uiUnlocked) return;
+    
+    // Lock check
+    if (draggingId !== null && draggingId !== 'layers') return;
+
+    const el = e.currentTarget as HTMLElement;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    
+    // Initial position
+    const initialLeft = uiPositions.layers.x;
+    const initialTop = uiPositions.layers.y;
+
+    el.setPointerCapture(e.pointerId);
+    setDraggingId('layers');
+
+    const onMove = (evt: PointerEvent) => {
+        const deltaX = evt.clientX - startX;
+        const deltaY = evt.clientY - startY;
+        
+        let newX = initialLeft + deltaX;
+        let newY = initialTop + deltaY;
+        
+        // Clamp to window bounds with Margin + Scrollbar safety
+        const maxX = window.innerWidth - el.offsetWidth - MARGIN_3MM - SCROLLBAR_WIDTH;
+        const maxY = window.innerHeight - el.offsetHeight - MARGIN_3MM - SCROLLBAR_WIDTH;
+        const minX = MARGIN_3MM;
+        const minY = MARGIN_3MM;
+        
+        newX = Math.max(minX, Math.min(newX, maxX));
+        newY = Math.max(minY, Math.min(newY, maxY));
+        
+        updateSettings({ 
+            ...settings, 
+            uiPositions: { 
+                ...settings.uiPositions, 
+                layers: { x: newX, y: newY } 
+            } 
+        });
+    };
+
+    const onUp = () => {
+        setDraggingId(null);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
   return (
-    <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex flex-col gap-3 z-40 bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50">
+    <div 
+        className={`absolute flex flex-col gap-3 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ left: uiPositions.layers.x, top: uiPositions.layers.y, touchAction: 'none' }}
+        onPointerDown={handleDrag}
+    >
       {LIMITS.map(limit => {
         const visible = isVisible(limit);
         const color = settings.colors[limit];
         const isTop = settings.layerOrder[settings.layerOrder.length - 1] === limit;
-        
-        // 1-Limit cannot be toggled off
         const isLocked = limit === 1;
 
         return (
           <div key={limit} className="flex items-center gap-2 group">
             {/* Visibility Toggle */}
             <button 
-              onClick={() => toggleVisibility(limit)}
+              onClick={(e) => { e.stopPropagation(); !uiUnlocked && toggleVisibility(limit); }}
               disabled={isLocked}
-              className={`w-6 h-6 flex items-center justify-center rounded text-xs transition-colors ${visible ? (isLocked ? 'text-slate-500 cursor-default opacity-50' : 'text-white') : 'text-slate-600'} hover:bg-white/10`}
-              title={isLocked ? "1-Limit is always visible" : `Toggle ${limit}-Limit Visibility`}
+              className={`w-6 h-6 flex items-center justify-center rounded text-xs transition-colors ${visible ? (isLocked ? 'text-slate-500 cursor-default opacity-50' : 'text-white') : 'text-slate-600'} hover:bg-white/10 ${uiUnlocked ? 'pointer-events-none' : ''}`}
+              onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
             >
                {visible ? (
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
@@ -72,14 +131,15 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings }) => {
             
             {/* Color/Select Layer Button */}
             <button 
-              onClick={() => bringToFront(limit)}
-              className={`w-10 h-10 rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-xs text-shadow`}
+              onClick={(e) => { e.stopPropagation(); !uiUnlocked && bringToFront(limit); }}
+              className={`w-10 h-10 rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-xs text-shadow ${uiUnlocked ? 'pointer-events-none' : ''}`}
               style={{ 
                 backgroundColor: color, 
                 borderColor: isTop ? 'white' : 'transparent',
                 boxShadow: isTop ? '0 0 10px rgba(255,255,255,0.5)' : 'none',
                 opacity: visible ? 1 : 0.2
               }}
+              onPointerDown={(e) => !uiUnlocked && e.stopPropagation()}
             >
               {limit}
             </button>

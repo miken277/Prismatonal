@@ -27,7 +27,6 @@ export interface ChordNode {
   id: string; // Coordinate key
   n: number;
   d: number;
-  // Minimal data needed to reconstruct/identify
 }
 
 export interface ChordDefinition {
@@ -36,7 +35,12 @@ export interface ChordDefinition {
   color: string;
   nodes: ChordNode[];
   visible: boolean; // Is shortcut on screen?
-  position: { x: number; y: number }; // Screen position of shortcut
+  position: { x: number; y: number }; // Relative position or legacy absolute
+}
+
+export interface XYPos {
+  x: number;
+  y: number;
 }
 
 export interface AppSettings {
@@ -67,11 +71,6 @@ export interface AppSettings {
   chordShortcutSizeScale: number; // 0.33 to 1.0 relative to main buttons
   chordsAlwaysRelatch: boolean; // If true, activating a chord re-triggers notes even if playing
   
-  // Chord Slide Settings
-  isChordSlideEnabled: boolean;
-  chordSlideTrigger: 1 | 2 | 3; // Number of fingers to trigger
-  fixLatchedChords: boolean; // If true, ignore interactions below trigger count
-
   // Visible toggle for lower limits (View only)
   hiddenLimits: number[]; 
   
@@ -116,24 +115,32 @@ export interface AppSettings {
   rainbowBrightness: number; // 0-100
   rainbowOffset: number; // 0-360 (Hue shift)
   isColoredIlluminationEnabled: boolean;
+
+  // UI Relocation
+  uiUnlocked: boolean;
+  uiPositions: {
+    volume: XYPos;
+    panic: XYPos;
+    off: XYPos;
+    center: XYPos;
+    depth: XYPos;
+    chords: XYPos;
+    layers: XYPos;
+  };
 }
 
-export interface SynthPreset {
-  id: number;
-  name: string;
-  // Osc 1
+export interface OscillatorConfig {
+  enabled: boolean;
   waveform: WaveformType;
-  // Osc 2
-  osc2Waveform: WaveformType;
-  osc2Detune: number; // Cents
-  osc2Mix: number; // 0 (Silent) to 1 (Full)
+  coarseDetune: number; // Cents -1200 to 1200
+  fineDetune: number; // Cents -50 to 50
+  gain: number; // 0 to 1 (Mix)
   
-  // Envelopes
+  // Envelope
   attack: number;
   decay: number;
   sustain: number;
   release: number;
-  gain: number;
   
   // Filter
   filterCutoff: number; // Hz
@@ -143,14 +150,26 @@ export interface SynthPreset {
   lfoRate: number; // Hz
   lfoDepth: number; // Amount 0-100
   lfoTarget: 'none' | 'pitch' | 'filter' | 'tremolo';
+}
+
+export interface SynthPreset {
+  id: number;
+  name: string;
   
-  // Effects
+  osc1: OscillatorConfig;
+  osc2: OscillatorConfig;
+  osc3: OscillatorConfig;
+  
+  // Master Gain for the preset
+  gain: number; 
+
+  // Effects (Global)
   reverbMix: number; // 0 to 1
   delayMix: number; // 0 to 1
   delayTime: number; // Seconds
   delayFeedback: number; // 0 to 0.95
 
-  // Dynamics (Compressor/Limiter)
+  // Dynamics (Compressor/Limiter) (Global)
   compressorThreshold: number; // dB (-60 to 0)
   compressorRatio: number; // 1 to 20
   compressorRelease: number; // seconds
@@ -178,6 +197,8 @@ export interface LatticeLine {
   x2: number;
   y2: number;
   limit: number;
+  sourceId: string;
+  targetId: string;
 }
 
 export interface ActiveVoice {
@@ -185,4 +206,9 @@ export interface ActiveVoice {
   nodeId?: string;
   stop: () => void;
   setDetune: (cents: number) => void;
+}
+
+export interface GenerationOrigin {
+  coords: number[];
+  octave: number;
 }

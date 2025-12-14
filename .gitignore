@@ -3,6 +3,3 @@ node_modules
 dist
 .DS_Store
 *.local
-fly.toml
-Dockerfile
-.dockerignore
