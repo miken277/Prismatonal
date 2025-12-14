@@ -152,7 +152,8 @@ export const generateLattice = (settings: AppSettings, generationOrigins: Genera
       localQueue.push({ coords: origin.coords, ratio: originFrac, relativeRatio: new Fraction(1, 1) });
       visitedLocal.add(originKey);
 
-      const MAX_LOCAL_NODES = 1500;
+      // Reduced to prevent exponential explosion at high limits
+      const MAX_LOCAL_NODES = 1000;
       let processedCount = 0;
       
       // Temporary storage for the "Base Nodes" (Prime Coords) found by this origin

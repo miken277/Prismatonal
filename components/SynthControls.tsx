@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { SynthPreset, WaveformType, OscillatorConfig } from '../types';
+import { SynthPreset, WaveformType, OscillatorConfig, ModulationRow, ModSource, ModTarget } from '../types';
 import { PRESETS } from '../constants';
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
 }
 
 const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'osc1' | 'osc2' | 'osc3' | 'fx'>('osc1');
+  const [activeTab, setActiveTab] = useState<'osc1' | 'osc2' | 'osc3' | 'matrix' | 'fx'>('osc1');
 
   if (!isOpen) return null;
 
@@ -26,6 +26,29 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
   
   const loadPreset = (p: SynthPreset) => {
       onChange({ ...p });
+  };
+
+  const addModRow = () => {
+      const newRow: ModulationRow = {
+          id: Math.random().toString(36).substr(2, 9),
+          enabled: true,
+          source: 'lfo1',
+          target: 'osc1_pitch',
+          amount: 50
+      };
+      onChange({ ...preset, modMatrix: [...(preset.modMatrix || []), newRow] });
+  };
+
+  const removeModRow = (id: string) => {
+      onChange({ ...preset, modMatrix: (preset.modMatrix || []).filter(r => r.id !== id) });
+  };
+
+  const updateModRow = (id: string, field: keyof ModulationRow, value: any) => {
+      const newMatrix = (preset.modMatrix || []).map(r => {
+          if (r.id === id) return { ...r, [field]: value };
+          return r;
+      });
+      onChange({ ...preset, modMatrix: newMatrix });
   };
 
   const renderOscillatorTab = (oscKey: 'osc1' | 'osc2' | 'osc3', label: string) => {
@@ -175,27 +198,33 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
         <div className="flex border-b border-slate-700 bg-slate-900/50">
             <button 
                 onClick={() => setActiveTab('osc1')} 
-                className={`flex-1 py-3 text-xs font-bold uppercase transition ${activeTab === 'osc1' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
+                className={`flex-1 py-3 text-[10px] font-bold uppercase transition ${activeTab === 'osc1' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
             >
                 Osc 1
             </button>
             <button 
                 onClick={() => setActiveTab('osc2')} 
-                className={`flex-1 py-3 text-xs font-bold uppercase transition ${activeTab === 'osc2' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
+                className={`flex-1 py-3 text-[10px] font-bold uppercase transition ${activeTab === 'osc2' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
             >
                 Osc 2
             </button>
             <button 
                 onClick={() => setActiveTab('osc3')} 
-                className={`flex-1 py-3 text-xs font-bold uppercase transition ${activeTab === 'osc3' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
+                className={`flex-1 py-3 text-[10px] font-bold uppercase transition ${activeTab === 'osc3' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
             >
                 Osc 3
             </button>
              <button 
-                onClick={() => setActiveTab('fx')} 
-                className={`flex-1 py-3 text-xs font-bold uppercase transition ${activeTab === 'fx' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
+                onClick={() => setActiveTab('matrix')} 
+                className={`flex-1 py-3 text-[10px] font-bold uppercase transition ${activeTab === 'matrix' ? 'text-purple-400 border-b-2 border-purple-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
             >
-                Global FX
+                Mods
+            </button>
+             <button 
+                onClick={() => setActiveTab('fx')} 
+                className={`flex-1 py-3 text-[10px] font-bold uppercase transition ${activeTab === 'fx' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+                FX
             </button>
         </div>
 
@@ -205,6 +234,86 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
             {activeTab === 'osc2' && renderOscillatorTab('osc2', 'Oscillator 2')}
             {activeTab === 'osc3' && renderOscillatorTab('osc3', 'Oscillator 3')}
             
+            {activeTab === 'matrix' && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                    <div className="flex justify-between items-center mb-2">
+                        <h3 className="text-sm font-bold text-purple-300 uppercase">Modulation Matrix</h3>
+                        <button onClick={addModRow} className="text-xs bg-purple-600 px-2 py-1 rounded text-white hover:bg-purple-500">
+                            + Add Route
+                        </button>
+                    </div>
+                    
+                    {(!preset.modMatrix || preset.modMatrix.length === 0) && (
+                        <div className="text-center py-8 text-slate-500 text-xs italic border-2 border-dashed border-slate-700 rounded-lg">
+                            No active modulations
+                        </div>
+                    )}
+
+                    {preset.modMatrix && preset.modMatrix.map((row) => (
+                        <div key={row.id} className="bg-slate-900/50 p-2 rounded border border-purple-500/30 flex flex-col gap-2">
+                            <div className="flex gap-2 items-center">
+                                <input 
+                                    type="checkbox" 
+                                    checked={row.enabled} 
+                                    onChange={(e) => updateModRow(row.id, 'enabled', e.target.checked)}
+                                    className="rounded border-slate-600 text-purple-500"
+                                />
+                                <div className="flex-1 text-[10px] font-mono text-slate-400">
+                                    {row.source.toUpperCase()} &rarr;
+                                </div>
+                                <button onClick={() => removeModRow(row.id)} className="text-slate-600 hover:text-red-400">
+                                    &times;
+                                </button>
+                            </div>
+
+                            <div className="flex gap-2">
+                                <select 
+                                    value={row.source} 
+                                    onChange={(e) => updateModRow(row.id, 'source', e.target.value)}
+                                    className="flex-1 bg-slate-700 text-[10px] rounded p-1 border border-slate-600"
+                                >
+                                    <option value="lfo1">LFO 1</option>
+                                    <option value="lfo2">LFO 2</option>
+                                    <option value="lfo3">LFO 3</option>
+                                    <option value="env1">Env 1</option>
+                                    <option value="env2">Env 2</option>
+                                    <option value="env3">Env 3</option>
+                                </select>
+
+                                <select 
+                                    value={row.target} 
+                                    onChange={(e) => updateModRow(row.id, 'target', e.target.value)}
+                                    className="flex-1 bg-slate-700 text-[10px] rounded p-1 border border-slate-600"
+                                >
+                                    <option value="osc1_pitch">Osc 1 Pitch</option>
+                                    <option value="osc1_cutoff">Osc 1 Cutoff</option>
+                                    <option value="osc1_gain">Osc 1 Gain</option>
+                                    <option value="osc2_pitch">Osc 2 Pitch</option>
+                                    <option value="osc2_cutoff">Osc 2 Cutoff</option>
+                                    <option value="osc2_gain">Osc 2 Gain</option>
+                                    <option value="osc3_pitch">Osc 3 Pitch</option>
+                                    <option value="osc3_cutoff">Osc 3 Cutoff</option>
+                                    <option value="osc3_gain">Osc 3 Gain</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <div className="flex justify-between text-[10px] mb-1 text-slate-400">
+                                    <span>Amount</span>
+                                    <span>{row.amount > 0 ? '+' : ''}{row.amount}%</span>
+                                </div>
+                                <input 
+                                    type="range" min="-100" max="100" step="1" 
+                                    value={row.amount}
+                                    onChange={(e) => updateModRow(row.id, 'amount', parseInt(e.target.value))}
+                                    className="w-full h-1 bg-purple-500 rounded appearance-none" 
+                                />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             {activeTab === 'fx' && (
                  <div className="space-y-6 animate-in fade-in duration-300">
                     <div>

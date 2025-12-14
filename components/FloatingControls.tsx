@@ -10,6 +10,7 @@ interface Props {
   onOff: () => void;
   onCenter: () => void;
   onIncreaseDepth: () => void;
+  onDecreaseDepth: () => void;
   onAddChord: () => void;
   toggleChord: (id: string) => void;
   activeChordIds: string[];
@@ -24,7 +25,7 @@ interface Props {
 }
 
 const FloatingControls: React.FC<Props> = ({ 
-  volume, setVolume, onPanic, onOff, onCenter, onIncreaseDepth, onAddChord, toggleChord,
+  volume, setVolume, onPanic, onOff, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
   draggingId, setDraggingId
@@ -42,8 +43,8 @@ const FloatingControls: React.FC<Props> = ({
     const startY = e.clientY;
     
     // Initial position relative to window
-    const initialLeft = uiPositions[key].x;
-    const initialTop = uiPositions[key].y;
+    const initialLeft = uiPositions[key as keyof typeof uiPositions].x;
+    const initialTop = uiPositions[key as keyof typeof uiPositions].y;
 
     el.setPointerCapture(e.pointerId);
     setDraggingId(key);
@@ -81,7 +82,6 @@ const FloatingControls: React.FC<Props> = ({
   // Base size reference for buttons
   const baseSize = 48; // 12 * 4px (w-12)
   const chordSize = baseSize * chordShortcutSizeScale;
-  const GAP = 10; // Spacing for chord grid
 
   // Common styles for draggable elements
   const draggableStyle = (key: string) => ({
@@ -89,6 +89,16 @@ const FloatingControls: React.FC<Props> = ({
       top: uiPositions[key as keyof typeof uiPositions].y,
       touchAction: 'none' as React.CSSProperties['touchAction'], // Crucial for smooth drag
   });
+  
+  // Helper to handle button press logic (Drag if unlocked, Action if locked)
+  const handleButtonPress = (e: React.PointerEvent, key: keyof AppSettings['uiPositions'], action: () => void) => {
+      e.stopPropagation(); // Stop propagation to canvas
+      if (uiUnlocked) {
+          handleDrag(e, key);
+      } else {
+          action();
+      }
+  };
 
   return (
     <>
@@ -109,22 +119,20 @@ const FloatingControls: React.FC<Props> = ({
         />
       </div>
 
-      {/* Off Button (Yellow, Smooth Release) */}
+      {/* Off Button */}
       <button
         className={`absolute w-20 h-20 rounded-full bg-yellow-600/20 border-2 border-yellow-500 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-yellow-600/40 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={draggableStyle('off')}
-        onClick={!uiUnlocked ? onOff : undefined}
-        onPointerDown={(e) => handleDrag(e, 'off')}
+        onPointerDown={(e) => handleButtonPress(e, 'off', onOff)}
       >
         OFF
       </button>
 
-      {/* Panic Button (Red, Hard Stop) */}
+      {/* Panic Button */}
       <button
         className={`absolute w-20 h-20 rounded-full bg-red-600/20 border-2 border-red-500 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-600/40 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={draggableStyle('panic')}
-        onClick={!uiUnlocked ? onPanic : undefined}
-        onPointerDown={(e) => handleDrag(e, 'panic')}
+        onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)}
       >
         PANIC
       </button>
@@ -133,8 +141,7 @@ const FloatingControls: React.FC<Props> = ({
       <button
         className={`absolute w-12 h-12 rounded bg-yellow-600/20 border-2 border-yellow-500 flex items-center justify-center text-yellow-500 font-bold backdrop-blur hover:bg-yellow-600/40 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={draggableStyle('center')}
-        onClick={!uiUnlocked ? onCenter : undefined}
-        onPointerDown={(e) => handleDrag(e, 'center')}
+        onPointerDown={(e) => handleButtonPress(e, 'center', onCenter)}
         title="Center Display"
       >
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
@@ -147,13 +154,29 @@ const FloatingControls: React.FC<Props> = ({
         <button
           className={`absolute w-12 h-12 rounded bg-blue-600/20 border-2 border-blue-500 flex items-center justify-center text-blue-500 font-bold backdrop-blur hover:bg-blue-600/40 active:bg-blue-600 active:text-white transition-all shadow-[0_0_15px_rgba(59,130,246,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
           style={draggableStyle('depth')}
-          onClick={!uiUnlocked ? onIncreaseDepth : undefined}
-          onPointerDown={(e) => handleDrag(e, 'depth')}
+          onPointerDown={(e) => handleButtonPress(e, 'depth', onIncreaseDepth)}
           title="Increase Depth from Selection"
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
             <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" fill="none" />
+          </svg>
+        </button>
+      )}
+
+      {/* Decrease Depth Button */}
+      {showIncreaseDepthButton && (
+        <button
+          className={`absolute w-12 h-12 rounded bg-green-600/20 border-2 border-green-500 flex items-center justify-center text-green-500 font-bold backdrop-blur hover:bg-green-600/40 active:bg-green-600 active:text-white transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+          style={draggableStyle('decreaseDepth')}
+          onPointerDown={(e) => handleButtonPress(e, 'decreaseDepth', onDecreaseDepth)}
+          title="Undo Last Depth Increase"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4 L10 10 M10 10 L10 6 M10 10 L6 10" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20 4 L14 10 M14 10 L14 6 M14 10 L18 10" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 20 L10 14 M10 14 L10 18 M10 14 L6 14" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20 20 L14 14 M14 14 L14 18 M14 14 L18 14" />
           </svg>
         </button>
       )}
@@ -168,9 +191,9 @@ const FloatingControls: React.FC<Props> = ({
           <button
             className={`rounded border-2 border-slate-500 border-dashed flex items-center justify-center text-slate-500 font-bold backdrop-blur hover:bg-slate-700/40 hover:text-white hover:border-white transition-all select-none ${uiUnlocked ? 'pointer-events-none' : ''}`}
             style={{ width: chordSize, height: chordSize }}
+            onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
             onClick={!uiUnlocked ? onAddChord : undefined}
             title="Store currently latched notes as a Chord"
-            onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-1/2 h-1/2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -193,6 +216,7 @@ const FloatingControls: React.FC<Props> = ({
                         color: isActive ? '#fff' : chord.color,
                         boxShadow: isActive ? `0 0 10px ${chord.color}` : 'none'
                     }}
+                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()}
                     onClick={() => !uiUnlocked && toggleChord(chord.id)}
                     title={`Chord ${chord.id}: ${chord.label}`}
                 >

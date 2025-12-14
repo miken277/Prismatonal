@@ -5,13 +5,14 @@ import SettingsModal from './components/SettingsModal';
 import SynthControls from './components/SynthControls';
 import FloatingControls from './components/FloatingControls';
 import LimitLayerControls from './components/LimitLayerControls';
-import AudioEngine from './services/AudioEngine';
-import { AppSettings, SynthPreset, ChordDefinition, LatticeNode, XYPos } from './types';
-import { DEFAULT_COLORS, DEFAULT_SETTINGS, DEFAULT_PRESET, MARGIN_3MM, SCROLLBAR_WIDTH } from './constants';
+import { audioEngine } from './services/AudioEngine'; // Import singleton
+import { useStore } from './services/Store';
+import { AppSettings, ChordDefinition, XYPos } from './types';
+import { MARGIN_3MM, SCROLLBAR_WIDTH } from './constants';
 
 const App: React.FC = () => {
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [preset, setPreset] = useState<SynthPreset>(DEFAULT_PRESET);
+  const { settings, preset, updateSettings, setPreset } = useStore();
+
   const [masterVolume, setMasterVolume] = useState(0.8);
   const [activeChordIds, setActiveChordIds] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -20,9 +21,71 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSynthOpen, setIsSynthOpen] = useState(false);
 
-  // Audio Engine Singleton Ref
-  const engineRef = useRef<AudioEngine>(new AudioEngine(DEFAULT_PRESET));
   const diamondRef = useRef<TonalityDiamondHandle>(null);
+
+  // Audio Warmup: Pre-initialize audio context on any user interaction
+  useEffect(() => {
+    const warmup = () => {
+        audioEngine.init();
+        
+        // Remove listeners once warmed up
+        window.removeEventListener('pointerdown', warmup);
+        window.removeEventListener('keydown', warmup);
+        window.removeEventListener('touchstart', warmup);
+    };
+
+    window.addEventListener('pointerdown', warmup);
+    window.addEventListener('keydown', warmup);
+    window.addEventListener('touchstart', warmup);
+
+    return () => {
+        window.removeEventListener('pointerdown', warmup);
+        window.removeEventListener('keydown', warmup);
+        window.removeEventListener('touchstart', warmup);
+    };
+  }, []);
+
+  // Sanitize UI Positions on Load to prevent off-screen elements
+  useEffect(() => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      
+      updateSettings(prev => {
+          const p = { ...prev.uiPositions };
+          let changed = false;
+          
+          // Helper to check and clamp
+          const checkAndFix = (key: keyof typeof p, width: number, height: number) => {
+              let x = p[key].x;
+              let y = p[key].y;
+              
+              const maxX = w - width - MARGIN_3MM;
+              const maxY = h - height - MARGIN_3MM;
+              const minX = MARGIN_3MM;
+              const minY = MARGIN_3MM;
+
+              // Clamp if out of bounds
+              if (x > maxX) { x = maxX; changed = true; }
+              if (x < minX) { x = minX; changed = true; }
+              if (y > maxY) { y = maxY; changed = true; }
+              if (y < minY) { y = minY; changed = true; }
+              
+              p[key] = { x, y };
+          };
+
+          // Estimates for element sizes (width, height)
+          checkAndFix('volume', 160, 40);
+          checkAndFix('panic', 80, 80);
+          checkAndFix('off', 80, 80);
+          checkAndFix('center', 48, 48);
+          checkAndFix('depth', 48, 48);
+          checkAndFix('decreaseDepth', 48, 48);
+          checkAndFix('chords', 300, 48); // Chords container can be wide
+          checkAndFix('layers', 90, 310);
+
+          return changed ? { ...prev, uiPositions: p } : prev;
+      });
+  }, []); // Run once on mount
 
   // Resize Handler to snap UI elements to their anchors
   const windowSize = useRef({ w: window.innerWidth, h: window.innerHeight });
@@ -34,25 +97,23 @@ const App: React.FC = () => {
       const oldW = windowSize.current.w;
       const oldH = windowSize.current.h;
 
-      setSettings(prev => {
+      updateSettings(prev => {
         const p = prev.uiPositions;
         const newPos = { ...p };
 
         // 1. Panic (Anchor: Bottom-Right)
-        // Maintains distance from Right and Bottom edges
         newPos.panic = {
             x: newW - (oldW - p.panic.x),
             y: newH - (oldH - p.panic.y)
         };
 
-        // 2. Off (Anchor: Bottom-Right, same as panic logic)
+        // 2. Off (Anchor: Bottom-Right)
         newPos.off = {
             x: newW - (oldW - p.off.x),
             y: newH - (oldH - p.off.y)
         };
 
         // 3. Volume (Anchor: Top-Center)
-        // Maintains distance from Center X, fixed Top Y
         const volOffsetFromCenter = p.volume.x - (oldW / 2);
         newPos.volume = {
             x: (newW / 2) + volOffsetFromCenter,
@@ -60,8 +121,7 @@ const App: React.FC = () => {
         };
 
         // 4. Center/Depth/Chords (Anchor: Bottom-Left)
-        // Maintains distance from Left and Bottom edges
-        const updateBottomLeft = (key: 'center' | 'depth' | 'chords') => {
+        const updateBottomLeft = (key: 'center' | 'depth' | 'decreaseDepth' | 'chords') => {
              newPos[key] = {
                  x: p[key].x, 
                  y: newH - (oldH - p[key].y)
@@ -69,11 +129,10 @@ const App: React.FC = () => {
         };
         updateBottomLeft('center');
         updateBottomLeft('depth');
+        updateBottomLeft('decreaseDepth');
         updateBottomLeft('chords');
 
         // 5. Layers (Anchor: Right-Center)
-        // Maintains distance from Right edge.
-        // Adjusts Y proportionally to maintain relative vertical position.
         newPos.layers = {
             x: newW - (oldW - p.layers.x),
             y: p.layers.y * (newH / oldH)
@@ -90,35 +149,28 @@ const App: React.FC = () => {
 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [updateSettings]);
 
   // Init Engine updates
   useEffect(() => {
-    engineRef.current.setMasterVolume(masterVolume);
+    audioEngine.setMasterVolume(masterVolume);
   }, [masterVolume]);
 
-  useEffect(() => {
-    engineRef.current.setPreset(preset);
-  }, [preset]);
-
   const handleLimitInteraction = (limit: number) => {
-    // Move touched limit to the end of the array (front)
-    // Only if it's not already at the front
     if (settings.layerOrder[settings.layerOrder.length - 1] !== limit) {
       const newOrder = settings.layerOrder.filter(l => l !== limit);
       newOrder.push(limit);
-      setSettings(prev => ({ ...prev, layerOrder: newOrder }));
+      updateSettings(prev => ({ ...prev, layerOrder: newOrder }));
     }
   };
 
   const handlePanic = () => {
-    engineRef.current.stopAll(); // Hard stop active voices
-    diamondRef.current?.clearLatches(); // Clear visual latches
-    setActiveChordIds([]); // Reset chords
+    audioEngine.stopAll(); 
+    diamondRef.current?.clearLatches(); 
+    setActiveChordIds([]); 
   };
 
   const handleOff = () => {
-    // Soft release: Clears latches, which triggers release envelopes via TonalityDiamond effect
     diamondRef.current?.clearLatches(); 
     setActiveChordIds([]);
   };
@@ -131,21 +183,22 @@ const App: React.FC = () => {
       diamondRef.current?.increaseDepth();
   };
 
+  const handleDecreaseDepth = () => {
+      diamondRef.current?.decreaseDepth();
+  };
+
   const handleAddChord = () => {
       if (diamondRef.current) {
           const latchedNodes = diamondRef.current.getLatchedNodes();
           if (latchedNodes.length === 0) return;
 
-          // Find first empty slot
           let slotIndex = settings.savedChords.findIndex(c => c.nodes.length === 0);
-          
           if (slotIndex === -1) {
                slotIndex = settings.savedChords.findIndex(c => !c.visible);
           }
           
           if (slotIndex !== -1) {
               const newChords = [...settings.savedChords];
-              
               const simplifiedNodes = latchedNodes.map(n => ({
                   id: n.id,
                   n: n.n,
@@ -159,7 +212,7 @@ const App: React.FC = () => {
                   position: { x: 0, y: 0 } 
               };
 
-              setSettings(prev => ({ ...prev, savedChords: newChords }));
+              updateSettings(prev => ({ ...prev, savedChords: newChords }));
           }
       }
   };
@@ -175,7 +228,7 @@ const App: React.FC = () => {
   };
 
   const handleUiPositionUpdate = (key: keyof AppSettings['uiPositions'], pos: XYPos) => {
-      setSettings(prev => ({
+      updateSettings(prev => ({
           ...prev,
           uiPositions: {
               ...prev.uiPositions,
@@ -187,7 +240,7 @@ const App: React.FC = () => {
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
       
-      {/* Top Bar - Fixed Position, Non-Moveable */}
+      {/* Top Bar - Fixed Position */}
       <div 
         className="absolute w-full flex justify-between items-center z-40 pointer-events-none"
         style={{ 
@@ -217,7 +270,7 @@ const App: React.FC = () => {
       <TonalityDiamond 
         ref={diamondRef}
         settings={settings} 
-        audioEngine={engineRef.current} 
+        audioEngine={audioEngine} 
         onLimitInteraction={handleLimitInteraction}
         activeChordIds={activeChordIds}
         uiUnlocked={settings.uiUnlocked}
@@ -231,6 +284,7 @@ const App: React.FC = () => {
         onOff={handleOff}
         onCenter={handleCenter}
         onIncreaseDepth={handleIncreaseDepth}
+        onDecreaseDepth={handleDecreaseDepth}
         onAddChord={handleAddChord}
         toggleChord={toggleChord}
         activeChordIds={activeChordIds}
@@ -246,7 +300,7 @@ const App: React.FC = () => {
 
       <LimitLayerControls 
         settings={settings}
-        updateSettings={setSettings}
+        updateSettings={updateSettings}
         draggingId={draggingId}
         setDraggingId={setDraggingId}
       />
@@ -256,7 +310,7 @@ const App: React.FC = () => {
         isOpen={isSettingsOpen} 
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
-        updateSettings={setSettings}
+        updateSettings={updateSettings}
       />
 
       <SynthControls 

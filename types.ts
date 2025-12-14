@@ -23,6 +23,15 @@ export interface LimitColorMap {
   [key: number]: string;
 }
 
+export interface LimitVisualSetting {
+    size: number;   // 0.1 to 2.0 (Multiplier of base size)
+    opacity: number; // 0.0 to 1.0
+}
+
+export interface LimitVisualsMap {
+    [key: number]: LimitVisualSetting;
+}
+
 export interface ChordNode {
   id: string; // Coordinate key
   n: number;
@@ -97,12 +106,21 @@ export interface AppSettings {
   latchShellLimit: number; // 1 = Octaves, 2 = Fifths, etc.
   latchedZoomScale: number; // Scale factor for active nodes (1.0 to 2.0)
 
-  buttonSizeScale: number; // 0.5 to 2.0
+  // Appearance
+  buttonSizeScale: number; // Global Scalar 0.5 to 2.0
   buttonSpacingScale: number; // 0.5 to 5.0
   latticeAspectRatio: number; // 0.5 (Stretched X) to 2.0 (Squished X)
   canvasSize: number; // Width/Height of the scrollable area in pixels (e.g. 3000, 5000)
   buttonShape: ButtonShape;
   colors: LimitColorMap;
+  
+  // Per-Limit Visuals (Size/Opacity)
+  limitVisuals: LimitVisualsMap;
+  
+  // Text Appearance
+  nodeTextSizeScale: number; // 0.5 to 2.0
+  showFractionBar: boolean;
+
   isPitchBendEnabled: boolean;
   isPitchSnapEnabled: boolean;
   polyphony: number;
@@ -116,6 +134,11 @@ export interface AppSettings {
   rainbowOffset: number; // 0-360 (Hue shift)
   isColoredIlluminationEnabled: boolean;
 
+  // MIDI Settings
+  midiEnabled: boolean;
+  midiOutputId: string | null;
+  midiPitchBendRange: number; // Semitones (typically 2, 12, 24, or 48)
+
   // UI Relocation
   uiUnlocked: boolean;
   uiPositions: {
@@ -124,6 +147,7 @@ export interface AppSettings {
     off: XYPos;
     center: XYPos;
     depth: XYPos;
+    decreaseDepth: XYPos;
     chords: XYPos;
     layers: XYPos;
   };
@@ -152,6 +176,20 @@ export interface OscillatorConfig {
   lfoTarget: 'none' | 'pitch' | 'filter' | 'tremolo';
 }
 
+export type ModSource = 'lfo1' | 'lfo2' | 'lfo3' | 'env1' | 'env2' | 'env3';
+export type ModTarget = 
+    'osc1_pitch' | 'osc1_gain' | 'osc1_cutoff' | 'osc1_res' |
+    'osc2_pitch' | 'osc2_gain' | 'osc2_cutoff' | 'osc2_res' |
+    'osc3_pitch' | 'osc3_gain' | 'osc3_cutoff' | 'osc3_res';
+
+export interface ModulationRow {
+    id: string;
+    enabled: boolean;
+    source: ModSource;
+    target: ModTarget;
+    amount: number; // -100 to 100
+}
+
 export interface SynthPreset {
   id: number;
   name: string;
@@ -160,6 +198,9 @@ export interface SynthPreset {
   osc2: OscillatorConfig;
   osc3: OscillatorConfig;
   
+  // Modulation Matrix
+  modMatrix: ModulationRow[];
+
   // Master Gain for the preset
   gain: number; 
 

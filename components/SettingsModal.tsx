@@ -1,7 +1,8 @@
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { AppSettings, ButtonShape, ChordDefinition } from '../types';
 import { DEFAULT_COLORS } from '../constants';
+import { midiService, MidiDevice } from '../services/MidiService';
 
 interface Props {
   isOpen: boolean;
@@ -11,7 +12,19 @@ interface Props {
 }
 
 const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'behavior' | 'color'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'behavior' | 'color' | 'midi'>('general');
+  const [midiDevices, setMidiDevices] = useState<MidiDevice[]>([]);
+
+  // Init MIDI list when opening MIDI tab
+  useEffect(() => {
+    if (isOpen && activeTab === 'midi') {
+        midiService.init().then(success => {
+            if (success) {
+                setMidiDevices(midiService.getOutputs());
+            }
+        });
+    }
+  }, [isOpen, activeTab]);
 
   if (!isOpen) return null;
 
@@ -44,6 +57,17 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
       ...settings,
       colors: { ...settings.colors, [limit]: color }
     });
+  };
+  
+  const handleLimitVisualChange = (limit: number, key: 'size' | 'opacity', val: number) => {
+      const current = settings.limitVisuals?.[limit] || { size: 1, opacity: 1 };
+      updateSettings({
+          ...settings,
+          limitVisuals: {
+              ...settings.limitVisuals,
+              [limit]: { ...current, [key]: val }
+          }
+      });
   };
   
   const updateChord = (index: number, field: keyof ChordDefinition, value: any) => {
@@ -93,8 +117,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
      updateSettings({ ...settings, colors: newColors });
   };
 
-  const canvasSizes = Array.from({length: 15}, (_, i) => 1000 + i * 500);
-
   return (
     <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center backdrop-blur-sm">
       <div className="bg-slate-800 rounded-xl w-[95%] max-w-4xl max-h-[90vh] overflow-hidden text-slate-200 shadow-2xl border border-slate-700 flex flex-col">
@@ -122,7 +144,13 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
              onClick={() => setActiveTab('color')}
              className={`flex-1 py-3 font-semibold transition ${activeTab === 'color' ? 'text-pink-400 border-b-2 border-pink-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
            >
-             Color
+             Visuals & Color
+           </button>
+           <button 
+             onClick={() => setActiveTab('midi')}
+             className={`flex-1 py-3 font-semibold transition ${activeTab === 'midi' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
+           >
+             MIDI
            </button>
         </div>
 
@@ -145,6 +173,19 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                   className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                               />
                               <span className="text-sm font-mono min-w-[5ch]">{settings.baseFrequency}Hz</span>
+                          </div>
+                      </div>
+                      
+                      <div>
+                          <label className="block text-sm font-semibold mb-2">Canvas Size (Scrollable Area)</label>
+                          <div className="flex items-center gap-4">
+                              <input 
+                                  type="range" min="1000" max="10000" step="500" 
+                                  value={settings.canvasSize}
+                                  onChange={(e) => handleChange('canvasSize', parseInt(e.target.value))}
+                                  className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                              />
+                              <span className="text-sm font-mono min-w-[5ch]">{settings.canvasSize}px</span>
                           </div>
                       </div>
 
@@ -183,20 +224,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                               </div>
                           ))}
                       </div>
-
-                      <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
-                          <label className="block text-sm font-semibold text-slate-300">Increase Depth</label>
-                          <div className="space-y-2">
-                             <label className="flex items-center space-x-2">
-                                <input type="checkbox" checked={settings.showIncreaseDepthButton} onChange={(e) => handleChange('showIncreaseDepthButton', e.target.checked)} className="rounded border-slate-600 bg-slate-700" />
-                                <span className="text-xs text-slate-300">Show Increase Depth Button</span>
-                             </label>
-                             <label className="flex items-center space-x-2">
-                                <input type="checkbox" checked={settings.centerResetsDepth} onChange={(e) => handleChange('centerResetsDepth', e.target.checked)} className="rounded border-slate-600 bg-slate-700" />
-                                <span className="text-xs text-slate-300">Center Display resets depth</span>
-                             </label>
-                          </div>
-                      </div>
                   </div>
 
                   <div className="space-y-6">
@@ -220,24 +247,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                        </div>
 
                       <div>
-                          <label className="block text-sm font-semibold mb-2">
-                            Lattice X-Stretch: {(settings.latticeAspectRatio < 1.0 ? 'Wide' : (settings.latticeAspectRatio > 1.0 ? 'Narrow' : 'Normal'))} ({settings.latticeAspectRatio})
-                          </label>
-                          <input 
-                              type="range" min="0.5" max="2.0" step="0.1" 
-                              value={settings.latticeAspectRatio}
-                              onChange={(e) => handleChange('latticeAspectRatio', parseFloat(e.target.value))}
-                              className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                          />
-                          <div className="flex justify-between text-[10px] text-slate-500 px-1 mt-1">
-                            <span>Wide (0.5)</span>
-                            <span>Normal (1.0)</span>
-                            <span>Narrow (2.0)</span>
-                          </div>
-                      </div>
-
-                      <div>
-                          <label className="block text-sm font-semibold mb-2">Button Spacing ({settings.buttonSpacingScale.toFixed(1)}x)</label>
+                          <label className="block text-sm font-semibold mb-2">Global Button Spacing ({settings.buttonSpacingScale.toFixed(1)}x)</label>
                           <input 
                               type="range" min="0.5" max="5.0" step="0.1" 
                               value={settings.buttonSpacingScale}
@@ -246,7 +256,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                           />
                       </div>
                       <div>
-                          <label className="block text-sm mb-1">Button Size ({settings.buttonSizeScale.toFixed(1)}x)</label>
+                          <label className="block text-sm mb-1">Global Button Size ({settings.buttonSizeScale.toFixed(1)}x)</label>
                           <input 
                               type="range" min="0.5" max="2.0" step="0.1" 
                               value={settings.buttonSizeScale}
@@ -254,6 +264,34 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                               className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                           />
                       </div>
+                      
+                      <div className="bg-slate-900/30 p-3 rounded border border-slate-700/50">
+                          <label className="block text-xs font-bold text-slate-400 mb-2 uppercase">Node Text</label>
+                          <div className="space-y-3">
+                              <div>
+                                  <label className="flex justify-between text-xs mb-1">
+                                      <span>Text Size</span>
+                                      <span>{settings.nodeTextSizeScale.toFixed(2)}x</span>
+                                  </label>
+                                  <input 
+                                      type="range" min="0.5" max="2.0" step="0.05" 
+                                      value={settings.nodeTextSizeScale}
+                                      onChange={(e) => handleChange('nodeTextSizeScale', parseFloat(e.target.value))}
+                                      className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
+                                  />
+                              </div>
+                              <label className="flex items-center space-x-2 cursor-pointer">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={settings.showFractionBar} 
+                                    onChange={(e) => handleChange('showFractionBar', e.target.checked)}
+                                    className="rounded border-slate-600 bg-slate-700"
+                                  />
+                                  <span className="text-xs text-slate-300">Show Fraction Bar</span>
+                              </label>
+                          </div>
+                      </div>
+
                        <div>
                            <label className="block text-sm mb-1">Button Shape</label>
                            <div className="flex gap-2">
@@ -267,18 +305,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                              >Diamond</button>
                            </div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-semibold mb-2">Canvas Size</label>
-                        <select 
-                            value={settings.canvasSize}
-                            onChange={(e) => handleChange('canvasSize', parseInt(e.target.value))}
-                            className="w-full bg-slate-700 border border-slate-600 rounded p-2 text-white"
-                        >
-                            {canvasSizes.map(size => (
-                                <option key={size} value={size}>{size}px</option>
-                            ))}
-                        </select>
-                    </div>
                   </div>
               </div>
             )}
@@ -349,16 +375,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                             <span className="font-semibold text-indigo-300">Voice Leading Lines</span>
                         </label>
                         <div className={`space-y-4 pl-4 border-l-2 border-slate-700 transition-opacity ${settings.isVoiceLeadingEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
-                            <div>
-                                <label className="block text-xs mb-1 text-slate-400">Falloff Strength</label>
-                                <input 
-                                    type="range" min="0.1" max="1.0" step="0.05" 
-                                    value={settings.voiceLeadingStrength}
-                                    onChange={(e) => handleChange('voiceLeadingStrength', parseFloat(e.target.value))}
-                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                                />
-                            </div>
-                            
                             <div>
                                 <label className="flex items-center space-x-2 mb-2">
                                    <input type="checkbox" checked={settings.isVoiceLeadingAnimationEnabled} onChange={(e) => handleChange('isVoiceLeadingAnimationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600" />
@@ -472,22 +488,53 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
             {activeTab === 'color' && (
                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-300">
                   <div className="space-y-6">
-                      <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Limit Colors</h3>
-                      <div className="space-y-3">
-                        {[1, 3, 5, 7, 11, 13].map(limit => (
-                           <div key={limit} className="flex items-center justify-between bg-slate-900/40 p-2 rounded">
-                             <span className="text-sm font-bold w-20">{limit}-Limit</span>
-                             <div className="flex items-center gap-3">
-                               <input 
-                                 type="color" 
-                                 value={settings.colors[limit]} 
-                                 onChange={(e) => handleColorChange(limit, e.target.value)}
-                                 className="w-8 h-8 rounded cursor-pointer bg-transparent border-none"
-                               />
-                               <span className="text-xs font-mono text-slate-500">{settings.colors[limit]}</span>
-                             </div>
-                           </div>
-                        ))}
+                      <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Limit Appearance</h3>
+                      <p className="text-[10px] text-slate-400">Customize the visual style of each prime limit layer.</p>
+                      
+                      <div className="space-y-4">
+                        {[1, 3, 5, 7, 11, 13].map(limit => {
+                           const currentVis = settings.limitVisuals?.[limit] || { size: 1, opacity: 1 };
+                           return (
+                               <div key={limit} className="bg-slate-900/40 p-3 rounded flex flex-col gap-2">
+                                 <div className="flex justify-between items-center">
+                                     <div className="flex items-center gap-3">
+                                         <input 
+                                           type="color" 
+                                           value={settings.colors[limit]} 
+                                           onChange={(e) => handleColorChange(limit, e.target.value)}
+                                           className="w-6 h-6 rounded cursor-pointer bg-transparent border-none"
+                                         />
+                                         <span className="text-sm font-bold">{limit}-Limit</span>
+                                     </div>
+                                 </div>
+                                 
+                                 <div className="grid grid-cols-2 gap-4">
+                                     <div>
+                                         <label className="flex justify-between text-xs text-slate-400 mb-1">
+                                             <span>Size</span> <span>{currentVis.size.toFixed(2)}x</span>
+                                         </label>
+                                         <input 
+                                             type="range" min="0.1" max="1.5" step="0.05"
+                                             value={currentVis.size}
+                                             onChange={(e) => handleLimitVisualChange(limit, 'size', parseFloat(e.target.value))}
+                                             className="w-full h-1 bg-slate-600 rounded appearance-none"
+                                         />
+                                     </div>
+                                     <div>
+                                         <label className="flex justify-between text-xs text-slate-400 mb-1">
+                                             <span>Opacity</span> <span>{(currentVis.opacity * 100).toFixed(0)}%</span>
+                                         </label>
+                                         <input 
+                                             type="range" min="0.0" max="1.0" step="0.05"
+                                             value={currentVis.opacity}
+                                             onChange={(e) => handleLimitVisualChange(limit, 'opacity', parseFloat(e.target.value))}
+                                             className="w-full h-1 bg-slate-600 rounded appearance-none"
+                                         />
+                                     </div>
+                                 </div>
+                               </div>
+                           );
+                        })}
                       </div>
                   </div>
 
@@ -571,6 +618,85 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                   </div>
                </div>
             )}
+
+            {/* --- MIDI Tab --- */}
+            {activeTab === 'midi' && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                    <div className="space-y-6">
+                        <h3 className="font-semibold text-green-400 border-b border-slate-700 pb-1">MIDI Configuration</h3>
+                        
+                        <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700 space-y-4">
+                            <label className="flex items-center space-x-3 cursor-pointer">
+                                <input 
+                                    type="checkbox" 
+                                    checked={settings.midiEnabled} 
+                                    onChange={(e) => handleChange('midiEnabled', e.target.checked)} 
+                                    className="w-6 h-6 rounded border-slate-600 text-green-500 focus:ring-green-500" 
+                                />
+                                <div>
+                                    <span className={`font-bold block ${settings.midiEnabled ? 'text-green-400' : 'text-slate-300'}`}>
+                                        Enable MIDI Output
+                                    </span>
+                                    <span className="text-xs text-slate-400">Send notes to external synths/DAW</span>
+                                </div>
+                            </label>
+
+                            <div className={`${settings.midiEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'} transition-opacity space-y-4`}>
+                                <div>
+                                    <label className="block text-sm font-semibold mb-2">Output Device</label>
+                                    <select 
+                                        value={settings.midiOutputId || ''}
+                                        onChange={(e) => {
+                                            const id = e.target.value || null;
+                                            handleChange('midiOutputId', id);
+                                            midiService.setOutput(id);
+                                        }}
+                                        className="w-full bg-slate-700 border border-slate-600 rounded p-2 text-white"
+                                    >
+                                        <option value="">Select MIDI Output...</option>
+                                        {midiDevices.map(device => (
+                                            <option key={device.id} value={device.id}>{device.name}</option>
+                                        ))}
+                                    </select>
+                                    {midiDevices.length === 0 && (
+                                        <p className="text-[10px] text-orange-400 mt-1">No MIDI devices found. Check connection or browser permissions.</p>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold mb-2">Pitch Bend Range (+/- Semitones)</label>
+                                    <p className="text-[10px] text-slate-400 mb-2">
+                                        Must match the setting on your external synth for accurate microtonality.
+                                        MPE Synths usually default to 48 or 24.
+                                    </p>
+                                    <div className="flex gap-2">
+                                        {[2, 12, 24, 48].map(range => (
+                                            <button 
+                                                key={range}
+                                                onClick={() => handleChange('midiPitchBendRange', range)}
+                                                className={`px-3 py-1 rounded text-xs font-bold border ${settings.midiPitchBendRange === range ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}
+                                            >
+                                                {range}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-blue-900/20 rounded-lg border border-blue-700/30">
+                             <h4 className="text-sm font-bold text-blue-300 mb-2">How it works (MPE Style)</h4>
+                             <p className="text-xs text-slate-300 leading-relaxed">
+                                PrismaTonal rotates through MIDI Channels 1-16 for every new note trigger. 
+                                This allows each touch to have its own independent Pitch Bend message, enabling true polyphonic microtonality.
+                                <br/><br/>
+                                Ensure your external synth is in <strong>MPE Mode</strong> or set to <strong>Multi-Channel</strong> mode with the same patch loaded on all channels.
+                             </p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
       </div>
     </div>
