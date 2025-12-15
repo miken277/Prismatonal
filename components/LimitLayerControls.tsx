@@ -22,10 +22,7 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
   };
 
   const toggleVisibility = (limit: number) => {
-    // Prevent hiding 1-Limit
     if (limit === 1) return;
-
-    // Toggle 'hiddenLimits' which affects strict filtering
     const isHidden = settings.hiddenLimits.includes(limit);
     let newHidden = [...settings.hiddenLimits];
     if (isHidden) {
@@ -45,15 +42,12 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
   // Drag Handler
   const handleDrag = (e: React.PointerEvent) => {
     if (!uiUnlocked) return;
-    
-    // Lock check
     if (draggingId !== null && draggingId !== 'layers') return;
 
     const el = e.currentTarget as HTMLElement;
     const startX = e.clientX;
     const startY = e.clientY;
     
-    // Initial position
     const initialLeft = uiPositions.layers.x;
     const initialTop = uiPositions.layers.y;
 
@@ -67,7 +61,6 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
         let newX = initialLeft + deltaX;
         let newY = initialTop + deltaY;
         
-        // Clamp to window bounds with Margin + Scrollbar safety
         const maxX = window.innerWidth - el.offsetWidth - MARGIN_3MM - SCROLLBAR_WIDTH;
         const maxY = window.innerHeight - el.offsetHeight - MARGIN_3MM - SCROLLBAR_WIDTH;
         const minX = MARGIN_3MM;
@@ -95,9 +88,11 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
     window.addEventListener('pointerup', onUp);
   };
 
+  const glassPanelClass = `bg-slate-800/80 border border-slate-600/50 shadow-xl rounded-2xl transition-all ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50 hover:bg-slate-700/80' : ''}`;
+
   return (
     <div 
-        className={`absolute flex flex-col gap-3 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        className={`absolute flex flex-col gap-3 z-[140] p-3 ${glassPanelClass}`}
         style={{ left: uiPositions.layers.x, top: uiPositions.layers.y, touchAction: 'none' }}
         onPointerDown={handleDrag}
     >

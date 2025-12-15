@@ -52,6 +52,25 @@ export interface XYPos {
   y: number;
 }
 
+export interface KeyMap {
+    panic: string;
+    center: string;
+    increaseDepth: string;
+    decreaseDepth: string;
+    addChord: string;
+    toggleSynth: string;
+    toggleSettings: string;
+    volumeUp: string;
+    volumeDown: string;
+    limit3: string;
+    limit5: string;
+    limit7: string;
+    limit11: string;
+    limit13: string;
+    closeModals: string;
+    toggleUI: string;
+}
+
 export interface AppSettings {
   // Individual depths (Steps from center)
   limitDepths: {
@@ -98,13 +117,12 @@ export interface AppSettings {
   voiceLeadingReverseDir: boolean; // Reverse the direction of the flow animation
   voiceLeadingGlowAmount: number; // 0.0 to 1.0 (Controls width/intensity of the lobe)
   
-  // Momentum is deprecated/greyed out in favor of Latch Mode
-  isMomentumEnabled: boolean; 
+  // Interaction Behavior
+  autoLatchOnDrag: boolean; // If true, dragging cursor over nodes latches/plays them
+  strumDurationMs: number; // Duration of strummed notes in ms
 
-  // Latch Settings
-  isLatchModeEnabled: boolean;
-  latchShellLimit: number; // 1 = Octaves, 2 = Fifths, etc.
-  latchedZoomScale: number; // Scale factor for active nodes (1.0 to 2.0)
+  // Momentum is deprecated/greyed out
+  isMomentumEnabled: boolean; 
 
   // Appearance
   buttonSizeScale: number; // Global Scalar 0.5 to 2.0
@@ -145,12 +163,16 @@ export interface AppSettings {
     volume: XYPos;
     panic: XYPos;
     off: XYPos;
+    latch: XYPos; // Added Latch Position
     center: XYPos;
     depth: XYPos;
     decreaseDepth: XYPos;
     chords: XYPos;
     layers: XYPos;
   };
+
+  // Keyboard Shortcuts
+  keyMap: KeyMap;
 }
 
 export interface OscillatorConfig {
@@ -191,8 +213,9 @@ export interface ModulationRow {
 }
 
 export interface SynthPreset {
-  id: number;
+  id: string; // changed to string for UUIDs if needed, or keeping number
   name: string;
+  category?: string;
   
   osc1: OscillatorConfig;
   osc2: OscillatorConfig;
@@ -204,6 +227,9 @@ export interface SynthPreset {
   // Master Gain for the preset
   gain: number; 
 
+  // Voice Effects
+  spread: number; // 0.0 (Mono) to 1.0 (Full Stereo Width)
+
   // Effects (Global)
   reverbMix: number; // 0 to 1
   delayMix: number; // 0 to 1
@@ -214,6 +240,12 @@ export interface SynthPreset {
   compressorThreshold: number; // dB (-60 to 0)
   compressorRatio: number; // 1 to 20
   compressorRelease: number; // seconds
+}
+
+export interface SynthBank {
+    id: string;
+    name: string;
+    presets: SynthPreset[];
 }
 
 export interface LatticeNode {

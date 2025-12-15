@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { SynthPreset, WaveformType, OscillatorConfig, ModulationRow, ModSource, ModTarget } from '../types';
-import { PRESETS } from '../constants';
+import { PRESET_BANKS } from '../constants';
 
 interface Props {
   preset: SynthPreset;
@@ -10,10 +10,67 @@ interface Props {
   onClose: () => void;
 }
 
+// Just Intonation Ratios (Cents offset from 1/1)
+// Indices 0-12 corresponding to chromatic steps but tuned justly
+const JI_CENTS_MAP = [
+    0,      // 0: Unison (1/1)
+    112,    // 1: Minor 2nd (16/15)
+    204,    // 2: Major 2nd (9/8)
+    316,    // 3: Minor 3rd (6/5)
+    386,    // 4: Major 3rd (5/4)
+    498,    // 5: Perfect 4th (4/3)
+    590,    // 6: Tritone (45/32)
+    702,    // 7: Perfect 5th (3/2)
+    814,    // 8: Minor 6th (8/5)
+    884,    // 9: Major 6th (5/3)
+    1018,   // 10: Minor 7th (9/5)
+    1088,   // 11: Major 7th (15/8)
+    1200    // 12: Octave (2/1)
+];
+
+const getJICents = (step: number): number => {
+    const sign = Math.sign(step);
+    const absStep = Math.abs(step);
+    const octaveShift = Math.floor(absStep / 12);
+    const index = absStep % 12;
+    
+    // Base cents for the interval class
+    let cents = JI_CENTS_MAP[index];
+    
+    // Add full octaves (1200 cents each) if step > 12 (though our slider is -12 to 12)
+    if (index === 0 && absStep > 0) cents = 1200; // Handle 12, 24 etc as pure octaves
+    
+    return sign * (cents + (octaveShift * 1200)); 
+};
+
+// Helper to find closest step from current cents (for UI feedback)
+const getStepFromCents = (cents: number): number => {
+    const sign = Math.sign(cents);
+    const absCents = Math.abs(cents);
+    
+    // Simple closest match
+    let bestStep = 0;
+    let minDiff = Infinity;
+    
+    for (let i = 0; i <= 12; i++) {
+        const target = JI_CENTS_MAP[i];
+        const diff = Math.abs(target - absCents);
+        if (diff < minDiff) {
+            minDiff = diff;
+            bestStep = i;
+        }
+    }
+    
+    return sign * bestStep;
+};
+
 const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<'osc1' | 'osc2' | 'osc3' | 'matrix' | 'fx'>('osc1');
+  const [activeBankId, setActiveBankId] = useState<string>(PRESET_BANKS[0].id);
 
   if (!isOpen) return null;
+
+  const activeBank = PRESET_BANKS.find(b => b.id === activeBankId) || PRESET_BANKS[0];
 
   const updateGlobal = (key: keyof SynthPreset, val: any) => {
     onChange({ ...preset, [key]: val });
@@ -21,6 +78,19 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
   
   const updateOsc = (oscKey: 'osc1' | 'osc2' | 'osc3', key: keyof OscillatorConfig, val: any) => {
       const newOsc = { ...preset[oscKey], [key]: val };
+      onChange({ ...preset, [oscKey]: newOsc });
+  };
+
+  const updateOscInterval = (oscKey: 'osc1' | 'osc2' | 'osc3', step: number) => {
+      const cents = getJICents(step);
+      // We set coarse detune to the JI interval. 
+      // We reset fine detune to 0 to ensure purity, or keep it? 
+      // Resetting fine detune is safer for "locking" to the interval.
+      const newOsc = { 
+          ...preset[oscKey], 
+          coarseDetune: cents,
+          fineDetune: 0 
+      };
       onChange({ ...preset, [oscKey]: newOsc });
   };
   
@@ -53,8 +123,9 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
 
   const renderOscillatorTab = (oscKey: 'osc1' | 'osc2' | 'osc3', label: string) => {
       const config = preset[oscKey];
-      // Osc 1 is always enabled, others can be toggled
       const canToggle = oscKey !== 'osc1'; 
+      
+      const currentIntervalStep = getStepFromCents(config.coarseDetune);
 
       return (
           <div className="space-y-6 animate-in fade-in duration-300">
@@ -94,13 +165,36 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
                             <label className="flex justify-between text-xs mb-1"><span>Mix (Gain)</span> <span>{(config.gain * 100).toFixed(0)}%</span></label>
                             <input type="range" min="0" max="1" step="0.01" value={config.gain} onChange={(e) => updateOsc(oscKey, 'gain', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-500 rounded appearance-none" />
                         </div>
+
+                        {/* Harmonic Interval Slider */}
+                        <div className="bg-slate-800/50 p-2 rounded border border-indigo-500/20">
+                            <label className="flex justify-between text-xs mb-1 font-bold text-indigo-300">
+                                <span>Harmonic Interval (JI)</span> 
+                                <span>{currentIntervalStep > 0 ? '+' : ''}{currentIntervalStep} Step</span>
+                            </label>
+                            <input 
+                                type="range" 
+                                min="-12" 
+                                max="12" 
+                                step="1" 
+                                value={currentIntervalStep} 
+                                onChange={(e) => updateOscInterval(oscKey, parseInt(e.target.value))} 
+                                className="w-full h-1 bg-indigo-500 rounded appearance-none cursor-pointer" 
+                            />
+                            <div className="flex justify-between text-[9px] text-slate-500 mt-1">
+                                <span>-Oct</span>
+                                <span>Unison</span>
+                                <span>+Oct</span>
+                            </div>
+                        </div>
+
                         <div>
                             <label className="flex justify-between text-xs mb-1"><span>Coarse Detune</span> <span>{config.coarseDetune} cents</span></label>
-                            <input type="range" min="-1200" max="1200" step="10" value={config.coarseDetune} onChange={(e) => updateOsc(oscKey, 'coarseDetune', parseInt(e.target.value))} className="w-full h-1 bg-indigo-500 rounded appearance-none" />
+                            <input type="range" min="-1200" max="1200" step="1" value={config.coarseDetune} onChange={(e) => updateOsc(oscKey, 'coarseDetune', parseInt(e.target.value))} className="w-full h-1 bg-slate-600 rounded appearance-none" />
                         </div>
                         <div>
                             <label className="flex justify-between text-xs mb-1"><span>Fine Detune</span> <span>{config.fineDetune} cents</span></label>
-                            <input type="range" min="-50" max="50" step="1" value={config.fineDetune} onChange={(e) => updateOsc(oscKey, 'fineDetune', parseInt(e.target.value))} className="w-full h-1 bg-indigo-400 rounded appearance-none" />
+                            <input type="range" min="-50" max="50" step="1" value={config.fineDetune} onChange={(e) => updateOsc(oscKey, 'fineDetune', parseInt(e.target.value))} className="w-full h-1 bg-slate-600 rounded appearance-none" />
                         </div>
                     </div>
                 </div>
@@ -179,16 +273,34 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
             <button onClick={onClose} className="text-slate-400 hover:text-white">Close</button>
         </div>
         
-        {/* Preset Selector */}
-        <div className="px-6 mb-4">
-            <div className="grid grid-cols-2 gap-2">
-                {PRESETS.map(p => (
-                    <button 
-                      key={p.id}
-                      onClick={() => loadPreset(p)}
-                      className={`px-2 py-1 text-xs rounded border truncate ${preset.name === p.name ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}
+        {/* Bank Tabs */}
+        <div className="px-6 mb-2">
+            <div className="flex space-x-1 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-700">
+                {PRESET_BANKS.map(bank => (
+                    <button
+                        key={bank.id}
+                        onClick={() => setActiveBankId(bank.id)}
+                        className={`px-3 py-1 text-xs font-bold uppercase whitespace-nowrap rounded-t-lg transition-colors border-b-2 ${activeBankId === bank.id ? 'text-white border-blue-500 bg-slate-700/50' : 'text-slate-400 border-transparent hover:text-slate-200'}`}
                     >
-                        {p.name}
+                        {bank.name}
+                    </button>
+                ))}
+            </div>
+        </div>
+
+        {/* Preset Selector (Grid of 10) */}
+        <div className="px-6 mb-4">
+            <div className="grid grid-cols-5 gap-2 bg-slate-900/30 p-2 rounded-lg border border-slate-700/50">
+                {activeBank.presets.map((p, idx) => (
+                    <button 
+                      key={`${p.id}-${idx}`}
+                      onClick={() => loadPreset(p)}
+                      title={p.name}
+                      className={`min-h-[3rem] px-1 py-1 text-[9px] leading-tight rounded border flex items-center justify-center text-center whitespace-normal break-words overflow-hidden transition-all ${preset.name === p.name ? 'bg-green-600 border-green-500 text-white shadow-[0_0_8px_rgba(22,163,74,0.5)]' : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600 hover:border-slate-500'}`}
+                    >
+                        <span className="line-clamp-2 w-full">
+                            {p.name === "Init Patch" ? (idx + 1) : p.name}
+                        </span>
                     </button>
                 ))}
             </div>
@@ -319,6 +431,23 @@ const SynthControls: React.FC<Props> = ({ preset, onChange, isOpen, onClose }) =
                     <div>
                         <label className="flex justify-between text-xs mb-1 font-bold"><span>Master Preset Gain</span> <span>{(preset.gain * 100).toFixed(0)}%</span></label>
                         <input type="range" min="0.0" max="1.0" step="0.01" value={preset.gain} onChange={(e) => updateGlobal('gain', parseFloat(e.target.value))} className="w-full h-1 bg-green-500 rounded appearance-none" />
+                    </div>
+
+                    <div className="p-3 bg-slate-900/50 rounded border border-slate-700">
+                         <h3 className="text-xs font-bold text-slate-300 uppercase mb-3">Stereo Field</h3>
+                         <div>
+                             <label className="flex justify-between text-xs mb-1 font-semibold text-blue-300">
+                                 <span>Voice Spread</span> 
+                                 <span>{((preset.spread || 0) * 100).toFixed(0)}%</span>
+                             </label>
+                             <input 
+                                 type="range" min="0" max="1" step="0.01" 
+                                 value={preset.spread || 0} 
+                                 onChange={(e) => updateGlobal('spread', parseFloat(e.target.value))} 
+                                 className="w-full h-1 bg-gradient-to-r from-blue-500 to-purple-500 rounded appearance-none" 
+                             />
+                             <p className="text-[9px] text-slate-500 mt-1">Pans individual voices left/right to create width.</p>
+                         </div>
                     </div>
 
                     <div className="p-3 bg-slate-900/50 rounded border border-slate-700">

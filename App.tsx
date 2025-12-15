@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
 import SynthControls from './components/SynthControls';
@@ -17,9 +17,15 @@ const App: React.FC = () => {
   const [activeChordIds, setActiveChordIds] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   
+  // Latch State: 0 = Off, 1 = Active (Green), 2 = Frozen (Momentary Only)
+  const [latchStatus, setLatchStatus] = useState<0 | 1 | 2>(0);
+
   // Modals
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSynthOpen, setIsSynthOpen] = useState(false);
+  
+  // Visual Focus Mode
+  const [showUI, setShowUI] = useState(true);
 
   const diamondRef = useRef<TonalityDiamondHandle>(null);
 
@@ -74,13 +80,12 @@ const App: React.FC = () => {
           };
 
           // Estimates for element sizes (width, height)
-          checkAndFix('volume', 160, 40);
-          checkAndFix('panic', 80, 80);
-          checkAndFix('off', 80, 80);
-          checkAndFix('center', 48, 48);
-          checkAndFix('depth', 48, 48);
-          checkAndFix('decreaseDepth', 48, 48);
-          checkAndFix('chords', 300, 48); // Chords container can be wide
+          checkAndFix('volume', 180, 48); // Increased width for new design
+          checkAndFix('panic', 64, 64);
+          checkAndFix('off', 64, 64);
+          checkAndFix('latch', 64, 64);
+          checkAndFix('center', 160, 48); // Increased width for grouped Navigation Bar
+          checkAndFix('chords', 300, 48); 
           checkAndFix('layers', 90, 310);
 
           return changed ? { ...prev, uiPositions: p } : prev;
@@ -113,29 +118,33 @@ const App: React.FC = () => {
             y: newH - (oldH - p.off.y)
         };
 
-        // 3. Volume (Anchor: Top-Center)
+        // 3. Latch (Anchor: Bottom-Right)
+        newPos.latch = {
+            x: newW - (oldW - p.latch.x),
+            y: newH - (oldH - p.latch.y)
+        };
+
+        // 4. Volume (Anchor: Top-Center)
         const volOffsetFromCenter = p.volume.x - (oldW / 2);
         newPos.volume = {
             x: (newW / 2) + volOffsetFromCenter,
             y: p.volume.y 
         };
 
-        // 4. Center/Depth/Chords (Anchor: Bottom-Left)
-        const updateBottomLeft = (key: 'center' | 'depth' | 'decreaseDepth' | 'chords') => {
+        // 5. Center/Chords (Anchor: Bottom-Left)
+        const updateBottomLeft = (key: 'center' | 'chords') => {
              newPos[key] = {
                  x: p[key].x, 
                  y: newH - (oldH - p[key].y)
              };
         };
         updateBottomLeft('center');
-        updateBottomLeft('depth');
-        updateBottomLeft('decreaseDepth');
         updateBottomLeft('chords');
 
-        // 5. Layers (Anchor: Right-Center)
+        // 6. Layers (Anchor: Vertical Center on Right Edge)
         newPos.layers = {
-            x: newW - (oldW - p.layers.x),
-            y: p.layers.y * (newH / oldH)
+            x: newW - (oldW - p.layers.x), // Maintain distance from right edge
+            y: (newH / 2) - 155 // Recenter vertically (height/2)
         };
 
         return {
@@ -164,20 +173,36 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePanic = () => {
+  const handlePanic = useCallback(() => {
     audioEngine.stopAll(); 
     diamondRef.current?.clearLatches(); 
     setActiveChordIds([]); 
-  };
+    setLatchStatus(0); // Reset Latch
+  }, []);
 
+  // Musical Off: Unlatch nodes but let tails fade
   const handleOff = () => {
     diamondRef.current?.clearLatches(); 
     setActiveChordIds([]);
+    setLatchStatus(0); // Reset Latch
   };
 
-  const handleCenter = () => {
-      diamondRef.current?.centerView();
+  // Tri-State Logic: Off (0) -> Active (1) -> Frozen (2) -> Off (0)
+  const handleLatchToggle = () => {
+      setLatchStatus(prev => {
+          if (prev === 0) return 1;
+          if (prev === 1) return 2;
+          if (prev === 2) {
+              diamondRef.current?.clearLatches(); // "Taking foot off pedal"
+              return 0;
+          }
+          return 0;
+      });
   };
+
+  const handleCenter = useCallback(() => {
+      diamondRef.current?.centerView();
+  }, []);
 
   const handleIncreaseDepth = () => {
       diamondRef.current?.increaseDepth();
@@ -187,7 +212,7 @@ const App: React.FC = () => {
       diamondRef.current?.decreaseDepth();
   };
 
-  const handleAddChord = () => {
+  const handleAddChord = useCallback(() => {
       if (diamondRef.current) {
           const latchedNodes = diamondRef.current.getLatchedNodes();
           if (latchedNodes.length === 0) return;
@@ -215,7 +240,7 @@ const App: React.FC = () => {
               updateSettings(prev => ({ ...prev, savedChords: newChords }));
           }
       }
-  };
+  }, [settings.savedChords, updateSettings]);
 
   const toggleChord = (id: string) => {
       setActiveChordIds(prev => {
@@ -237,12 +262,97 @@ const App: React.FC = () => {
       }));
   };
 
+  // --- Keyboard Shortcuts ---
+  const handleToggleLimit = useCallback((limit: number) => {
+      const isHidden = settings.hiddenLimits.includes(limit);
+      let newHidden = [...settings.hiddenLimits];
+      if (isHidden) {
+          newHidden = newHidden.filter(l => l !== limit);
+      } else {
+          newHidden.push(limit);
+      }
+      updateSettings(prev => ({ ...prev, hiddenLimits: newHidden }));
+  }, [settings.hiddenLimits, updateSettings]);
+
+  useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+          // Ignore if typing in an input
+          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+          // Mapping
+          const map = settings.keyMap;
+
+          switch(e.code) {
+              case map.panic:
+                  e.preventDefault();
+                  handlePanic();
+                  break;
+              case map.center:
+                  e.preventDefault();
+                  handleCenter();
+                  break;
+              case map.increaseDepth:
+                  e.preventDefault();
+                  handleIncreaseDepth();
+                  break;
+              case map.decreaseDepth:
+                  e.preventDefault();
+                  handleDecreaseDepth();
+                  break;
+              case map.addChord:
+                  e.preventDefault();
+                  handleAddChord();
+                  break;
+              case map.toggleSynth:
+                  e.preventDefault();
+                  setIsSynthOpen(prev => !prev);
+                  break;
+              case map.toggleSettings:
+                  e.preventDefault();
+                  setIsSettingsOpen(prev => !prev);
+                  break;
+              case map.toggleUI:
+                  e.preventDefault();
+                  setShowUI(prev => !prev);
+                  break;
+              case map.closeModals:
+                  e.preventDefault();
+                  setIsSettingsOpen(false);
+                  setIsSynthOpen(false);
+                  break;
+              
+              // Volume Control
+              case map.volumeUp:
+                  e.preventDefault();
+                  setMasterVolume(v => Math.min(1.0, v + 0.05));
+                  break;
+              case map.volumeDown:
+                  e.preventDefault();
+                  setMasterVolume(v => Math.max(0.0, v - 0.05));
+                  break;
+
+              // Limits
+              case map.limit3: e.preventDefault(); handleToggleLimit(3); break;
+              case map.limit5: e.preventDefault(); handleToggleLimit(5); break;
+              case map.limit7: e.preventDefault(); handleToggleLimit(7); break;
+              case map.limit11: e.preventDefault(); handleToggleLimit(11); break;
+              case map.limit13: e.preventDefault(); handleToggleLimit(13); break;
+          }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handlePanic, handleCenter, handleAddChord, handleToggleLimit, settings.keyMap]);
+
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
+    <div 
+        className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white"
+        onContextMenu={(e) => e.preventDefault()} // Prevent native context menu for app-like feel
+    >
       
       {/* Top Bar - Fixed Position */}
       <div 
-        className="absolute w-full flex justify-between items-center z-40 pointer-events-none"
+        className={`absolute w-full flex justify-between items-center z-40 pointer-events-none transition-opacity duration-300 ${showUI ? 'opacity-100' : 'opacity-0'}`}
         style={{ 
             top: `${MARGIN_3MM}px`, 
             paddingLeft: `${MARGIN_3MM}px`,
@@ -275,36 +385,43 @@ const App: React.FC = () => {
         onLimitInteraction={handleLimitInteraction}
         activeChordIds={activeChordIds}
         uiUnlocked={settings.uiUnlocked}
+        latchStatus={latchStatus}
       />
 
       {/* Floating UI */}
-      <FloatingControls 
-        volume={masterVolume}
-        setVolume={setMasterVolume}
-        onPanic={handlePanic}
-        onOff={handleOff}
-        onCenter={handleCenter}
-        onIncreaseDepth={handleIncreaseDepth}
-        onDecreaseDepth={handleDecreaseDepth}
-        onAddChord={handleAddChord}
-        toggleChord={toggleChord}
-        activeChordIds={activeChordIds}
-        savedChords={settings.savedChords}
-        chordShortcutSizeScale={settings.chordShortcutSizeScale}
-        showIncreaseDepthButton={settings.showIncreaseDepthButton}
-        uiUnlocked={settings.uiUnlocked}
-        uiPositions={settings.uiPositions}
-        updatePosition={handleUiPositionUpdate}
-        draggingId={draggingId}
-        setDraggingId={setDraggingId}
-      />
+      {showUI && (
+          <FloatingControls 
+            volume={masterVolume}
+            setVolume={setMasterVolume}
+            onPanic={handlePanic}
+            onOff={handleOff}
+            latchStatus={latchStatus}
+            onLatchToggle={handleLatchToggle}
+            onCenter={handleCenter}
+            onIncreaseDepth={handleIncreaseDepth}
+            onDecreaseDepth={handleDecreaseDepth}
+            onAddChord={handleAddChord}
+            toggleChord={toggleChord}
+            activeChordIds={activeChordIds}
+            savedChords={settings.savedChords}
+            chordShortcutSizeScale={settings.chordShortcutSizeScale}
+            showIncreaseDepthButton={settings.showIncreaseDepthButton}
+            uiUnlocked={settings.uiUnlocked}
+            uiPositions={settings.uiPositions}
+            updatePosition={handleUiPositionUpdate}
+            draggingId={draggingId}
+            setDraggingId={setDraggingId}
+          />
+      )}
 
-      <LimitLayerControls 
-        settings={settings}
-        updateSettings={updateSettings}
-        draggingId={draggingId}
-        setDraggingId={setDraggingId}
-      />
+      {showUI && (
+          <LimitLayerControls 
+            settings={settings}
+            updateSettings={updateSettings}
+            draggingId={draggingId}
+            setDraggingId={setDraggingId}
+          />
+      )}
 
       {/* Modals */}
       <SettingsModal 

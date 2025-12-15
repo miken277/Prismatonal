@@ -1,7 +1,7 @@
+
 // --- DSP UTILS ---
 const TWO_PI = 2 * Math.PI;
 
-// Safe Default Config
 const DUMMY_OSC_CONFIG = {
     enabled: false,
     waveform: 'sine',
@@ -53,11 +53,30 @@ class SVF {
   }
 
   process(input, cutoff, res, sampleRate) {
-    const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.42));
+    // NaN Guard for Cutoff
+    let safeCutoff = cutoff;
+    if (!Number.isFinite(safeCutoff)) safeCutoff = 1000;
+    // Clamp cutoff to slightly below Nyquist to ensure stability
+    safeCutoff = Math.max(20, Math.min(safeCutoff, sampleRate * 0.45));
+
+    // NaN Guard for Resonance
+    let safeRes = res;
+    if (!Number.isFinite(safeRes)) safeRes = 0;
+    
+    // NaN Guard for Input
+    if (!Number.isFinite(input)) input = 0;
+
+    // State NaN Guard (Self-healing)
+    if (!Number.isFinite(this.low) || !Number.isFinite(this.band)) {
+        this.reset();
+    }
+
     let f = 2.0 * Math.sin(Math.PI * safeCutoff / sampleRate);
     
-    // Stability Fix: Map resonance input (0..N) to Q factor safely.
-    const q = 1.0 / (res + 0.5);
+    // STABILITY FIX: 
+    // Increased offset from 0.5 to 0.9 to prevent instability at Res=0 and High Cutoff.
+    // This reduces the maximum damping factor q, keeping the filter stable.
+    const q = 1.0 / (safeRes + 0.9);
 
     this.low += f * this.band;
     this.high = input - this.low - q * this.band;
@@ -78,6 +97,8 @@ class Envelope {
   trigger(velocity = 1.0) {
     this.stage = 'attack';
     this.velocity = velocity;
+    // Note: We do NOT reset this.value to 0.0 here. 
+    // This allows smooth re-triggering if the envelope was in release.
   }
 
   release() {
@@ -137,17 +158,18 @@ class Envelope {
 
 class Oscillator {
   constructor(sampleRate) {
-    this.phase = 0.0; 
+    this.phase = Math.random(); // Random start phase for organic feel
     this.blep = new PolyBLEP(sampleRate);
     this.sampleRate = sampleRate;
   }
 
   reset() {
-      this.phase = 0.0;
+      // Intentionally empty. 
+      // Do NOT reset phase on note on. Free-running oscillators prevent click transients.
   }
 
   process(freq, type, dt) {
-    if (!Number.isFinite(freq) || freq <= 0 || freq > 24000) return 0.0;
+    if (!Number.isFinite(freq) || freq <= 0) return 0.0;
 
     this.phase += dt * freq;
     while (this.phase >= 1.0) this.phase -= 1.0;
@@ -209,16 +231,17 @@ class Voice {
     this.startTime = currentTime; 
     this.releaseTime = 0; 
     
-    // CRITICAL: Reset phase on trigger to prevent transient clicks
-    this.oscs.forEach(osc => osc.reset());
+    // We do NOT reset oscillator phase here.
     
-    // CRITICAL: Reset envelopes to 0 before triggering to prevent clicks if stealing a loud voice
+    // We trigger envelopes. If they are already running (stealing), they will ramp from current value.
     this.envs.forEach(env => {
-        env.reset();
         env.trigger();
     });
     
+    // Filter state is reset to prevent blown filters from previous bad states
     this.filters.forEach(f => f.reset());
+    
+    // LFOs reset to 0 phase for consistency on attack
     this.lfoPhases.fill(0.0);
   }
 
@@ -327,9 +350,20 @@ class Voice {
         else if (i===1) { modPitch=modP2; modCutoff=modC2; modGain=modG2; modRes=modR2; }
         else { modPitch=modP3; modCutoff=modC3; modGain=modG3; modRes=modR3; }
 
+        // Sanitize Modulations
+        if (!Number.isFinite(modPitch)) modPitch = 0;
+        if (!Number.isFinite(modCutoff)) modCutoff = 0;
+        if (!Number.isFinite(modGain)) modGain = 0;
+        if (!Number.isFinite(modRes)) modRes = 0;
+
         const cents = config.coarseDetune + config.fineDetune + hardPitch + (modPitch * 1200);
         const detuneMult = Math.pow(2, cents / 1200.0);
-        const oscFreq = this.baseFreq * detuneMult;
+        let oscFreq = this.baseFreq * detuneMult;
+
+        // CRITICAL FIX: Nyquist Clamping to prevent aliasing/static on high notes
+        if (oscFreq > this.sampleRate * 0.48) {
+            oscFreq = this.sampleRate * 0.48;
+        }
 
         let signal = this.oscs[i].process(oscFreq, config.waveform, dt);
 
@@ -345,7 +379,7 @@ class Voice {
         voiceMix += signal * finalGain;
     }
     
-    return voiceMix;
+    return Number.isFinite(voiceMix) ? voiceMix : 0.0;
   }
 }
 
@@ -353,7 +387,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.voices = [];
-    // Initialize ample voice pool to allow for release tails overlap
     for(let i=0; i<32; i++) {
         this.voices.push(new Voice(sampleRate));
     }
@@ -362,8 +395,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
     this.maxPolyphony = 10; 
     this.oscConfigs = [DUMMY_OSC_CONFIG, DUMMY_OSC_CONFIG, DUMMY_OSC_CONFIG];
     this.modMatrix = [];
-    
-    // DC Blocker State
     this.xm1 = 0;
     this.ym1 = 0;
 
@@ -399,37 +430,32 @@ class PrismaProcessor extends AudioWorkletProcessor {
   }
 
   triggerVoice(id, freq) {
-    // 1. Retrigger existing if active
+    if (!Number.isFinite(freq) || freq <= 0) return; 
+
     for (let i = 0; i < this.voices.length; i++) {
         if (this.voices[i].active && this.voices[i].id === id) {
             this.voices[i].trigger(id, freq);
             return;
         }
     }
-
-    // 2. Count "Musically Held" voices (Active AND Not Released)
     let heldCount = 0;
     let physicallyFree = null;
     let quietestHeld = null;
     let minHeldLevel = 1000.0;
-    let quietestVoice = null; // For hard steal fallback
+    let quietestVoice = null;
     let minLevel = 1000.0;
 
     for (let i = 0; i < this.voices.length; i++) {
         const v = this.voices[i];
-        
         if (!v.active) {
             if (!physicallyFree) physicallyFree = v;
             continue;
         }
-
         const level = v.getLevel();
         if (level < minLevel) {
             minLevel = level;
             quietestVoice = v;
         }
-
-        // Check if held (releaseTime === 0 implies note is held)
         if (v.releaseTime === 0) {
             heldCount++;
             if (level < minHeldLevel) {
@@ -439,18 +465,13 @@ class PrismaProcessor extends AudioWorkletProcessor {
         }
     }
 
-    // 3. Soft Steal Strategy
-    // If we reached the musical polyphony limit, force the oldest/quietest HELD note into release phase.
-    // This allows it to fade out naturally using one of the extra physical voices, rather than being cut off.
     if (heldCount >= this.maxPolyphony && quietestHeld) {
         quietestHeld.release();
     }
 
-    // 4. Voice Allocation
     if (physicallyFree) {
         physicallyFree.trigger(id, freq);
     } else if (quietestVoice) {
-        // Fallback: Hard Steal if all 32 physical voices are busy (very rare)
         quietestVoice.trigger(id, freq);
     }
   }
@@ -473,19 +494,15 @@ class PrismaProcessor extends AudioWorkletProcessor {
 
   process(inputs, outputs, parameters) {
     if (!this.preset) return true;
-
     const output = outputs[0];
     const channelL = output[0];
     const channelR = output[1];
-    
     if (!channelL) return true;
-    
     const len = channelL.length;
     const dt = 1.0 / sampleRate;
 
     for (let s = 0; s < len; s++) {
         let sampleMix = 0.0;
-        
         for (let i = 0; i < this.voices.length; i++) {
             const v = this.voices[i];
             if (v.active) {
@@ -498,20 +515,21 @@ class PrismaProcessor extends AudioWorkletProcessor {
             }
         }
         
-        // 1. Aggressive Gain Staging (Headroom)
-        // With up to 3 oscillators per voice and polyphony, we must attenuate before clipper
+        // Safety Clamping for Summing Bus
+        if (!Number.isFinite(sampleMix)) sampleMix = 0;
+        if (sampleMix > 10.0) sampleMix = 10.0;
+        if (sampleMix < -10.0) sampleMix = -10.0;
+
         sampleMix *= 0.1; 
-
-        // 2. Soft Clipper (Tanh)
         sampleMix = Math.tanh(sampleMix * 0.7);
-
-        // 3. DC Blocker
         const x = sampleMix;
-        const y = x - this.xm1 + 0.995 * this.ym1;
+        // Improved DC Blocker with tighter coeff for low end preservation
+        const y = x - this.xm1 + 0.998 * this.ym1;
         this.xm1 = x;
         this.ym1 = y;
         
-        channelL[s] = y;
+        // Final Safety
+        channelL[s] = Number.isFinite(y) ? y : 0;
     }
 
     const masterGain = this.preset.gain;
@@ -525,7 +543,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
             channelL[s] *= masterGain;
         }
     }
-
     return true;
   }
 }

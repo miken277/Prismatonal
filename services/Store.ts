@@ -1,7 +1,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { AppSettings, SynthPreset } from '../types';
-import { DEFAULT_SETTINGS, DEFAULT_PRESET } from '../constants';
+import { DEFAULT_SETTINGS, DEFAULT_PRESET, DEFAULT_KEY_MAP } from '../constants';
 
 interface StoreState {
     settings: AppSettings;
@@ -11,14 +11,21 @@ interface StoreState {
 class PrismaStore {
   private state: StoreState;
   private listeners: Set<() => void> = new Set();
+  
+  // Debounce timers for persistence
+  private settingsSaveTimer: number | null = null;
+  private presetSaveTimer: number | null = null;
 
   constructor() {
     // Load Settings
     const savedSettings = localStorage.getItem('prismatonal_settings');
-    const loadedSettings = savedSettings ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) } : DEFAULT_SETTINGS;
+    let loadedSettings = savedSettings ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) } : DEFAULT_SETTINGS;
     
     // Safety merge for nested UI Positions
     loadedSettings.uiPositions = { ...DEFAULT_SETTINGS.uiPositions, ...(loadedSettings.uiPositions || {}) };
+
+    // Safety merge for KeyMap (handle old versions)
+    loadedSettings.keyMap = { ...DEFAULT_KEY_MAP, ...(loadedSettings.keyMap || {}) };
 
     // Load Preset
     const savedPreset = localStorage.getItem('prismatonal_preset');
@@ -42,21 +49,37 @@ class PrismaStore {
       next = { ...current, ...partial };
     }
 
-    // Reference equality check optimization could be added here if needed, 
-    // but settings changes usually mean deep changes.
     if (next === current) return;
 
+    // 1. Update In-Memory State Immediately (UI Responsiveness)
     this.state = { ...this.state, settings: next };
-    localStorage.setItem('prismatonal_settings', JSON.stringify(next));
     this.notify();
+
+    // 2. Debounce Disk Write (Prevent blocking main thread on sliders/drag)
+    if (this.settingsSaveTimer) {
+        clearTimeout(this.settingsSaveTimer);
+    }
+    this.settingsSaveTimer = setTimeout(() => {
+        localStorage.setItem('prismatonal_settings', JSON.stringify(next));
+        this.settingsSaveTimer = null;
+    }, 1000) as unknown as number;
   };
 
   setPreset = (newPreset: SynthPreset) => {
     if (newPreset === this.state.preset) return;
     
+    // 1. Update In-Memory State Immediately
     this.state = { ...this.state, preset: newPreset };
-    localStorage.setItem('prismatonal_preset', JSON.stringify(newPreset));
     this.notify();
+
+    // 2. Debounce Disk Write
+    if (this.presetSaveTimer) {
+        clearTimeout(this.presetSaveTimer);
+    }
+    this.presetSaveTimer = setTimeout(() => {
+        localStorage.setItem('prismatonal_preset', JSON.stringify(newPreset));
+        this.presetSaveTimer = null;
+    }, 1000) as unknown as number;
   };
 
   updatePresetGlobal = (key: keyof SynthPreset, value: any) => {

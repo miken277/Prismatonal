@@ -1,5 +1,5 @@
 
-import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, LimitVisualsMap } from './types';
+import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, LimitVisualsMap, KeyMap, SynthBank } from './types';
 
 export const DEFAULT_COLORS: LimitColorMap = {
   1: '#EF4444', // Red (Unity)
@@ -17,6 +17,25 @@ export const DEFAULT_LIMIT_VISUALS: LimitVisualsMap = {
     7: { size: 0.8, opacity: 0.8 },
     11: { size: 0.7, opacity: 0.7 },
     13: { size: 0.6, opacity: 0.6 }
+};
+
+export const DEFAULT_KEY_MAP: KeyMap = {
+    panic: 'Space',
+    center: 'KeyC',
+    increaseDepth: 'BracketRight', // ]
+    decreaseDepth: 'BracketLeft',  // [
+    addChord: 'KeyA',
+    toggleSynth: 'KeyS',
+    toggleSettings: 'Comma',
+    volumeUp: 'F12',
+    volumeDown: 'F11',
+    limit3: 'Digit1',
+    limit5: 'Digit2',
+    limit7: 'Digit3',
+    limit11: 'Digit4',
+    limit13: 'Digit5',
+    closeModals: 'Escape',
+    toggleUI: 'KeyF' // Focus Mode
 };
 
 // Generate empty chord slots A-Z + 6 more to make 32
@@ -37,7 +56,8 @@ const generateChordSlots = (): ChordDefinition[] => {
 };
 
 // UI Dimensions Constants
-export const MARGIN_3MM = 10; 
+// 3mm physical approx 12px
+export const MARGIN_3MM = 12; 
 export const GAP_5MM = 20;
 export const SCROLLBAR_WIDTH = 12; 
 
@@ -50,22 +70,25 @@ const getDefaults = () => {
     // Component Dimensions Estimates
     const LAYERS_HEIGHT = 310; 
     const LAYERS_WIDTH = 90; 
+    const BOTTOM_BAR_HEIGHT = 48;
+    const PANIC_SIZE = 64; // w-16 = 4rem = 64px
     
-    // Top Bar Bottom
-    const TOP_BAR_BOTTOM = MARGIN_3MM + 40; 
-    // Bottom Bar Top: Height - (80px Panic + 10px Margin + 12px Scroll)
-    const BOTTOM_BAR_TOP = h - (80 + MARGIN_3MM + SCROLLBAR_WIDTH);
-
-    // Calculate vertical center for Layers
-    const verticalCenterY = TOP_BAR_BOTTOM + ((BOTTOM_BAR_TOP - TOP_BAR_BOTTOM) / 2) - (LAYERS_HEIGHT / 2);
+    // Bottom Safe Area: Margin + Scrollbar
+    const BOTTOM_SAFE_Y = h - MARGIN_3MM - SCROLLBAR_WIDTH;
 
     // Panic Position (Bottom Right)
-    const panicX = w - 80 - MARGIN_3MM - SCROLLBAR_WIDTH;
-    const panicY = h - 80 - MARGIN_3MM - SCROLLBAR_WIDTH;
+    const panicX = w - PANIC_SIZE - MARGIN_3MM - SCROLLBAR_WIDTH;
+    const panicY = BOTTOM_SAFE_Y - PANIC_SIZE;
+
+    // Off Position (Above Panic)
+    const offY = panicY - PANIC_SIZE - GAP_5MM;
+
+    // Latch Position (Above Off)
+    const latchY = offY - PANIC_SIZE - GAP_5MM;
 
     return {
         volume: { 
-            x: (w / 2) - 80, // Centered (Width 160)
+            x: (w / 2) - 90, // Centered (Width 180)
             y: MARGIN_3MM 
         },
         panic: { 
@@ -74,33 +97,30 @@ const getDefaults = () => {
         },
         off: {
             x: panicX,
-            y: panicY - 80 - GAP_5MM // Placed above Panic with 5mm gap
+            y: offY 
+        },
+        latch: {
+            x: panicX,
+            y: latchY
         },
         center: { 
-            // 48px width
+            // Navigation Bar (Left)
             x: MARGIN_3MM, 
-            y: h - 48 - MARGIN_3MM - SCROLLBAR_WIDTH 
+            y: BOTTOM_SAFE_Y - BOTTOM_BAR_HEIGHT 
         },
-        depth: { 
-            // 48px width + 12px gap from Center
-            x: MARGIN_3MM + 60, 
-            y: h - 48 - MARGIN_3MM - SCROLLBAR_WIDTH 
-        },
-        decreaseDepth: {
-            // 60px offset from Depth
-            x: MARGIN_3MM + 120,
-            y: h - 48 - MARGIN_3MM - SCROLLBAR_WIDTH
-        },
+        // Legacy keys kept for type compatibility but unused in new grouped layout
+        depth: { x: 0, y: 0 },
+        decreaseDepth: { x: 0, y: 0 },
         chords: { 
-            // 60px offset from Decrease Depth
-            x: MARGIN_3MM + 180, 
-            y: h - 48 - MARGIN_3MM - SCROLLBAR_WIDTH 
+            // Placed to the right of Center Nav (160px width + gap)
+            x: MARGIN_3MM + 160 + GAP_5MM, 
+            y: BOTTOM_SAFE_Y - BOTTOM_BAR_HEIGHT 
         },
         layers: { 
-            // Positioned to avoid scrollbar overlap (Right Edge)
+            // Vertically Centered on Right Side
+            // Right edge = Width - LayerWidth - Margin - Scrollbar
             x: w - LAYERS_WIDTH - MARGIN_3MM - SCROLLBAR_WIDTH, 
-            // Equidistant between Settings (Top) and Off (Bottom)
-            y: Math.max(TOP_BAR_BOTTOM, verticalCenterY) 
+            y: (h / 2) - (LAYERS_HEIGHT / 2) 
         }
     };
 };
@@ -144,12 +164,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voiceLeadingAnimationSpeed: 2.0,
   voiceLeadingGlowAmount: 0.5,
   
+  autoLatchOnDrag: true, // Enabled by default
+  strumDurationMs: 300, // Default Strum Length
+  
   isMomentumEnabled: false, // Disabled by default
   
-  isLatchModeEnabled: true, // Enabled by default per request
-  latchShellLimit: 5, // Default allows reasonable complexity to be latched
-  latchedZoomScale: 1.3,
-
   buttonSizeScale: 0.8, // Reduced from 1.0 per request
   buttonSpacingScale: 1.5, 
   latticeAspectRatio: 0.7, // "Wide" default per request
@@ -181,7 +200,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
   // UI Relocation
   uiUnlocked: false,
-  uiPositions: DEFAULT_UI_POSITIONS
+  uiPositions: DEFAULT_UI_POSITIONS,
+  
+  keyMap: DEFAULT_KEY_MAP
 };
 
 // Helper for default disabled oscillator
@@ -189,282 +210,50 @@ const defaultDisabledOsc: OscillatorConfig = {
     enabled: false,
     waveform: WaveformType.SINE,
     coarseDetune: 0,
-    fineDetune: 5,
+    fineDetune: 0, // Reset default fine detune to 0
     gain: 0.5,
     attack: 0.1,
     decay: 0.5,
     sustain: 0.7,
     release: 1.0,
     filterCutoff: 2000,
-    filterResonance: 0.5, // Changed from 0 to 0.5 for stability
+    filterResonance: 0.5, 
     lfoRate: 1,
     lfoDepth: 0,
     lfoTarget: 'none'
 };
 
-// Reduced gains significantly to provide headroom
-export const PRESETS: SynthPreset[] = [
-  {
-    id: 1,
-    name: "Deep Ocean",
-    gain: 0.5, // 50%
+const generateInitPatch = (name: string, id: string): SynthPreset => ({
+    id: id,
+    name: name,
+    gain: 0.5,
     modMatrix: [],
-    osc1: {
-        enabled: true,
-        waveform: WaveformType.TRIANGLE,
-        coarseDetune: 0, fineDetune: 0, gain: 0.3, 
-        attack: 1.5, decay: 0.5, sustain: 0.8, release: 2.0,
-        filterCutoff: 800, filterResonance: 0.5,
-        lfoRate: 0.2, lfoDepth: 15, lfoTarget: 'filter'
-    },
-    osc2: {
-        enabled: true,
-        waveform: WaveformType.SINE,
-        coarseDetune: 0, fineDetune: -8, gain: 0.2, 
-        attack: 2.0, decay: 1.0, sustain: 0.7, release: 2.5,
-        filterCutoff: 600, filterResonance: 0.5, 
-        lfoRate: 0.15, lfoDepth: 10, lfoTarget: 'pitch'
-    },
+    osc1: { ...defaultDisabledOsc, enabled: true, gain: 0.5 },
+    osc2: { ...defaultDisabledOsc },
     osc3: { ...defaultDisabledOsc },
-    reverbMix: 0.75,
-    delayMix: 0.4,
-    delayTime: 0.6,
-    delayFeedback: 0.4,
-    compressorThreshold: -30,
-    compressorRatio: 8,
-    compressorRelease: 0.5
-  },
-  {
-    id: 2,
-    name: "Crystal Pluck",
-    gain: 0.5, // 50%
-    modMatrix: [],
-    osc1: {
-        enabled: true,
-        waveform: WaveformType.SINE,
-        coarseDetune: 0, fineDetune: 0, gain: 0.35, 
-        attack: 0.01, decay: 0.4, sustain: 0.0, release: 0.4,
-        filterCutoff: 4000, filterResonance: 0.5, 
-        lfoRate: 0, lfoDepth: 0, lfoTarget: 'none'
-    },
-    osc2: {
-        enabled: true,
-        waveform: WaveformType.SINE,
-        coarseDetune: 1200, fineDetune: 0, gain: 0.2, 
-        attack: 0.01, decay: 0.3, sustain: 0.0, release: 0.3,
-        filterCutoff: 5000, filterResonance: 0.5, 
-        lfoRate: 0, lfoDepth: 0, lfoTarget: 'none'
-    },
-    osc3: { 
-        enabled: true,
-        waveform: WaveformType.TRIANGLE,
-        coarseDetune: 2400, fineDetune: 5, gain: 0.1,
-        attack: 0.01, decay: 0.5, sustain: 0.0, release: 0.5,
-        filterCutoff: 8000, filterResonance: 0.5, 
-        lfoRate: 0, lfoDepth: 0, lfoTarget: 'none'
-    },
-    reverbMix: 0.4,
-    delayMix: 0.5,
-    delayTime: 0.35,
-    delayFeedback: 0.3,
-    compressorThreshold: -15,
-    compressorRatio: 4,
-    compressorRelease: 0.1
-  },
-  {
-    id: 3,
-    name: "Voltage Saw",
-    gain: 0.5, // 50%
-    modMatrix: [],
-    osc1: {
-        enabled: true,
-        waveform: WaveformType.SAWTOOTH,
-        coarseDetune: 0, fineDetune: -5, gain: 0.3,
-        attack: 0.05, decay: 0.2, sustain: 1.0, release: 0.1,
-        filterCutoff: 2500, filterResonance: 0.5,
-        lfoRate: 6.0, lfoDepth: 5, lfoTarget: 'pitch'
-    },
-    osc2: {
-        enabled: true,
-        waveform: WaveformType.SAWTOOTH,
-        coarseDetune: 0, fineDetune: 5, gain: 0.3,
-        attack: 0.05, decay: 0.2, sustain: 1.0, release: 0.1,
-        filterCutoff: 2500, filterResonance: 0.5,
-        lfoRate: 6.1, lfoDepth: 5, lfoTarget: 'pitch'
-    },
-    osc3: { ...defaultDisabledOsc },
-    reverbMix: 0.2,
-    delayMix: 0.0,
-    delayTime: 0.1,
-    delayFeedback: 0.0,
-    compressorThreshold: -10,
-    compressorRatio: 12,
-    compressorRelease: 0.1
-  },
-  {
-    id: 4,
-    name: "Analog Strings",
-    gain: 0.5, // 50%
-    modMatrix: [],
-    osc1: {
-        enabled: true,
-        waveform: WaveformType.SAWTOOTH,
-        coarseDetune: 0, fineDetune: -4, gain: 0.25,
-        attack: 0.6, decay: 0.5, sustain: 0.8, release: 1.2,
-        filterCutoff: 2000, filterResonance: 0.2,
-        lfoRate: 4, lfoDepth: 2, lfoTarget: 'pitch'
-    },
-    osc2: {
-        enabled: true,
-        waveform: WaveformType.SAWTOOTH,
-        coarseDetune: 0, fineDetune: 4, gain: 0.25,
-        attack: 0.6, decay: 0.5, sustain: 0.8, release: 1.2,
-        filterCutoff: 2000, filterResonance: 0.2,
-        lfoRate: 3.5, lfoDepth: 2, lfoTarget: 'pitch'
-    },
-    osc3: { 
-        enabled: true,
-        waveform: WaveformType.SQUARE,
-        coarseDetune: -1200, fineDetune: 0, gain: 0.15,
-        attack: 0.6, decay: 0.5, sustain: 0.8, release: 1.2,
-        filterCutoff: 1500, filterResonance: 0.5, 
-        lfoRate: 0, lfoDepth: 0, lfoTarget: 'none'
-    },
-    reverbMix: 0.5,
-    delayMix: 0.2,
-    delayTime: 0.4,
-    delayFeedback: 0.2,
-    compressorThreshold: -20,
-    compressorRatio: 6,
-    compressorRelease: 0.3
-  },
-  {
-    id: 5,
-    name: "Resonant Lead",
-    gain: 0.5, // 50%
-    modMatrix: [],
-    osc1: {
-        enabled: true,
-        waveform: WaveformType.SQUARE,
-        coarseDetune: 0, fineDetune: 0, gain: 0.4,
-        attack: 0.05, decay: 2.0, sustain: 0.5, release: 0.5,
-        filterCutoff: 800, filterResonance: 8,
-        lfoRate: 4, lfoDepth: 50, lfoTarget: 'filter'
-    },
-    osc2: {
-        enabled: true,
-        waveform: WaveformType.SAWTOOTH,
-        coarseDetune: -1200, fineDetune: 0, gain: 0.2,
-        attack: 0.05, decay: 2.0, sustain: 0.5, release: 0.5,
-        filterCutoff: 1200, filterResonance: 4,
-        lfoRate: 0, lfoDepth: 0, lfoTarget: 'none'
-    },
-    osc3: { ...defaultDisabledOsc },
-    reverbMix: 0.3,
-    delayMix: 0.4,
+    spread: 0.5,
+    reverbMix: 0.1,
+    delayMix: 0,
     delayTime: 0.25,
-    delayFeedback: 0.5,
-    compressorThreshold: -12,
-    compressorRatio: 10,
-    compressorRelease: 0.1
-  },
-  {
-    id: 6,
-    name: "Sub Bass",
-    gain: 0.5, // 50%
-    modMatrix: [],
-    osc1: {
-        enabled: true,
-        waveform: WaveformType.SINE,
-        coarseDetune: -1200, fineDetune: 0, gain: 0.5,
-        attack: 0.05, decay: 0.2, sustain: 1.0, release: 0.2,
-        filterCutoff: 200, filterResonance: 0.5, 
-        lfoRate: 0, lfoDepth: 0, lfoTarget: 'none'
-    },
-    osc2: {
-        enabled: true,
-        waveform: WaveformType.TRIANGLE,
-        coarseDetune: -1200, fineDetune: 0, gain: 0.3,
-        attack: 0.05, decay: 0.2, sustain: 0.8, release: 0.2,
-        filterCutoff: 400, filterResonance: 0.5, 
-        lfoRate: 0, lfoDepth: 0, lfoTarget: 'none'
-    },
-    osc3: { 
-        enabled: true,
-        waveform: WaveformType.SQUARE,
-        coarseDetune: 0, fineDetune: 0, gain: 0.1,
-        attack: 0.1, decay: 0.1, sustain: 0.4, release: 0.2,
-        filterCutoff: 1000, filterResonance: 0.5, 
-        lfoRate: 0, lfoDepth: 0, lfoTarget: 'none'
-    },
-    reverbMix: 0.0,
-    delayMix: 0.0,
-    delayTime: 0.1,
-    delayFeedback: 0,
-    compressorThreshold: -5,
-    compressorRatio: 20,
-    compressorRelease: 0.1
-  },
-  {
-    id: 7,
-    name: "Sci-Fi Tremolo",
-    gain: 0.5, // 50%
-    modMatrix: [],
-    osc1: {
-        enabled: true,
-        waveform: WaveformType.TRIANGLE,
-        coarseDetune: 0, fineDetune: 0, gain: 0.4,
-        attack: 1.0, decay: 1.0, sustain: 1.0, release: 2.0,
-        filterCutoff: 1500, filterResonance: 1,
-        lfoRate: 8, lfoDepth: 80, lfoTarget: 'tremolo'
-    },
-    osc2: {
-        enabled: true,
-        waveform: WaveformType.SINE,
-        coarseDetune: 0, fineDetune: 10, gain: 0.3,
-        attack: 1.0, decay: 1.0, sustain: 1.0, release: 2.0,
-        filterCutoff: 1500, filterResonance: 1,
-        lfoRate: 0.2, lfoDepth: 30, lfoTarget: 'pitch'
-    },
-    osc3: { ...defaultDisabledOsc },
-    reverbMix: 0.6,
-    delayMix: 0.4,
-    delayTime: 0.5,
-    delayFeedback: 0.5,
-    compressorThreshold: -25,
+    delayFeedback: 0.2,
+    compressorThreshold: -10,
     compressorRatio: 4,
-    compressorRelease: 0.5
-  },
-  {
-    id: 8,
-    name: "Noise Wash",
-    gain: 0.5, // 50%
-    modMatrix: [],
-    osc1: {
-        enabled: true,
-        waveform: WaveformType.SAWTOOTH,
-        coarseDetune: -2400, fineDetune: 0, gain: 0.3,
-        attack: 2.0, decay: 3.0, sustain: 0.8, release: 4.0,
-        filterCutoff: 300, filterResonance: 15,
-        lfoRate: 0.1, lfoDepth: 80, lfoTarget: 'filter'
-    },
-    osc2: {
-        enabled: true,
-        waveform: WaveformType.SQUARE,
-        coarseDetune: -1200, fineDetune: 0, gain: 0.2,
-        attack: 2.0, decay: 3.0, sustain: 0.8, release: 4.0,
-        filterCutoff: 400, filterResonance: 10,
-        lfoRate: 0.15, lfoDepth: 60, lfoTarget: 'filter'
-    },
-    osc3: { ...defaultDisabledOsc },
-    reverbMix: 0.9,
-    delayMix: 0.7,
-    delayTime: 0.8,
-    delayFeedback: 0.7,
-    compressorThreshold: -30,
-    compressorRatio: 2,
-    compressorRelease: 1.0
-  }
-];
+    compressorRelease: 0.2
+});
 
-export const DEFAULT_PRESET = PRESETS[0];
+export const DEFAULT_PRESET: SynthPreset = generateInitPatch("Init Patch", "init");
+
+// --- BANKS DEFINITION ---
+const PADS_BANK: SynthPreset[] = [DEFAULT_PRESET];
+const LEADS_BANK: SynthPreset[] = [DEFAULT_PRESET];
+const BASS_BANK: SynthPreset[] = [DEFAULT_PRESET];
+const KEYS_BANK: SynthPreset[] = [DEFAULT_PRESET];
+const MALLETS_BANK: SynthPreset[] = [DEFAULT_PRESET];
+
+export const PRESET_BANKS: SynthBank[] = [
+    { id: 'pads', name: 'Pads', presets: PADS_BANK },
+    { id: 'leads', name: 'Leads', presets: LEADS_BANK },
+    { id: 'bass', name: 'Bass', presets: BASS_BANK },
+    { id: 'keys', name: 'Keys', presets: KEYS_BANK },
+    { id: 'mallets', name: 'Mallets', presets: MALLETS_BANK },
+];

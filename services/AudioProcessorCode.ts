@@ -54,9 +54,30 @@ class SVF {
   }
 
   process(input, cutoff, res, sampleRate) {
-    const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.42));
+    // NaN Guard for Cutoff
+    let safeCutoff = cutoff;
+    if (!Number.isFinite(safeCutoff)) safeCutoff = 1000;
+    // Clamp cutoff to slightly below Nyquist to ensure stability
+    safeCutoff = Math.max(20, Math.min(safeCutoff, sampleRate * 0.45));
+
+    // NaN Guard for Resonance
+    let safeRes = res;
+    if (!Number.isFinite(safeRes)) safeRes = 0;
+    
+    // NaN Guard for Input
+    if (!Number.isFinite(input)) input = 0;
+
+    // State NaN Guard (Self-healing)
+    if (!Number.isFinite(this.low) || !Number.isFinite(this.band)) {
+        this.reset();
+    }
+
     let f = 2.0 * Math.sin(Math.PI * safeCutoff / sampleRate);
-    const q = 1.0 / (res + 0.5);
+    
+    // STABILITY FIX: 
+    // Increased offset from 0.5 to 0.9 to prevent instability at Res=0 and High Cutoff.
+    // This reduces the maximum damping factor q, keeping the filter stable.
+    const q = 1.0 / (safeRes + 0.9);
 
     this.low += f * this.band;
     this.high = input - this.low - q * this.band;
@@ -77,6 +98,8 @@ class Envelope {
   trigger(velocity = 1.0) {
     this.stage = 'attack';
     this.velocity = velocity;
+    // Note: We do NOT reset this.value to 0.0 here. 
+    // This allows smooth re-triggering if the envelope was in release.
   }
 
   release() {
@@ -136,17 +159,18 @@ class Envelope {
 
 class Oscillator {
   constructor(sampleRate) {
-    this.phase = 0.0; 
+    this.phase = Math.random(); // Random start phase for organic feel
     this.blep = new PolyBLEP(sampleRate);
     this.sampleRate = sampleRate;
   }
 
   reset() {
-      this.phase = 0.0;
+      // Intentionally empty. 
+      // Do NOT reset phase on note on. Free-running oscillators prevent click transients.
   }
 
   process(freq, type, dt) {
-    if (!Number.isFinite(freq) || freq <= 0 || freq > 24000) return 0.0;
+    if (!Number.isFinite(freq) || freq <= 0) return 0.0;
 
     this.phase += dt * freq;
     while (this.phase >= 1.0) this.phase -= 1.0;
@@ -208,14 +232,17 @@ class Voice {
     this.startTime = currentTime; 
     this.releaseTime = 0; 
     
-    this.oscs.forEach(osc => osc.reset());
+    // We do NOT reset oscillator phase here.
     
+    // We trigger envelopes. If they are already running (stealing), they will ramp from current value.
     this.envs.forEach(env => {
-        env.reset();
         env.trigger();
     });
     
+    // Filter state is reset to prevent blown filters from previous bad states
     this.filters.forEach(f => f.reset());
+    
+    // LFOs reset to 0 phase for consistency on attack
     this.lfoPhases.fill(0.0);
   }
 
@@ -324,9 +351,20 @@ class Voice {
         else if (i===1) { modPitch=modP2; modCutoff=modC2; modGain=modG2; modRes=modR2; }
         else { modPitch=modP3; modCutoff=modC3; modGain=modG3; modRes=modR3; }
 
+        // Sanitize Modulations
+        if (!Number.isFinite(modPitch)) modPitch = 0;
+        if (!Number.isFinite(modCutoff)) modCutoff = 0;
+        if (!Number.isFinite(modGain)) modGain = 0;
+        if (!Number.isFinite(modRes)) modRes = 0;
+
         const cents = config.coarseDetune + config.fineDetune + hardPitch + (modPitch * 1200);
         const detuneMult = Math.pow(2, cents / 1200.0);
-        const oscFreq = this.baseFreq * detuneMult;
+        let oscFreq = this.baseFreq * detuneMult;
+
+        // CRITICAL FIX: Nyquist Clamping to prevent aliasing/static on high notes
+        if (oscFreq > this.sampleRate * 0.48) {
+            oscFreq = this.sampleRate * 0.48;
+        }
 
         let signal = this.oscs[i].process(oscFreq, config.waveform, dt);
 
@@ -342,7 +380,7 @@ class Voice {
         voiceMix += signal * finalGain;
     }
     
-    return voiceMix;
+    return Number.isFinite(voiceMix) ? voiceMix : 0.0;
   }
 }
 
@@ -351,15 +389,21 @@ class PrismaProcessor extends AudioWorkletProcessor {
     super();
     this.voices = [];
     for(let i=0; i<32; i++) {
-        this.voices.push(new Voice(sampleRate));
+        const v = new Voice(sampleRate);
+        // Pre-calculate unique deterministic pan position for each voice (-1 to 1)
+        // Using a prime-based scatter to avoid adjacent voices clustering
+        v.panPos = Math.sin(i * 123.456); 
+        this.voices.push(v);
     }
     
     this.preset = null;
     this.maxPolyphony = 10; 
     this.oscConfigs = [DUMMY_OSC_CONFIG, DUMMY_OSC_CONFIG, DUMMY_OSC_CONFIG];
     this.modMatrix = [];
-    this.xm1 = 0;
-    this.ym1 = 0;
+    
+    // DC Blockers
+    this.xm1L = 0; this.ym1L = 0;
+    this.xm1R = 0; this.ym1R = 0;
 
     this.port.onmessage = (e) => {
       const msg = e.data;
@@ -393,6 +437,8 @@ class PrismaProcessor extends AudioWorkletProcessor {
   }
 
   triggerVoice(id, freq) {
+    if (!Number.isFinite(freq) || freq <= 0) return; 
+
     for (let i = 0; i < this.voices.length; i++) {
         if (this.voices[i].active && this.voices[i].id === id) {
             this.voices[i].trigger(id, freq);
@@ -461,40 +507,64 @@ class PrismaProcessor extends AudioWorkletProcessor {
     if (!channelL) return true;
     const len = channelL.length;
     const dt = 1.0 / sampleRate;
+    
+    const spreadAmount = (this.preset.spread !== undefined) ? this.preset.spread : 0.0;
 
     for (let s = 0; s < len; s++) {
-        let sampleMix = 0.0;
+        let mixL = 0.0;
+        let mixR = 0.0;
+
         for (let i = 0; i < this.voices.length; i++) {
             const v = this.voices[i];
             if (v.active) {
                 const val = v.process(this.oscConfigs, this.modMatrix, dt);
                 if (Number.isFinite(val)) {
-                    sampleMix += val;
+                    // Stereo Panning Logic
+                    let pan = v.panPos * spreadAmount; // -1 to 1
+                    // Equal Power Panning approx
+                    // L = 0.5 * (1 - pan), R = 0.5 * (1 + pan) is Linear
+                    // Let's use simple linear for speed, good enough for spread
+                    const gainL = 0.5 * (1.0 - pan);
+                    const gainR = 0.5 * (1.0 + pan);
+                    
+                    mixL += val * gainL;
+                    mixR += val * gainR;
                 } else {
                     v.hardStop();
                 }
             }
         }
-        sampleMix *= 0.1; 
-        sampleMix = Math.tanh(sampleMix * 0.7);
-        const x = sampleMix;
-        const y = x - this.xm1 + 0.995 * this.ym1;
-        this.xm1 = x;
-        this.ym1 = y;
-        channelL[s] = y;
+        
+        // Safety Clamping & DC Block
+        if (!Number.isFinite(mixL)) mixL = 0;
+        if (!Number.isFinite(mixR)) mixR = 0;
+        
+        // Tanh Saturation
+        mixL = Math.tanh(mixL * 0.15); 
+        mixR = Math.tanh(mixR * 0.15); 
+
+        // DC Block L
+        const yL = mixL - this.xm1L + 0.998 * this.ym1L;
+        this.xm1L = mixL;
+        this.ym1L = yL;
+        
+        // DC Block R
+        const yR = mixR - this.xm1R + 0.998 * this.ym1R;
+        this.xm1R = mixR;
+        this.ym1R = yR;
+        
+        channelL[s] = Number.isFinite(yL) ? yL : 0;
+        if (channelR) {
+            channelR[s] = Number.isFinite(yR) ? yR : 0;
+        }
     }
 
     const masterGain = this.preset.gain;
-    if (channelR) {
-        for (let s = 0; s < len; s++) {
-            channelL[s] *= masterGain;
-            channelR[s] = channelL[s];
-        }
-    } else {
-        for (let s = 0; s < len; s++) {
-            channelL[s] *= masterGain;
-        }
+    for (let s = 0; s < len; s++) {
+        channelL[s] *= masterGain;
+        if (channelR) channelR[s] *= masterGain;
     }
+    
     return true;
   }
 }

@@ -112,22 +112,29 @@ class AudioEngine {
 
     // Rebuild Graph
     this.limiter = this.ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -12.0; // Reduced threshold to catch peaks earlier
+    this.limiter.threshold.value = -12.0; 
     this.limiter.ratio.value = 12.0;
     this.limiter.connect(this.ctx.destination);
 
+    // Initialize Dry Gain at 0 to prevent connection pop
     this.dryGain = this.ctx.createGain();
+    this.dryGain.gain.value = 0; 
     this.dryGain.connect(this.limiter);
 
+    // Reverb Setup
     this.reverbNode = this.ctx.createConvolver();
     this.reverbNode.buffer = this.createImpulseResponse(2.5, 2.0);
     this.reverbGain = this.ctx.createGain();
+    this.reverbGain.gain.value = 0; // Initialize at 0
     this.reverbGain.connect(this.reverbNode);
     this.reverbNode.connect(this.limiter);
 
+    // Delay Setup
     this.delayNode = this.ctx.createDelay(5.0);
     this.delayFeedbackGain = this.ctx.createGain();
+    this.delayFeedbackGain.gain.value = 0; // Initialize at 0 to prevent feedback loop on startup
     this.delayOutputGain = this.ctx.createGain();
+    this.delayOutputGain.gain.value = 0; // Initialize at 0
     
     this.delayOutputGain.connect(this.delayNode);
     this.delayNode.connect(this.limiter); 
@@ -142,19 +149,27 @@ class AudioEngine {
         this.workletNode.connect(this.delayOutputGain);
     }
 
-    this.updateFX();
-    this.setMasterVolume(this.currentMasterVol);
+    // Ramp up the gains to current settings (Smooth Start)
+    this.updateFX(true);
   }
 
-  private updateFX() {
+  private updateFX(isInit: boolean = false) {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      const ramp = 0.1;
+      const ramp = 0.05; // Fast but smooth ramp to eliminate clicks
+
+      // RESET FEEDBACK INSTANTLY if changing presets or initializing
+      // This kills the feedback loop from previous patches
+      if (this.delayFeedbackGain) {
+          this.delayFeedbackGain.gain.cancelScheduledValues(now);
+          this.delayFeedbackGain.gain.setValueAtTime(0, now); // Kill feedback
+          // Ramp back up to target
+          this.delayFeedbackGain.gain.linearRampToValueAtTime(this.activePreset.delayFeedback, now + 0.2); 
+      }
 
       if (this.reverbGain) this.reverbGain.gain.setTargetAtTime(this.activePreset.reverbMix, now, ramp);
       if (this.delayOutputGain) this.delayOutputGain.gain.setTargetAtTime(this.activePreset.delayMix, now, ramp);
       if (this.delayNode) this.delayNode.delayTime.setTargetAtTime(this.activePreset.delayTime, now, ramp);
-      if (this.delayFeedbackGain) this.delayFeedbackGain.gain.setTargetAtTime(this.activePreset.delayFeedback, now, ramp);
       
       if (this.limiter) {
           const thresh = this.activePreset.compressorThreshold ?? -20.0;
@@ -180,11 +195,11 @@ class AudioEngine {
     const left = impulse.getChannelData(0);
     const right = impulse.getChannelData(1);
 
-    // FIX: Normalize the Impulse Response to prevent massive gain accumulation
     let maxVal = 0;
     for (let i = 0; i < length; i++) {
         const n = i / length;
         const amp = Math.pow(1 - n, decay);
+        // Use a simpler noise to avoid massive initial spikes
         left[i] = (Math.random() * 2 - 1) * amp;
         right[i] = (Math.random() * 2 - 1) * amp;
         if (Math.abs(left[i]) > maxVal) maxVal = Math.abs(left[i]);
@@ -192,7 +207,7 @@ class AudioEngine {
     }
 
     // Normalize
-    const scale = 0.1 / Math.max(0.001, maxVal); // Scale down significantly to keep Reverb Gain sensible
+    const scale = 0.1 / Math.max(0.001, maxVal); 
     for (let i = 0; i < length; i++) {
         left[i] *= scale;
         right[i] *= scale;
@@ -254,9 +269,18 @@ class AudioEngine {
     if (!this.workletNode) return;
     this.workletNode.port.postMessage({ type: 'stop_all' });
     
-    // CRITICAL: Rebuild FX chain on Panic to clear any corrupted delay buffers (NaNs)
-    // that might be causing infinite feedback loops.
-    this.setupFX();
+    // Smoothly duck volume then rebuild to clear buffers
+    if (this.dryGain && this.ctx) {
+         this.dryGain.gain.cancelScheduledValues(this.ctx.currentTime);
+         this.dryGain.gain.setValueAtTime(this.dryGain.gain.value, this.ctx.currentTime);
+         this.dryGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.05);
+         
+         setTimeout(() => {
+             this.setupFX();
+         }, 100);
+    } else {
+        this.setupFX();
+    }
   }
 }
 

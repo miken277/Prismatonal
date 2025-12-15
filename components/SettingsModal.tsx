@@ -1,6 +1,6 @@
 
-import React, { useRef, useState, useEffect } from 'react';
-import { AppSettings, ButtonShape, ChordDefinition } from '../types';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { AppSettings, ButtonShape, ChordDefinition, KeyMap } from '../types';
 import { DEFAULT_COLORS } from '../constants';
 import { midiService, MidiDevice } from '../services/MidiService';
 
@@ -11,7 +11,71 @@ interface Props {
   updateSettings: (s: AppSettings) => void;
 }
 
-// Helper component for Validated Numeric Input
+// --- HELPER COMPONENTS ---
+
+// 1. Throttled Slider
+interface ThrottledSliderProps {
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    onChange: (val: number) => void;
+    className?: string;
+    style?: React.CSSProperties;
+}
+
+const ThrottledSlider: React.FC<ThrottledSliderProps> = ({
+    value,
+    min,
+    max,
+    step,
+    onChange,
+    className = "",
+    style
+}) => {
+    const [localValue, setLocalValue] = useState(value);
+    const lastEmit = useRef(0);
+    const timer = useRef<number | null>(null);
+
+    // Sync from parent if changed externally
+    useEffect(() => {
+        setLocalValue(value);
+    }, [value]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newVal = parseFloat(e.target.value);
+        setLocalValue(newVal);
+
+        const now = Date.now();
+        // Throttle to ~33ms (30fps) for heavy operations
+        if (now - lastEmit.current > 33) {
+            onChange(newVal);
+            lastEmit.current = now;
+        } else {
+            // Trailing edge call to ensure final value is set
+            if (timer.current) clearTimeout(timer.current);
+            timer.current = window.setTimeout(() => {
+                onChange(newVal);
+                lastEmit.current = Date.now();
+            }, 33);
+        }
+    };
+
+    return (
+        <input 
+            type="range" 
+            min={min} 
+            max={max} 
+            step={step}
+            value={localValue}
+            onChange={handleChange}
+            className={className}
+            style={style}
+        />
+    );
+};
+
+// 2. Number Input
 const NumberInput = ({
     value,
     min,
@@ -31,7 +95,6 @@ const NumberInput = ({
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        // Sync with external updates if they differ from current valid text
         if (parseInt(text) !== value) {
              setText(value.toString());
              setError(null);
@@ -40,18 +103,13 @@ const NumberInput = ({
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
-        
-        // Strict Reject: Only allow digits. 
         if (val !== '' && !/^\d+$/.test(val)) return;
-
         setText(val);
-
         if (val === '') return; 
 
         const num = parseInt(val, 10);
         if (num < min || num > max) {
             setError(`Range: ${min}-${max}`);
-            // Reject input: Do not call onChange
         } else {
             setError(null);
             onChange(num);
@@ -59,7 +117,6 @@ const NumberInput = ({
     };
 
     const handleBlur = () => {
-        // Revert to last valid value on blur if empty or invalid
         if (text === '' || error) {
             setText(value.toString());
             setError(null);
@@ -84,16 +141,41 @@ const NumberInput = ({
     );
 };
 
+// 3. Key Bind Button
+interface KeyBindButtonProps {
+    label: string;
+    code: string;
+    onBind: () => void;
+}
+
+const KeyBindButton: React.FC<KeyBindButtonProps> = ({ 
+    label, 
+    code, 
+    onBind 
+}) => {
+    const display = code.replace('Key', '').replace('Digit', '').replace('BracketRight', ']').replace('BracketLeft', '[').replace('Comma', ',').replace('Period', '.');
+    return (
+        <div className="flex justify-between items-center py-2 border-b border-slate-700/50 last:border-0">
+            <span className="text-xs text-slate-300">{label}</span>
+            <button 
+                onClick={onBind}
+                className="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded text-xs font-mono font-bold min-w-[3rem] text-center border border-slate-600"
+            >
+                {display}
+            </button>
+        </div>
+    );
+};
+
 const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'behavior' | 'color' | 'midi'>('general');
   const [midiDevices, setMidiDevices] = useState<MidiDevice[]>([]);
+  const [bindingKey, setBindingKey] = useState<keyof KeyMap | null>(null);
 
-  // Init MIDI list when opening MIDI tab
   useEffect(() => {
     if (isOpen && activeTab === 'midi') {
         midiService.init().then(success => {
             if (success) {
-                // Now await the asynchronous device list
                 midiService.getOutputs().then(devices => {
                     setMidiDevices(devices);
                 });
@@ -101,6 +183,21 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
         });
     }
   }, [isOpen, activeTab]);
+
+  useEffect(() => {
+      if (!bindingKey) return;
+      const handleBind = (e: KeyboardEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          updateSettings({
+              ...settings,
+              keyMap: { ...settings.keyMap, [bindingKey]: e.code }
+          });
+          setBindingKey(null);
+      };
+      window.addEventListener('keydown', handleBind, { capture: true });
+      return () => window.removeEventListener('keydown', handleBind, { capture: true });
+  }, [bindingKey, settings, updateSettings]);
 
   if (!isOpen) return null;
 
@@ -111,20 +208,14 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   const handleLimitDepthChange = (limit: 3 | 5 | 7 | 11 | 13, val: number) => {
     updateSettings({
       ...settings,
-      limitDepths: {
-        ...settings.limitDepths,
-        [limit]: val
-      }
+      limitDepths: { ...settings.limitDepths, [limit]: val }
     });
   };
 
   const handleLimitComplexityChange = (limit: 3 | 5 | 7 | 11 | 13, val: number) => {
     updateSettings({
       ...settings,
-      limitComplexities: {
-        ...settings.limitComplexities,
-        [limit]: val
-      }
+      limitComplexities: { ...settings.limitComplexities, [limit]: val }
     });
   };
 
@@ -168,33 +259,22 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   };
 
   const pairLimitColors = () => {
-     const ratios: {[key: number]: number} = {
-         1: 1,
-         3: 1.5,
-         5: 1.25,
-         7: 7/8,
-         11: 11/8,
-         13: 13/8
-     };
-
+     const ratios: {[key: number]: number} = { 1: 1, 3: 1.5, 5: 1.25, 7: 7/8, 11: 11/8, 13: 13/8 };
      const newColors = { ...settings.colors };
      const offset = settings.rainbowOffset;
-     
      Object.keys(ratios).forEach(k => {
          const key = parseInt(k);
          const ratio = ratios[key];
          const shift = -Math.log2(ratio) * 360;
          let hue = (offset + shift) % 360;
          if (hue < 0) hue += 360;
-         
          newColors[key] = hslToHex(hue, 70, 60); 
      });
-
      updateSettings({ ...settings, colors: newColors });
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center backdrop-blur-sm">
+    <div className="fixed inset-0 bg-slate-900/90 z-[200] flex items-center justify-center">
       <div className="bg-slate-800 rounded-xl w-[95%] max-w-4xl max-h-[90vh] overflow-hidden text-slate-200 shadow-2xl border border-slate-700 flex flex-col">
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-slate-700 bg-slate-800">
@@ -204,35 +284,23 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
         {/* Tabs */}
         <div className="flex border-b border-slate-700 bg-slate-900/50">
-           <button 
-             onClick={() => setActiveTab('general')}
-             className={`flex-1 py-3 font-semibold transition ${activeTab === 'general' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
-           >
-             Dimensions
-           </button>
-           <button 
-             onClick={() => setActiveTab('behavior')}
-             className={`flex-1 py-3 font-semibold transition ${activeTab === 'behavior' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
-           >
-             Behavior & Chords
-           </button>
-           <button 
-             onClick={() => setActiveTab('color')}
-             className={`flex-1 py-3 font-semibold transition ${activeTab === 'color' ? 'text-pink-400 border-b-2 border-pink-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
-           >
-             Visuals & Color
-           </button>
-           <button 
-             onClick={() => setActiveTab('midi')}
-             className={`flex-1 py-3 font-semibold transition ${activeTab === 'midi' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}
-           >
-             MIDI
-           </button>
+           <button onClick={() => setActiveTab('general')} className={`flex-1 py-3 font-semibold transition ${activeTab === 'general' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Dimensions</button>
+           <button onClick={() => setActiveTab('behavior')} className={`flex-1 py-3 font-semibold transition ${activeTab === 'behavior' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Behavior & Chords</button>
+           <button onClick={() => setActiveTab('color')} className={`flex-1 py-3 font-semibold transition ${activeTab === 'color' ? 'text-pink-400 border-b-2 border-pink-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Visuals & Color</button>
+           <button onClick={() => setActiveTab('midi')} className={`flex-1 py-3 font-semibold transition ${activeTab === 'midi' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>MIDI</button>
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto flex-1 bg-slate-800">
+        <div className="p-6 overflow-y-auto flex-1 bg-slate-800 relative">
             
+            {bindingKey && (
+                <div className="absolute inset-0 z-50 bg-slate-900/90 flex flex-col items-center justify-center animate-in fade-in duration-200">
+                    <h3 className="text-2xl font-bold text-white mb-2">Press any key...</h3>
+                    <p className="text-slate-400">Binding for: <span className="text-indigo-400 capitalize">{bindingKey.replace(/([A-Z])/g, ' $1').trim()}</span></p>
+                    <button onClick={() => setBindingKey(null)} className="mt-8 text-sm text-slate-500 hover:text-white">Cancel</button>
+                </div>
+            )}
+
             {/* --- General Tab --- */}
             {activeTab === 'general' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-300">
@@ -241,22 +309,16 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       
                       <div>
                           <label className="block text-sm font-semibold mb-2">Base Frequency (1/1)</label>
-                          <NumberInput 
-                              value={settings.baseFrequency}
-                              min={20}
-                              max={15000}
-                              suffix="Hz"
-                              onChange={(val) => handleChange('baseFrequency', val)}
-                          />
+                          <NumberInput value={settings.baseFrequency} min={20} max={15000} suffix="Hz" onChange={(val) => handleChange('baseFrequency', val)} />
                       </div>
                       
                       <div>
                           <label className="block text-sm font-semibold mb-2">Canvas Size (Scrollable Area)</label>
                           <div className="flex items-center gap-4">
-                              <input 
-                                  type="range" min="1000" max="10000" step="500" 
+                              <ThrottledSlider 
+                                  min={1000} max={10000} step={500} 
                                   value={settings.canvasSize}
-                                  onChange={(e) => handleChange('canvasSize', parseInt(e.target.value))}
+                                  onChange={(val) => handleChange('canvasSize', val)}
                                   className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                               />
                               <span className="text-sm font-mono min-w-[5ch]">{settings.canvasSize}px</span>
@@ -266,7 +328,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
                           <label className="block text-sm font-semibold text-slate-300">Lattice Depth</label>
                           <p className="text-[10px] text-slate-500 mb-2">Controls how many steps outward from the center are generated for each axis.</p>
-                          
                           {[3, 5, 7, 11, 13].map(limit => (
                               <div key={limit} className="flex items-center gap-3">
                                   <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
@@ -284,14 +345,12 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                        <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
                           <label className="block text-sm font-semibold text-slate-300">Lattice Complexity (Max N/D)</label>
                           <p className="text-[10px] text-slate-500 mb-2">Controls the maximum Numerator or Denominator allowed for a node generated by extending this axis.</p>
-                          
                           {[3, 5, 7, 11, 13].map(limit => (
                               <div key={`comp-${limit}`} className="flex items-center gap-3">
                                   <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
                                   <NumberInput 
                                       value={settings.limitComplexities[limit as 3|5|7|11|13]}
-                                      min={10}
-                                      max={10000}
+                                      min={10} max={10000}
                                       onChange={(val) => handleLimitComplexityChange(limit as any, val)}
                                   />
                               </div>
@@ -304,16 +363,9 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       
                        <div className="mb-4">
                         <label className="flex items-center space-x-3 cursor-pointer p-3 bg-slate-700/50 rounded-lg border border-yellow-500/30 hover:bg-slate-700/80 transition">
-                            <input 
-                                type="checkbox" 
-                                checked={settings.uiUnlocked} 
-                                onChange={(e) => handleChange('uiUnlocked', e.target.checked)} 
-                                className="w-5 h-5 rounded border-slate-600 text-yellow-500 focus:ring-yellow-500" 
-                            />
+                            <input type="checkbox" checked={settings.uiUnlocked} onChange={(e) => handleChange('uiUnlocked', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-yellow-500 focus:ring-yellow-500" />
                             <div>
-                                <span className={`font-bold block ${settings.uiUnlocked ? 'text-yellow-400' : 'text-slate-300'}`}>
-                                    Unlock UI elements
-                                </span>
+                                <span className={`font-bold block ${settings.uiUnlocked ? 'text-yellow-400' : 'text-slate-300'}`}>Unlock UI elements</span>
                                 <span className="text-[10px] text-slate-400">Enable dragging of buttons and controls</span>
                             </div>
                         </label>
@@ -321,19 +373,19 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
                       <div>
                           <label className="block text-sm font-semibold mb-2">Global Button Spacing ({settings.buttonSpacingScale.toFixed(1)}x)</label>
-                          <input 
-                              type="range" min="0.5" max="5.0" step="0.1" 
+                          <ThrottledSlider 
+                              min={0.5} max={5.0} step={0.1} 
                               value={settings.buttonSpacingScale}
-                              onChange={(e) => handleChange('buttonSpacingScale', parseFloat(e.target.value))}
+                              onChange={(val) => handleChange('buttonSpacingScale', val)}
                               className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                           />
                       </div>
                       <div>
                           <label className="block text-sm mb-1">Global Button Size ({settings.buttonSizeScale.toFixed(1)}x)</label>
-                          <input 
-                              type="range" min="0.5" max="2.0" step="0.1" 
+                          <ThrottledSlider 
+                              min={0.5} max={2.0} step={0.1} 
                               value={settings.buttonSizeScale}
-                              onChange={(e) => handleChange('buttonSizeScale', parseFloat(e.target.value))}
+                              onChange={(val) => handleChange('buttonSizeScale', val)}
                               className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                           />
                       </div>
@@ -342,24 +394,16 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                           <label className="block text-xs font-bold text-slate-400 mb-2 uppercase">Node Text</label>
                           <div className="space-y-3">
                               <div>
-                                  <label className="flex justify-between text-xs mb-1">
-                                      <span>Text Size</span>
-                                      <span>{settings.nodeTextSizeScale.toFixed(2)}x</span>
-                                  </label>
-                                  <input 
-                                      type="range" min="0.5" max="2.0" step="0.05" 
+                                  <label className="flex justify-between text-xs mb-1"><span>Text Size</span><span>{settings.nodeTextSizeScale.toFixed(2)}x</span></label>
+                                  <ThrottledSlider 
+                                      min={0.5} max={2.0} step={0.05} 
                                       value={settings.nodeTextSizeScale}
-                                      onChange={(e) => handleChange('nodeTextSizeScale', parseFloat(e.target.value))}
+                                      onChange={(val) => handleChange('nodeTextSizeScale', val)}
                                       className="w-full h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer"
                                   />
                               </div>
                               <label className="flex items-center space-x-2 cursor-pointer">
-                                  <input 
-                                    type="checkbox" 
-                                    checked={settings.showFractionBar} 
-                                    onChange={(e) => handleChange('showFractionBar', e.target.checked)}
-                                    className="rounded border-slate-600 bg-slate-700"
-                                  />
+                                  <input type="checkbox" checked={settings.showFractionBar} onChange={(e) => handleChange('showFractionBar', e.target.checked)} className="rounded border-slate-600 bg-slate-700" />
                                   <span className="text-xs text-slate-300">Show Fraction Bar</span>
                               </label>
                           </div>
@@ -368,14 +412,8 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                        <div>
                            <label className="block text-sm mb-1">Button Shape</label>
                            <div className="flex gap-2">
-                             <button 
-                               onClick={() => handleChange('buttonShape', ButtonShape.CIRCLE)}
-                               className={`px-3 py-1 rounded ${settings.buttonShape === ButtonShape.CIRCLE ? 'bg-blue-600' : 'bg-slate-700'}`}
-                             >Circle</button>
-                             <button 
-                               onClick={() => handleChange('buttonShape', ButtonShape.DIAMOND)}
-                               className={`px-3 py-1 rounded ${settings.buttonShape === ButtonShape.DIAMOND ? 'bg-blue-600' : 'bg-slate-700'}`}
-                             >Diamond</button>
+                             <button onClick={() => handleChange('buttonShape', ButtonShape.CIRCLE)} className={`px-3 py-1 rounded ${settings.buttonShape === ButtonShape.CIRCLE ? 'bg-blue-600' : 'bg-slate-700'}`}>Circle</button>
+                             <button onClick={() => handleChange('buttonShape', ButtonShape.DIAMOND)} className={`px-3 py-1 rounded ${settings.buttonShape === ButtonShape.DIAMOND ? 'bg-blue-600' : 'bg-slate-700'}`}>Diamond</button>
                            </div>
                       </div>
                   </div>
@@ -388,60 +426,60 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                 <div className="space-y-6">
                    <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1">Interactions</h3>
                    
-                   <div>
-                       <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-teal-500/30">
-                          <input type="checkbox" checked={settings.isLatchModeEnabled} onChange={(e) => handleChange('isLatchModeEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-teal-500 focus:ring-teal-500" />
-                          <span className="font-semibold text-teal-300">Latch Mode</span>
-                      </label>
-                      <div className={`transition-opacity pl-4 border-l-2 border-slate-700 ${settings.isLatchModeEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
-                          <label className="block text-xs mb-1 text-slate-400">Harmonic Reach (Latch & Visuals)</label>
-                          <div className="flex gap-2 items-center">
-                              <input 
-                                  type="range" min="1" max="6" step="1" 
-                                  value={settings.latchShellLimit}
-                                  onChange={(e) => handleChange('latchShellLimit', parseInt(e.target.value))}
-                                  className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                              />
-                              <span className="text-xs font-mono">{settings.latchShellLimit}</span>
-                          </div>
-                          <p className="text-[10px] text-slate-500 mt-1">1=Octaves, 2=5th (3), 3=3rd (5), 4=7th...</p>
-                      </div>
-                  </div>
-
                   <div>
                     <label className="block text-sm font-semibold mb-2">Polyphony (Voices)</label>
                     <div className="flex items-center gap-4">
-                        <input 
-                            type="range" min="1" max="20" step="1" 
-                            value={settings.polyphony}
-                            onChange={(e) => handleChange('polyphony', parseInt(e.target.value))}
-                            className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                        />
+                        <input type="range" min="1" max="20" step="1" value={settings.polyphony} onChange={(e) => handleChange('polyphony', parseInt(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
                         <span className="text-xl font-bold min-w-[2ch]">{settings.polyphony}</span>
                     </div>
                   </div>
 
-                  <div className="text-sm">
-                     <label className="flex items-center space-x-2 cursor-pointer">
+                  <div className="space-y-3 text-sm">
+                     <label className="flex items-center space-x-2 cursor-pointer p-2 bg-slate-900/50 rounded border border-slate-700">
                        <input type="checkbox" checked={settings.isPitchBendEnabled} onChange={(e) => handleChange('isPitchBendEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
-                       <span>Enable Pitch Bend (Drag)</span>
+                       <div className="flex flex-col">
+                           <span className="font-semibold text-indigo-300">Enable Pitch Bend (Drag)</span>
+                           <span className="text-[10px] text-slate-500">Drag away from node center to bend pitch</span>
+                       </div>
                      </label>
+
+                     <label className="flex items-center space-x-2 cursor-pointer p-2 bg-slate-900/50 rounded border border-slate-700">
+                       <input type="checkbox" checked={settings.autoLatchOnDrag} onChange={(e) => handleChange('autoLatchOnDrag', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
+                       <div className="flex flex-col">
+                           <span className="font-semibold text-indigo-300">Auto-Latch/Play on Drag</span>
+                           <span className="text-[10px] text-slate-500">Sliding over new nodes triggers them (Draw Chords/Strum)</span>
+                       </div>
+                     </label>
+                     
+                     <div className="bg-slate-900/50 rounded border border-slate-700 p-2">
+                         <div className="flex justify-between items-center mb-1">
+                             <span className="text-xs font-semibold text-indigo-300">Strum Note Duration</span>
+                             <span className="text-xs font-mono">{settings.strumDurationMs} ms</span>
+                         </div>
+                         <ThrottledSlider 
+                            min={50} max={2000} step={10} 
+                            value={settings.strumDurationMs} 
+                            onChange={(val) => handleChange('strumDurationMs', val)}
+                            className="w-full h-1 bg-indigo-700 rounded appearance-none"
+                         />
+                         <p className="text-[10px] text-slate-500 mt-1">Duration of notes when dragged over from outside.</p>
+                     </div>
                   </div>
+
+                   {/* SHORTCUTS SECTION */}
+                   <div className="mt-8 pt-6 border-t border-slate-700">
+                      <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1 mb-4">Keyboard Shortcuts</h3>
+                      <div className="bg-slate-900/50 rounded border border-slate-700 p-2 max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700">
+                          {Object.keys(settings.keyMap).map(k => (
+                              <KeyBindButton key={k} label={k} code={settings.keyMap[k as keyof KeyMap]} onBind={() => setBindingKey(k as keyof KeyMap)} />
+                          ))}
+                      </div>
+                   </div>
                 </div>
 
                 <div className="space-y-6">
                     <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1">Visual Feedback</h3>
                     
-                    <div>
-                        <label className="block text-sm font-semibold mb-2">Latched Zoom ({settings.latchedZoomScale.toFixed(1)}x)</label>
-                        <input 
-                            type="range" min="1.0" max="2.0" step="0.1" 
-                            value={settings.latchedZoomScale}
-                            onChange={(e) => handleChange('latchedZoomScale', parseFloat(e.target.value))}
-                            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                        />
-                    </div>
-
                     <div>
                         <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-indigo-500/30">
                             <input type="checkbox" checked={settings.isVoiceLeadingEnabled} onChange={(e) => handleChange('isVoiceLeadingEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
@@ -462,19 +500,19 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                   </div>
                                   <div className="col-span-2">
                                     <label className="block text-xs mb-1 text-slate-400">Glow Width</label>
-                                    <input 
-                                        type="range" min="0.0" max="1.0" step="0.01" 
+                                    <ThrottledSlider 
+                                        min={0.0} max={1.0} step={0.01} 
                                         value={settings.voiceLeadingGlowAmount}
-                                        onChange={(e) => handleChange('voiceLeadingGlowAmount', parseFloat(e.target.value))}
+                                        onChange={(val) => handleChange('voiceLeadingGlowAmount', val)}
                                         className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                                     />
                                   </div>
                                   <div className="col-span-2">
                                     <label className="block text-xs mb-1 text-slate-400">Speed</label>
-                                    <input 
-                                        type="range" min="0.5" max="5.0" step="0.5" 
+                                    <ThrottledSlider 
+                                        min={0.5} max={5.0} step={0.5} 
                                         value={settings.voiceLeadingAnimationSpeed}
-                                        onChange={(e) => handleChange('voiceLeadingAnimationSpeed', parseFloat(e.target.value))}
+                                        onChange={(val) => handleChange('voiceLeadingAnimationSpeed', val)}
                                         className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                                     />
                                   </div>
@@ -491,10 +529,10 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                     <div className="flex gap-4">
                         <div className="flex-1">
                             <label className="block text-sm font-semibold mb-2">Chord Shortcut Size ({settings.chordShortcutSizeScale.toFixed(2)}x)</label>
-                            <input 
-                                type="range" min="0.33" max="1.0" step="0.01" 
+                            <ThrottledSlider 
+                                min={0.33} max={1.0} step={0.01} 
                                 value={settings.chordShortcutSizeScale}
-                                onChange={(e) => handleChange('chordShortcutSizeScale', parseFloat(e.target.value))}
+                                onChange={(val) => handleChange('chordShortcutSizeScale', val)}
                                 className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
                             />
                         </div>
@@ -562,7 +600,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-300">
                   <div className="space-y-6">
                       <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Limit Appearance</h3>
-                      <p className="text-[10px] text-slate-400">Customize the visual style of each prime limit layer.</p>
                       
                       <div className="space-y-4">
                         {[1, 3, 5, 7, 11, 13].map(limit => {
@@ -583,24 +620,20 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                  
                                  <div className="grid grid-cols-2 gap-4">
                                      <div>
-                                         <label className="flex justify-between text-xs text-slate-400 mb-1">
-                                             <span>Size</span> <span>{currentVis.size.toFixed(2)}x</span>
-                                         </label>
-                                         <input 
-                                             type="range" min="0.1" max="1.5" step="0.05"
+                                         <label className="flex justify-between text-xs text-slate-400 mb-1"><span>Size</span> <span>{currentVis.size.toFixed(2)}x</span></label>
+                                         <ThrottledSlider 
+                                             min={0.1} max={1.5} step={0.05}
                                              value={currentVis.size}
-                                             onChange={(e) => handleLimitVisualChange(limit, 'size', parseFloat(e.target.value))}
+                                             onChange={(val) => handleLimitVisualChange(limit, 'size', val)}
                                              className="w-full h-1 bg-slate-600 rounded appearance-none"
                                          />
                                      </div>
                                      <div>
-                                         <label className="flex justify-between text-xs text-slate-400 mb-1">
-                                             <span>Opacity</span> <span>{(currentVis.opacity * 100).toFixed(0)}%</span>
-                                         </label>
-                                         <input 
-                                             type="range" min="0.0" max="1.0" step="0.05"
+                                         <label className="flex justify-between text-xs text-slate-400 mb-1"><span>Opacity</span> <span>{(currentVis.opacity * 100).toFixed(0)}%</span></label>
+                                         <ThrottledSlider 
+                                             min={0.0} max={1.0} step={0.05}
                                              value={currentVis.opacity}
-                                             onChange={(e) => handleLimitVisualChange(limit, 'opacity', parseFloat(e.target.value))}
+                                             onChange={(val) => handleLimitVisualChange(limit, 'opacity', val)}
                                              className="w-full h-1 bg-slate-600 rounded appearance-none"
                                          />
                                      </div>
@@ -622,42 +655,21 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         
                         <div className={`space-y-4 ${settings.isRainbowModeEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'} transition-opacity`}>
                             <div>
-                                <label className="flex justify-between text-xs text-slate-400 mb-1">
-                                    <span>Background Brightness</span>
-                                    <span>{settings.rainbowBrightness}%</span>
-                                </label>
-                                <input 
-                                    type="range" min="0" max="100" 
-                                    value={settings.rainbowBrightness}
-                                    onChange={(e) => handleChange('rainbowBrightness', parseInt(e.target.value))}
-                                    className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                                />
+                                <label className="flex justify-between text-xs text-slate-400 mb-1"><span>Background Brightness</span><span>{settings.rainbowBrightness}%</span></label>
+                                <ThrottledSlider min={0} max={100} step={1} value={settings.rainbowBrightness} onChange={(val) => handleChange('rainbowBrightness', val)} className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer" />
                             </div>
                             <div>
-                                <label className="flex justify-between text-xs text-slate-400 mb-1">
-                                    <span>Background Saturation</span>
-                                    <span>{settings.rainbowSaturation}%</span>
-                                </label>
-                                <input 
-                                    type="range" min="0" max="100" 
-                                    value={settings.rainbowSaturation}
-                                    onChange={(e) => handleChange('rainbowSaturation', parseInt(e.target.value))}
-                                    className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                                />
+                                <label className="flex justify-between text-xs text-slate-400 mb-1"><span>Background Saturation</span><span>{settings.rainbowSaturation}%</span></label>
+                                <ThrottledSlider min={0} max={100} step={1} value={settings.rainbowSaturation} onChange={(val) => handleChange('rainbowSaturation', val)} className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer" />
                             </div>
                             <div>
-                                <label className="flex justify-between text-xs text-slate-400 mb-1">
-                                    <span>Vertical Offset (Hue Shift)</span>
-                                    <span>{settings.rainbowOffset}°</span>
-                                </label>
-                                <input 
-                                    type="range" min="0" max="360" 
-                                    value={settings.rainbowOffset}
-                                    onChange={(e) => handleChange('rainbowOffset', parseInt(e.target.value))}
-                                    className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                                    style={{
-                                        backgroundImage: 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)'
-                                    }}
+                                <label className="flex justify-between text-xs text-slate-400 mb-1"><span>Vertical Offset (Hue Shift)</span><span>{settings.rainbowOffset}°</span></label>
+                                <ThrottledSlider 
+                                    min={0} max={360} step={1} 
+                                    value={settings.rainbowOffset} 
+                                    onChange={(val) => handleChange('rainbowOffset', val)} 
+                                    className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer" 
+                                    style={{ backgroundImage: 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)' }} 
                                 />
                             </div>
                         </div>
@@ -671,23 +683,9 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                 <span className="text-xs text-slate-400">Node outline uses pitch-rainbow color when latched</span>
                             </div>
                         </label>
-                        
-                        <button 
-                            onClick={resetColors}
-                            className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors border border-slate-500/50 mb-2"
-                        >
-                            Default Colors
-                        </button>
-
-                        <button 
-                            onClick={pairLimitColors}
-                            className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors border border-slate-500/50"
-                        >
-                            Pair Limit Colors with Background
-                        </button>
-                        <p className="text-[10px] text-slate-400 mt-1">Updates Limit Colors to match the background hue at 1/1, 3/2, 5/4, etc.</p>
+                        <button onClick={resetColors} className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors border border-slate-500/50 mb-2">Default Colors</button>
+                        <button onClick={pairLimitColors} className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white transition-colors border border-slate-500/50">Pair Limit Colors with Background</button>
                        </div>
-
                   </div>
                </div>
             )}
@@ -700,18 +698,8 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         
                         <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700 space-y-4">
                             <label className="flex items-center space-x-3 cursor-pointer">
-                                <input 
-                                    type="checkbox" 
-                                    checked={settings.midiEnabled} 
-                                    onChange={(e) => handleChange('midiEnabled', e.target.checked)} 
-                                    className="w-6 h-6 rounded border-slate-600 text-green-500 focus:ring-green-500" 
-                                />
-                                <div>
-                                    <span className={`font-bold block ${settings.midiEnabled ? 'text-green-400' : 'text-slate-300'}`}>
-                                        Enable MIDI Output
-                                    </span>
-                                    <span className="text-xs text-slate-400">Send notes to external synths/DAW</span>
-                                </div>
+                                <input type="checkbox" checked={settings.midiEnabled} onChange={(e) => handleChange('midiEnabled', e.target.checked)} className="w-6 h-6 rounded border-slate-600 text-green-500 focus:ring-green-500" />
+                                <div><span className={`font-bold block ${settings.midiEnabled ? 'text-green-400' : 'text-slate-300'}`}>Enable MIDI Output</span><span className="text-xs text-slate-400">Send notes to external synths/DAW</span></div>
                             </label>
 
                             <div className={`${settings.midiEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'} transition-opacity space-y-4`}>
@@ -731,40 +719,18 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                             <option key={device.id} value={device.id}>{device.name}</option>
                                         ))}
                                     </select>
-                                    {midiDevices.length === 0 && (
-                                        <p className="text-[10px] text-orange-400 mt-1">No MIDI devices found. Check connection or browser permissions.</p>
-                                    )}
+                                    {midiDevices.length === 0 && <p className="text-[10px] text-orange-400 mt-1">No MIDI devices found. Check connection or browser permissions.</p>}
                                 </div>
 
                                 <div>
                                     <label className="block text-sm font-semibold mb-2">Pitch Bend Range (+/- Semitones)</label>
-                                    <p className="text-[10px] text-slate-400 mb-2">
-                                        Must match the setting on your external synth for accurate microtonality.
-                                        MPE Synths usually default to 48 or 24.
-                                    </p>
                                     <div className="flex gap-2">
                                         {[2, 12, 24, 48].map(range => (
-                                            <button 
-                                                key={range}
-                                                onClick={() => handleChange('midiPitchBendRange', range)}
-                                                className={`px-3 py-1 rounded text-xs font-bold border ${settings.midiPitchBendRange === range ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}
-                                            >
-                                                {range}
-                                            </button>
+                                            <button key={range} onClick={() => handleChange('midiPitchBendRange', range)} className={`px-3 py-1 rounded text-xs font-bold border ${settings.midiPitchBendRange === range ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>{range}</button>
                                         ))}
                                     </div>
                                 </div>
                             </div>
-                        </div>
-
-                        <div className="p-4 bg-blue-900/20 rounded-lg border border-blue-700/30">
-                             <h4 className="text-sm font-bold text-blue-300 mb-2">How it works (MPE Style)</h4>
-                             <p className="text-xs text-slate-300 leading-relaxed">
-                                PrismaTonal rotates through MIDI Channels 1-16 for every new note trigger. 
-                                This allows each touch to have its own independent Pitch Bend message, enabling true polyphonic microtonality.
-                                <br/><br/>
-                                Ensure your external synth is in <strong>MPE Mode</strong> or set to <strong>Multi-Channel</strong> mode with the same patch loaded on all channels.
-                             </p>
                         </div>
                     </div>
                 </div>
