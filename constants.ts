@@ -179,7 +179,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   midiOutputId: null,
   midiPitchBendRange: 24, // High default for smooth microtonality
 
-  // UI
+  // UI Relocation
   uiUnlocked: false,
   uiPositions: DEFAULT_UI_POSITIONS
 };
@@ -207,7 +207,7 @@ export const PRESETS: SynthPreset[] = [
   {
     id: 1,
     name: "Deep Ocean",
-    gain: 0.2, 
+    gain: 0.5, // 50%
     modMatrix: [],
     osc1: {
         enabled: true,
@@ -237,7 +237,7 @@ export const PRESETS: SynthPreset[] = [
   {
     id: 2,
     name: "Crystal Pluck",
-    gain: 0.2, 
+    gain: 0.5, // 50%
     modMatrix: [],
     osc1: {
         enabled: true,
@@ -274,7 +274,7 @@ export const PRESETS: SynthPreset[] = [
   {
     id: 3,
     name: "Voltage Saw",
-    gain: 0.15, 
+    gain: 0.5, // 50%
     modMatrix: [],
     osc1: {
         enabled: true,
@@ -304,7 +304,7 @@ export const PRESETS: SynthPreset[] = [
   {
     id: 4,
     name: "Analog Strings",
-    gain: 0.2,
+    gain: 0.5, // 50%
     modMatrix: [],
     osc1: {
         enabled: true,
@@ -341,7 +341,7 @@ export const PRESETS: SynthPreset[] = [
   {
     id: 5,
     name: "Resonant Lead",
-    gain: 0.2,
+    gain: 0.5, // 50%
     modMatrix: [],
     osc1: {
         enabled: true,
@@ -371,7 +371,7 @@ export const PRESETS: SynthPreset[] = [
   {
     id: 6,
     name: "Sub Bass",
-    gain: 0.3,
+    gain: 0.5, // 50%
     modMatrix: [],
     osc1: {
         enabled: true,
@@ -408,7 +408,7 @@ export const PRESETS: SynthPreset[] = [
   {
     id: 7,
     name: "Sci-Fi Tremolo",
-    gain: 0.25,
+    gain: 0.5, // 50%
     modMatrix: [],
     osc1: {
         enabled: true,
@@ -438,7 +438,7 @@ export const PRESETS: SynthPreset[] = [
   {
     id: 8,
     name: "Noise Wash",
-    gain: 0.2,
+    gain: 0.5, // 50%
     modMatrix: [],
     osc1: {
         enabled: true,

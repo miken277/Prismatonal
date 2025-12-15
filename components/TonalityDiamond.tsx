@@ -1,7 +1,8 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { AppSettings, LatticeNode, LatticeLine, GenerationOrigin, ButtonShape } from '../types';
-import { generateLattice, getHarmonicDistance } from '../services/LatticeService';
+import { AppSettings, LatticeNode, LatticeLine, ButtonShape } from '../types';
+import { getHarmonicDistance, generateLattice } from '../services/LatticeService';
+import { getPitchRatioFromScreenDelta, getRainbowPeriod } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
 
@@ -15,6 +16,7 @@ export interface TonalityDiamondHandle {
 
 interface Props {
   settings: AppSettings;
+  updateSettings: (s: Partial<AppSettings> | ((prev: AppSettings) => AppSettings)) => void;
   audioEngine: AudioEngine;
   onLimitInteraction: (limit: number) => void;
   activeChordIds: string[];
@@ -31,10 +33,8 @@ interface ActiveCursor {
 // Spatial Grid Constants
 const GRID_CELL_SIZE = 100; // Pixel size of spatial buckets
 
-const PITCH_SCALE = 200;
-
 const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) => {
-  const { settings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked } = props;
+  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked } = props;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
@@ -46,7 +46,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   
   // Data State
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
+  const [isGenerating, setIsGenerating] = useState(false);
   
+  // Auto-calculated Dimensions
+  // We initialize with window size to prevent flash, but it will update immediately
+  const [dynamicSize, setDynamicSize] = useState(2000);
+  const prevDynamicSizeRef = useRef(2000);
+
   // Optimization: Memoized Lookups & Spatial Grid
   const nodeMap = useMemo(() => {
       return new Map(data.nodes.map(n => [n.id, n]));
@@ -55,33 +61,30 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   // Spatial Index for O(1) Hit Testing
   const spatialGrid = useMemo(() => {
       const grid = new Map<string, LatticeNode[]>();
-      const centerOffset = settings.canvasSize / 2;
+      // CRITICAL: Use the Dynamic Size for centering, not the settings.canvasSize
+      const centerOffset = dynamicSize / 2;
       const spacing = settings.buttonSpacingScale;
 
       data.nodes.forEach(node => {
           const x = node.x * spacing + centerOffset;
           const y = node.y * spacing + centerOffset;
           
-          // Determine grid cell
           const col = Math.floor(x / GRID_CELL_SIZE);
           const row = Math.floor(y / GRID_CELL_SIZE);
           const key = `${col},${row}`;
           
           if (!grid.has(key)) grid.set(key, []);
           grid.get(key)!.push(node);
-          
-          // Add to neighbors to handle edge overlaps (simple approach: add to 3x3 block if near edge, 
-          // but for simplicity we'll just check neighbors in hit test)
       });
       return grid;
-  }, [data.nodes, settings.buttonSpacingScale, settings.canvasSize]);
+  }, [data.nodes, settings.buttonSpacingScale, dynamicSize]);
 
   // Interaction State
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [manualLatchedNodes, setManualLatchedNodes] = useState<Map<string, string>>(new Map());
   const [effectiveLatchedNodes, setEffectiveLatchedNodes] = useState<Map<string, string>>(new Map());
 
-  // Optimization: Pre-calculate active lines to avoid O(L) scan in render loop
+  // Optimization: Pre-calculate active lines
   const activeLines = useMemo(() => {
     const latched = effectiveLatchedNodes;
     const lines = data.lines;
@@ -96,7 +99,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     return active;
   }, [data.lines, effectiveLatchedNodes]);
   
-  // Refs for Render Loop (to avoid stale closures)
+  // Refs for Render Loop
   const settingsRef = useRef(settings);
   const dataRef = useRef(data);
   const activeCursorsRef = useRef(activeCursors);
@@ -104,6 +107,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const nodeMapRef = useRef(nodeMap);
   const activeLinesRef = useRef(activeLines);
   const spatialGridRef = useRef(spatialGrid);
+  const dynamicSizeRef = useRef(dynamicSize);
   
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
 
@@ -115,10 +119,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
   useEffect(() => { activeLinesRef.current = activeLines; }, [activeLines]);
   useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
+  useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
   
-  // Generation State
-  const [depthOrigins, setDepthOrigins] = useState<GenerationOrigin[]>([{coords: [0,0,0,0,0], octave: 0}]);
-  const [lastTouchedNode, setLastTouchedNode] = useState<GenerationOrigin | null>(null);
+  // Depth Interaction State
+  const lastTouchedLimitRef = useRef<number | null>(null);
+  const depthHistoryRef = useRef<number[]>([]);
   const [hasCentered, setHasCentered] = useState(false);
   const prevActiveChordIds = useRef<string[]>([]);
 
@@ -126,34 +131,40 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useImperativeHandle(ref, () => ({
     clearLatches: () => setManualLatchedNodes(new Map()),
     centerView: () => {
-        if (settings.centerResetsDepth) {
-            setDepthOrigins([{coords: [0,0,0,0,0], octave: 0}]);
-            setLastTouchedNode(null);
-        }
         centerScroll();
     },
     increaseDepth: () => {
-        if (lastTouchedNode) {
-            setDepthOrigins(prev => {
-                const exists = prev.some(o => 
-                    o.octave === lastTouchedNode.octave &&
-                    o.coords.every((val, i) => val === lastTouchedNode.coords[i])
-                );
-                if (exists) return prev;
-                return [...prev, { coords: [...lastTouchedNode.coords], octave: lastTouchedNode.octave }];
-            });
+        const limit = lastTouchedLimitRef.current;
+        if (limit && limit > 1) {
+             updateSettings((prev: AppSettings) => {
+                 const currentDepth = prev.limitDepths[limit as 3|5|7|11|13];
+                 return {
+                     ...prev,
+                     limitDepths: {
+                         ...prev.limitDepths,
+                         [limit]: currentDepth + 1
+                     }
+                 };
+             });
+             depthHistoryRef.current.push(limit);
         }
     },
     decreaseDepth: () => {
-        setDepthOrigins(prev => {
-            if (prev.length <= 1) return prev; // Keep initial origin
-            const next = [...prev];
-            next.pop();
-            return next;
-        });
+        const limit = depthHistoryRef.current.pop();
+        if (limit) {
+            updateSettings((prev: AppSettings) => {
+                 const currentDepth = prev.limitDepths[limit as 3|5|7|11|13];
+                 return {
+                     ...prev,
+                     limitDepths: {
+                         ...prev.limitDepths,
+                         [limit]: Math.max(0, currentDepth - 1)
+                     }
+                 };
+             });
+        }
     },
     getLatchedNodes: () => {
-        // Use map for O(1) lookup
         const result: LatticeNode[] = [];
         effectiveLatchedNodes.forEach((_, id) => {
             const n = nodeMap.get(id);
@@ -165,7 +176,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const centerScroll = () => {
       if (scrollContainerRef.current) {
-        const center = settings.canvasSize / 2;
+        const center = dynamicSize / 2;
         const viewportW = scrollContainerRef.current.clientWidth;
         const viewportH = scrollContainerRef.current.clientHeight;
         scrollContainerRef.current.scrollLeft = center - viewportW / 2;
@@ -173,46 +184,109 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
   };
 
+  // Recenter when dynamic size changes significantly
   useLayoutEffect(() => {
-    if (!hasCentered && scrollContainerRef.current) {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    if (!hasCentered && dynamicSize > 0) {
         centerScroll();
         setHasCentered(true);
+    } else if (dynamicSize !== prevDynamicSizeRef.current) {
+        // When size changes (e.g. depth increase), the content origin (center) shifts.
+        // We must adjust scroll to keep the viewport stationary relative to the content.
+        const diff = (dynamicSize - prevDynamicSizeRef.current) / 2;
+        container.scrollLeft += diff;
+        container.scrollTop += diff;
     }
-  }, [settings.canvasSize]);
+    prevDynamicSizeRef.current = dynamicSize;
+  }, [dynamicSize]);
 
-  // --- Data Generation ---
+  // --- Data Generation (Main Thread Revert) ---
+  // Memoize dependency string to avoid deep object comparison in useEffect
   const generationDeps = useMemo(() => {
       return JSON.stringify({
           depths: settings.limitDepths,
           complexities: settings.limitComplexities,
           hidden: settings.hiddenLimits,
-          ratio: settings.latticeAspectRatio,
-          origins: depthOrigins
+          ratio: settings.latticeAspectRatio
       });
-  }, [settings.limitDepths, settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio, depthOrigins]);
+  }, [settings.limitDepths, settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio]);
 
   useEffect(() => {
-    const effectiveSettings = { ...settings, limitDepths: { ...settings.limitDepths } };
-    const hiddenLimits = settings.hiddenLimits as number[]; 
+    setIsGenerating(true);
 
-    hiddenLimits.forEach(limit => {
-        if (limit in effectiveSettings.limitDepths) {
-            effectiveSettings.limitDepths[limit as 3|5|7|11|13] = 0;
+    // Use setTimeout to yield to the renderer so the "Calculating..." spinner appears
+    const timerId = setTimeout(() => {
+        const effectiveSettings: AppSettings = JSON.parse(JSON.stringify(settings));
+        const hiddenLimits = effectiveSettings.hiddenLimits || [];
+
+        // Zero out depths for hidden limits to prevent unnecessary generation
+        hiddenLimits.forEach((limit: number) => {
+            // @ts-ignore
+            if (effectiveSettings.limitDepths[limit] !== undefined) {
+                // @ts-ignore
+                effectiveSettings.limitDepths[limit] = 0;
+            }
+        });
+
+        // Generate
+        const result = generateLattice(effectiveSettings);
+
+        // Filter lines
+        const visibleNodeIds = new Set(result.nodes.map(n => n.id));
+        const visibleLines = result.lines.filter(l => {
+            if (hiddenLimits.includes(l.limit)) return false;
+            if (!visibleNodeIds.has(l.sourceId) || !visibleNodeIds.has(l.targetId)) return false;
+            return true;
+        });
+
+        // Calc Dynamic Size
+        let maxExtent = 0;
+        for (const n of result.nodes) {
+            const absX = Math.abs(n.x);
+            const absY = Math.abs(n.y);
+            if (absX > maxExtent) maxExtent = absX;
+            if (absY > maxExtent) maxExtent = absY;
         }
-    });
 
-    const result = generateLattice(effectiveSettings, depthOrigins);
-    
-    const visibleNodeIds = new Set(result.nodes.map(n => n.id));
+        const padding = 600; 
+        const spacing = settingsRef.current.buttonSpacingScale; // Use ref to get latest
+        const calculatedSize = (maxExtent * spacing * 2) + padding;
+        const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
 
-    const visibleLines = result.lines.filter(l => {
-        if (hiddenLimits.includes(l.limit)) return false;
-        if (!visibleNodeIds.has(l.sourceId) || !visibleNodeIds.has(l.targetId)) return false;
-        return true;
-    });
+        if (Math.abs(finalSize - dynamicSizeRef.current) > 50) {
+            setDynamicSize(finalSize);
+        }
+
+        setData({ nodes: result.nodes, lines: visibleLines });
+        setIsGenerating(false);
+    }, 10);
+
+    return () => clearTimeout(timerId);
     
-    setData({ nodes: result.nodes, lines: visibleLines });
-  }, [generationDeps, settings.buttonSpacingScale, settings.canvasSize]);
+  }, [generationDeps]); 
+  
+  // Separate effect for Spacing Scale changes (visual only, no regen needed)
+  useEffect(() => {
+      let maxExtent = 0;
+      for (const n of data.nodes) {
+          const absX = Math.abs(n.x);
+          const absY = Math.abs(n.y);
+          if (absX > maxExtent) maxExtent = absX;
+          if (absY > maxExtent) maxExtent = absY;
+      }
+      
+      const padding = 600; 
+      const spacing = settings.buttonSpacingScale;
+      const calculatedSize = (maxExtent * spacing * 2) + padding;
+      const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
+      
+      if (Math.abs(finalSize - dynamicSize) > 50) {
+          setDynamicSize(finalSize);
+      }
+  }, [settings.buttonSpacingScale]);
+
 
   // --- STATIC CANVAS RENDERER ---
   const visualDeps = useMemo(() => JSON.stringify({
@@ -223,7 +297,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       shape: settings.buttonShape,
       textScale: settings.nodeTextSizeScale,
       fractionBar: settings.showFractionBar,
-      canvasSize: settings.canvasSize
+      canvasSize: dynamicSize 
   }), [
       settings.buttonSizeScale,
       settings.buttonSpacingScale,
@@ -232,7 +306,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       settings.buttonShape,
       settings.nodeTextSizeScale,
       settings.showFractionBar,
-      settings.canvasSize
+      dynamicSize
   ]);
 
   useEffect(() => {
@@ -242,7 +316,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       if (!ctx) return;
 
       const dpr = window.devicePixelRatio || 1;
-      const size = settings.canvasSize;
+      const size = dynamicSize;
       
       // Resize
       if (canvas.width !== size * dpr || canvas.height !== size * dpr) {
@@ -287,7 +361,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           }
           ctx.lineWidth = (limit === 1 ? 4 : 2) * visualSettings.size;
           ctx.strokeStyle = color;
-          // Lines are always a bit faint to let nodes pop
           ctx.globalAlpha = 0.3 * visualSettings.opacity; 
           
           if (limit === 1) ctx.setLineDash([5, 5]);
@@ -296,7 +369,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
       ctx.setLineDash([]); 
 
-      // 2. Draw Nodes (Idle State)
+      // 2. Draw Nodes
       for (const node of data.nodes) {
           const x = node.x * spacing + centerOffset;
           const y = node.y * spacing + centerOffset;
@@ -307,7 +380,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           const limitOpacity = topVis.opacity;
           const radius = baseRadius * limitScale;
 
-          // Full visibility for static nodes to prevent "dimming" look
           ctx.globalAlpha = 1.0 * limitOpacity;
           
           ctx.beginPath();
@@ -401,7 +473,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       
       current.forEach((originId, nodeId) => {
           if (!prev.has(nodeId)) {
-               const node = nodes.get(nodeId); // O(1) Lookup
+               const node = nodes.get(nodeId); 
                if (node) {
                    audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency);
                    if (settings.midiEnabled) midiService.noteOn(`node-${nodeId}`, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
@@ -423,8 +495,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     setManualLatchedNodes((prev: Map<string, string>) => {
         const next = new Map<string, string>(prev);
         let changed = false;
-        
-        // Use memoized map for Lookups
         const nodes = nodeMap;
 
         next.forEach((originId, nodeId) => {
@@ -457,21 +527,20 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     audioEngine.setPolyphony(settings.polyphony);
   }, [settings.polyphony]);
 
-  // Helper for Hit Testing using Spatial Grid
+  // Helper for Hit Testing
   const getHitNode = (clientX: number, clientY: number): LatticeNode | null => {
       if (!dynamicCanvasRef.current) return null;
       const rect = dynamicCanvasRef.current.getBoundingClientRect();
       const x = clientX - rect.left;
       const y = clientY - rect.top;
 
-      const centerOffset = settings.canvasSize / 2;
+      const centerOffset = dynamicSizeRef.current / 2;
       const spacing = settings.buttonSpacingScale;
       const baseRadius = (60 * settings.buttonSizeScale) / 2;
 
       const col = Math.floor(x / GRID_CELL_SIZE);
       const row = Math.floor(y / GRID_CELL_SIZE);
       
-      // Check current cell and immediate neighbors (to handle nodes on edges)
       const cellsToCheck = [
           `${col},${row}`, `${col+1},${row}`, `${col-1},${row}`,
           `${col},${row+1}`, `${col},${row-1}`,
@@ -510,7 +579,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
       cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      // O(1) Hit Test
       const hitNode = getHitNode(e.clientX, e.clientY);
 
       if (hitNode) {
@@ -530,7 +598,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              onLimitInteraction(hitNode.maxPrime);
         }
         
-        setLastTouchedNode({ coords: hitNode.coords, octave: hitNode.octave });
+        // Track for Increase Depth Logic
+        lastTouchedLimitRef.current = hitNode.maxPrime;
 
         setActiveCursors(prev => {
             const next = new Map(prev);
@@ -569,20 +638,19 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     const cursor = activeCursorsRef.current.get(e.pointerId)!;
 
     if (settings.isPitchBendEnabled && scrollContainerRef.current) {
-         const centerOffset = settings.canvasSize / 2;
+         const centerOffset = dynamicSizeRef.current / 2;
          const rect = scrollContainerRef.current.getBoundingClientRect();
          const canvasY = (e.clientY - rect.top) + scrollContainerRef.current.scrollTop;
          const relY = canvasY - centerOffset;
-         const effectivePitchScale = PITCH_SCALE * settings.buttonSpacingScale;
-         const bentRatio = Math.pow(2, -relY / effectivePitchScale);
+         
+         // Use unified Pitch Ratio calculation
+         const bentRatio = getPitchRatioFromScreenDelta(relY, settings.buttonSpacingScale);
          
          audioEngine.glideVoice(`cursor-${e.pointerId}`, bentRatio, settings.baseFrequency, 0.05);
          if (settings.midiEnabled) midiService.pitchBend(`cursor-${e.pointerId}`, bentRatio, settings.baseFrequency, settings.midiPitchBendRange);
     }
 
     if (settings.isLatchModeEnabled && dynamicCanvasRef.current) {
-         // Optimized Hit Test for Drag Latching
-         // We only care about nodes under the finger, not checking 2000 nodes for distance
          const hitNode = getHitNode(e.clientX, e.clientY);
          
          if (hitNode && hitNode.id !== cursor.originNodeId) {
@@ -612,7 +680,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                      eff.set(hitNode.id, cursor.originNodeId);
                      effectiveLatchedRef.current = eff;
                      
-                     setLastTouchedNode({ coords: hitNode.coords, octave: hitNode.octave });
+                     // Update track logic for dragging too? Maybe. 
+                     // Usually focus logic tracks 'down', but if dragging expands reach, maybe update last touched.
+                     lastTouchedLimitRef.current = hitNode.maxPrime;
+                     
                      return next;
                  }
                  return prev;
@@ -662,8 +733,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const currentCursors = activeCursorsRef.current;
         const currentLatched = effectiveLatchedRef.current;
         const currentActiveLines = activeLinesRef.current;
-        
-        const size = currentSettings.canvasSize;
+        const size = dynamicSizeRef.current;
         
         if (canvas.width !== size * dpr || canvas.height !== size * dpr) {
             canvas.width = size * dpr;
@@ -679,10 +749,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             viewH = scrollContainerRef.current.clientHeight;
         }
         
-        // Only clear dynamic layer
         ctx.clearRect(viewX, viewY, viewW, viewH);
 
-        const centerOffset = currentSettings.canvasSize / 2;
+        const centerOffset = size / 2;
         const spacing = currentSettings.buttonSpacingScale;
         const baseRadius = (60 * currentSettings.buttonSizeScale) / 2;
         const isDiamond = currentSettings.buttonShape === ButtonShape.DIAMOND;
@@ -701,9 +770,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const bottomBound = viewY + viewH + viewPad;
         
         // --- DRAW ACTIVE LINES ---
-        // Optimization: Removed shadowBlur and Composite changes.
-        // Used multi-pass stroking for glow effect instead.
-        
         ctx.setLineDash([]); 
         for (const line of currentActiveLines) {
             const x1 = line.x1 * spacing + centerOffset;
@@ -715,7 +781,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
             const limitColor = colorCache[line.limit] || '#666';
 
-            // Base Line (Solid)
+            // Base Line
             ctx.beginPath();
             ctx.moveTo(x1, y1);
             ctx.lineTo(x2, y2);
@@ -724,29 +790,26 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             ctx.globalAlpha = 1.0;
             ctx.stroke();
 
-            // Animated Pulse Overlay (Manual Glow)
+            // Animated Pulse
             if (currentSettings.isVoiceLeadingAnimationEnabled) {
                 const grad = ctx.createLinearGradient(x1, y1, x2, y2);
                 const p = flowPhase;
                 
-                // Simple white pulse gradient
                 grad.addColorStop(0, 'rgba(255,255,255,0)');
                 const pulseWidth = 0.2;
                 const start = Math.max(0, p - pulseWidth);
                 const end = Math.min(1, p + pulseWidth);
                 if (start > 0) grad.addColorStop(start, 'rgba(255,255,255,0)');
-                grad.addColorStop(p, 'rgba(255,255,255,0.7)'); // 70% opacity white
+                grad.addColorStop(p, 'rgba(255,255,255,0.7)'); 
                 if (end < 1) grad.addColorStop(end, 'rgba(255,255,255,0)');
                 grad.addColorStop(1, 'rgba(255,255,255,0)');
 
                 ctx.strokeStyle = grad;
                 
-                // Draw wide faint stroke (simulates blur)
                 ctx.lineWidth = 10 * (0.5 + currentSettings.voiceLeadingGlowAmount);
-                ctx.globalAlpha = 0.3; // Low opacity for "glow" look
+                ctx.globalAlpha = 0.3; 
                 ctx.stroke();
                 
-                // Draw core hot stroke
                 ctx.lineWidth = 4;
                 ctx.globalAlpha = 1.0;
                 ctx.stroke();
@@ -794,7 +857,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              ctx.fill();
 
              if (currentSettings.isColoredIlluminationEnabled) {
-                 const rainbowPeriod = PITCH_SCALE * spacing;
+                 const rainbowPeriod = getRainbowPeriod(spacing); // Use Helper
                  const phase = (y % rainbowPeriod) / rainbowPeriod;
                  const hue = (currentSettings.rainbowOffset + phase * 360) % 360;
                  const sat = currentSettings.isRainbowModeEnabled ? currentSettings.rainbowSaturation : 100;
@@ -828,7 +891,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              }
         }
         
-        // Cursors (Draw Lines connecting cursor to node)
         currentCursors.forEach(c => {
             const node = nodeMapRef.current.get(c.originNodeId);
             if(node) {
@@ -861,21 +923,24 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     return () => cancelAnimationFrame(animationFrameRef.current);
   }, []); 
 
-  const rainbowBackgroundFixed = (() => {
+  const rainbowPeriod = getRainbowPeriod(settings.buttonSpacingScale);
+
+  // New Gradient Logic using linear-gradient + percentages
+  const rainbowBackgroundFixed = useMemo(() => {
     if (settings.isRainbowModeEnabled) {
         const stops: string[] = [];
         const steps = 6;
-        const rainbowPeriod = PITCH_SCALE * settings.buttonSpacingScale;
         for (let i = 0; i <= steps; i++) {
-            const pct = i / steps;
-            const px = pct * rainbowPeriod;
+            const pct = (i / steps) * 100;
             const hue = (settings.rainbowOffset + i * 60); 
-            stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${px.toFixed(1)}px`);
+            stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${pct}%`);
         }
-        return `repeating-linear-gradient(to bottom, ${stops.join(', ')})`;
+        return `linear-gradient(to bottom, ${stops.join(', ')})`;
     }
     return undefined;
-  })();
+  }, [settings.isRainbowModeEnabled, settings.rainbowOffset, settings.rainbowSaturation, settings.rainbowBrightness]);
+
+  const bgOffsetY = (dynamicSize / 2) - (rainbowPeriod / 3);
 
   return (
     <div 
@@ -891,9 +956,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         <div 
             className="relative"
             style={{ 
-                width: settings.canvasSize, 
-                height: settings.canvasSize,
-                background: rainbowBackgroundFixed,
+                width: dynamicSize, 
+                height: dynamicSize,
+                backgroundImage: rainbowBackgroundFixed,
+                backgroundSize: `100% ${rainbowPeriod}px`,
+                backgroundRepeat: 'repeat',
+                backgroundPosition: `0px ${bgOffsetY}px`,
                 pointerEvents: uiUnlocked ? 'none' : 'auto',
             }}
         >
@@ -909,9 +977,20 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              className="absolute top-0 left-0 z-10"
              style={{ width: '100%', height: '100%' }}
            />
+
+           {/* Loading Indicator */}
+           {isGenerating && (
+             <div className="absolute top-4 right-4 z-50 flex items-center gap-2 bg-slate-900/80 p-2 rounded-full backdrop-blur-sm border border-white/10 shadow-xl">
+                 <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                 </svg>
+                 <span className="text-xs font-bold text-slate-300 pr-2">Calculating...</span>
+             </div>
+           )}
         </div>
     </div>
   );
 });
 
-export default TonalityDiamond;
+export default React.memo(TonalityDiamond);

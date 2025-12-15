@@ -11,6 +11,79 @@ interface Props {
   updateSettings: (s: AppSettings) => void;
 }
 
+// Helper component for Validated Numeric Input
+const NumberInput = ({
+    value,
+    min,
+    max,
+    onChange,
+    suffix = "",
+    className = ""
+}: {
+    value: number;
+    min: number;
+    max: number;
+    onChange: (val: number) => void;
+    suffix?: string;
+    className?: string;
+}) => {
+    const [text, setText] = useState(value.toString());
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        // Sync with external updates if they differ from current valid text
+        if (parseInt(text) !== value) {
+             setText(value.toString());
+             setError(null);
+        }
+    }, [value]);
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        
+        // Strict Reject: Only allow digits. 
+        if (val !== '' && !/^\d+$/.test(val)) return;
+
+        setText(val);
+
+        if (val === '') return; 
+
+        const num = parseInt(val, 10);
+        if (num < min || num > max) {
+            setError(`Range: ${min}-${max}`);
+            // Reject input: Do not call onChange
+        } else {
+            setError(null);
+            onChange(num);
+        }
+    };
+
+    const handleBlur = () => {
+        // Revert to last valid value on blur if empty or invalid
+        if (text === '' || error) {
+            setText(value.toString());
+            setError(null);
+        }
+    };
+
+    return (
+        <div className="flex flex-col flex-grow">
+            <div className="relative">
+                <input 
+                    type="text" 
+                    inputMode="numeric"
+                    value={text}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    className={`w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600 focus:outline-none focus:border-blue-500 transition-colors ${className} ${error ? 'border-red-500 focus:border-red-500' : ''}`}
+                />
+                {suffix && <span className="absolute right-3 top-2 text-sm text-slate-400 pointer-events-none">{suffix}</span>}
+            </div>
+            {error && <span className="text-[10px] text-red-400 mt-1 font-bold animate-pulse">{error}</span>}
+        </div>
+    );
+};
+
 const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'behavior' | 'color' | 'midi'>('general');
   const [midiDevices, setMidiDevices] = useState<MidiDevice[]>([]);
@@ -20,7 +93,10 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
     if (isOpen && activeTab === 'midi') {
         midiService.init().then(success => {
             if (success) {
-                setMidiDevices(midiService.getOutputs());
+                // Now await the asynchronous device list
+                midiService.getOutputs().then(devices => {
+                    setMidiDevices(devices);
+                });
             }
         });
     }
@@ -165,15 +241,13 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       
                       <div>
                           <label className="block text-sm font-semibold mb-2">Base Frequency (1/1)</label>
-                          <div className="flex items-center gap-4">
-                              <input 
-                                  type="range" min="20" max="15000" step="1" 
-                                  value={settings.baseFrequency}
-                                  onChange={(e) => handleChange('baseFrequency', parseFloat(e.target.value))}
-                                  className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                              />
-                              <span className="text-sm font-mono min-w-[5ch]">{settings.baseFrequency}Hz</span>
-                          </div>
+                          <NumberInput 
+                              value={settings.baseFrequency}
+                              min={20}
+                              max={15000}
+                              suffix="Hz"
+                              onChange={(val) => handleChange('baseFrequency', val)}
+                          />
                       </div>
                       
                       <div>
@@ -190,7 +264,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       </div>
 
                       <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
-                          <label className="block text-sm font-semibold text-slate-300">Lattice Depths (Coordinate Bounds)</label>
+                          <label className="block text-sm font-semibold text-slate-300">Lattice Depth</label>
                           <p className="text-[10px] text-slate-500 mb-2">Controls how many steps outward from the center are generated for each axis.</p>
                           
                           {[3, 5, 7, 11, 13].map(limit => (
@@ -214,13 +288,12 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                           {[3, 5, 7, 11, 13].map(limit => (
                               <div key={`comp-${limit}`} className="flex items-center gap-3">
                                   <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
-                                  <input 
-                                      type="range" min="10" max="10000" step="10" 
+                                  <NumberInput 
                                       value={settings.limitComplexities[limit as 3|5|7|11|13]}
-                                      onChange={(e) => handleLimitComplexityChange(limit as any, parseInt(e.target.value))}
-                                      className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                                      min={10}
+                                      max={10000}
+                                      onChange={(val) => handleLimitComplexityChange(limit as any, val)}
                                   />
-                                  <span className="text-[10px] font-mono w-8 text-right">{settings.limitComplexities[limit as 3|5|7|11|13]}</span>
                               </div>
                           ))}
                       </div>

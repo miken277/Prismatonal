@@ -1,62 +1,78 @@
 
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 import { AppSettings, SynthPreset } from '../types';
 import { DEFAULT_SETTINGS, DEFAULT_PRESET } from '../constants';
 
-// --- STORE EVENT BUS ---
-type Listener = () => void;
+interface StoreState {
+    settings: AppSettings;
+    preset: SynthPreset;
+}
 
 class PrismaStore {
-  private listeners: Set<Listener> = new Set();
-  
-  private _settings: AppSettings;
-  private _preset: SynthPreset;
+  private state: StoreState;
+  private listeners: Set<() => void> = new Set();
 
   constructor() {
     // Load Settings
     const savedSettings = localStorage.getItem('prismatonal_settings');
-    this._settings = savedSettings ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) } : DEFAULT_SETTINGS;
+    const loadedSettings = savedSettings ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) } : DEFAULT_SETTINGS;
     
-    // Safety merge for nested UI Positions (handles new keys like 'decreaseDepth')
-    this._settings.uiPositions = { ...DEFAULT_SETTINGS.uiPositions, ...(this._settings.uiPositions || {}) };
+    // Safety merge for nested UI Positions
+    loadedSettings.uiPositions = { ...DEFAULT_SETTINGS.uiPositions, ...(loadedSettings.uiPositions || {}) };
 
     // Load Preset
     const savedPreset = localStorage.getItem('prismatonal_preset');
-    this._preset = savedPreset ? JSON.parse(savedPreset) : DEFAULT_PRESET;
+    const loadedPreset = savedPreset ? JSON.parse(savedPreset) : DEFAULT_PRESET;
+
+    this.state = {
+        settings: loadedSettings,
+        preset: loadedPreset
+    };
   }
 
-  // --- GETTERS ---
-  get settings() { return this._settings; }
-  get preset() { return this._preset; }
-
-  // --- ACTIONS ---
-  updateSettings(partial: Partial<AppSettings> | ((prev: AppSettings) => AppSettings)) {
+  // --- ACTIONS (Arrow functions for stability) ---
+  
+  updateSettings = (partial: Partial<AppSettings> | ((prev: AppSettings) => AppSettings)) => {
+    const current = this.state.settings;
+    let next: AppSettings;
+    
     if (typeof partial === 'function') {
-      this._settings = partial(this._settings);
+      next = partial(current);
     } else {
-      this._settings = { ...this._settings, ...partial };
+      next = { ...current, ...partial };
     }
-    localStorage.setItem('prismatonal_settings', JSON.stringify(this._settings));
-    this.notify();
-  }
 
-  setPreset(newPreset: SynthPreset) {
-    this._preset = newPreset;
-    localStorage.setItem('prismatonal_preset', JSON.stringify(this._preset));
-    this.notify();
-  }
+    // Reference equality check optimization could be added here if needed, 
+    // but settings changes usually mean deep changes.
+    if (next === current) return;
 
-  updatePresetGlobal(key: keyof SynthPreset, value: any) {
-    this._preset = { ...this._preset, [key]: value };
-    localStorage.setItem('prismatonal_preset', JSON.stringify(this._preset));
+    this.state = { ...this.state, settings: next };
+    localStorage.setItem('prismatonal_settings', JSON.stringify(next));
     this.notify();
-  }
+  };
+
+  setPreset = (newPreset: SynthPreset) => {
+    if (newPreset === this.state.preset) return;
+    
+    this.state = { ...this.state, preset: newPreset };
+    localStorage.setItem('prismatonal_preset', JSON.stringify(newPreset));
+    this.notify();
+  };
+
+  updatePresetGlobal = (key: keyof SynthPreset, value: any) => {
+    const next = { ...this.state.preset, [key]: value };
+    this.setPreset(next);
+  };
 
   // --- SUBSCRIPTION ---
-  subscribe(listener: Listener) {
+  subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
-  }
+  };
+
+  getSnapshot = () => {
+    return this.state;
+  };
 
   private notify() {
     this.listeners.forEach(l => l());
@@ -67,18 +83,13 @@ export const store = new PrismaStore();
 
 // --- REACT HOOK ---
 export function useStore() {
-  // We use a simple tick to force re-render when store notifies
-  const [_, setTick] = useState(0);
-
-  useEffect(() => {
-    return store.subscribe(() => setTick(t => t + 1));
-  }, []);
+  const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
 
   return {
-    settings: store.settings,
-    preset: store.preset,
-    updateSettings: store.updateSettings.bind(store),
-    setPreset: store.setPreset.bind(store),
-    updatePresetGlobal: store.updatePresetGlobal.bind(store)
+    settings: state.settings,
+    preset: state.preset,
+    updateSettings: store.updateSettings,
+    setPreset: store.setPreset,
+    updatePresetGlobal: store.updatePresetGlobal
   };
 }

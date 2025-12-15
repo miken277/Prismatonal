@@ -1,5 +1,6 @@
 
 import { LatticeNode, LatticeLine, AppSettings, GenerationOrigin } from '../types';
+import { projectCoordinates } from './ProjectionService';
 
 // --- Math Helpers ---
 
@@ -72,15 +73,6 @@ class Fraction {
   }
 }
 
-// X-Axis projection vectors (Harmonic Width)
-const X_VECTORS = {
-  3: 100,
-  5: 30,  
-  7: 20,
-  11: -20,
-  13: -30,
-};
-
 const PRIMES = [3, 5, 7, 11, 13];
 const PRIME_RATIOS = {
   3: new Fraction(3, 2),
@@ -133,30 +125,36 @@ const calculateRatioFromCoords = (coords: number[]): Fraction => {
 };
 
 // Origins now includes octave information
-export const generateLattice = (settings: AppSettings, generationOrigins: GenerationOrigin[] = [{coords: [0,0,0,0,0], octave: 0}]): { nodes: LatticeNode[], lines: LatticeLine[] } => {
-  const nodesMap: Map<string, LatticeNode> = new Map();
+export const generateLattice = (
+    settings: AppSettings, 
+    generationOrigins: GenerationOrigin[] = [{coords: [0,0,0,0,0], octave: 0}],
+    // Incremental generation support
+    existingNodesMap?: Map<string, LatticeNode>,
+    startIndex: number = 0
+): { nodes: LatticeNode[], lines: LatticeLine[] } => {
+  
+  // Clone existing map if provided to avoid mutation of cache, or create new
+  const nodesMap: Map<string, LatticeNode> = existingNodesMap ? new Map(existingNodesMap) : new Map();
+  
   const OCTAVE_RANGE = 2; // Range +/- around the origin octave
 
-  // Iterate through each origin and generate a local lattice cluster
-  generationOrigins.forEach(origin => {
+  // Iterate through new origins only
+  for (let i = startIndex; i < generationOrigins.length; i++) {
+      const origin = generationOrigins[i];
+      
       // 1. BFS for Prime Coordinates relative to this origin
-      // We store these temporarily to then expand vertically relative to THIS origin's octave
-      // Updated Queue Item to include 'relativeRatio' for complexity checking relative to the origin
       const localQueue: { coords: number[], ratio: Fraction, relativeRatio: Fraction }[] = [];
       const originFrac = calculateRatioFromCoords(origin.coords);
       
       const originKey = origin.coords.join(',');
-      // Track visited for THIS BFS run to handle local bounds logic correctly
       const visitedLocal = new Set<string>();
       
       localQueue.push({ coords: origin.coords, ratio: originFrac, relativeRatio: new Fraction(1, 1) });
       visitedLocal.add(originKey);
 
-      // Reduced to prevent exponential explosion at high limits
       const MAX_LOCAL_NODES = 1000;
       let processedCount = 0;
       
-      // Temporary storage for the "Base Nodes" (Prime Coords) found by this origin
       const foundBaseNodes: { coords: number[], ratio: Fraction }[] = [];
       foundBaseNodes.push({ coords: origin.coords, ratio: originFrac });
 
@@ -196,8 +194,6 @@ export const generateLattice = (settings: AppSettings, generationOrigins: Genera
                     nextRelativeRatio = relativeRatio.mul(invRatio).normalize();
                  }
                  
-                 // Complexity Check: Now performed against the relative ratio from the seed/origin
-                 // This allows "moss-like" expansion into complex absolute territories as long as local complexity is low.
                  if (nextRelativeRatio.n <= complexityLimit && nextRelativeRatio.d <= complexityLimit) {
                     const nodeData = { coords: nextPos, ratio: nextRatio, relativeRatio: nextRelativeRatio };
                     foundBaseNodes.push(nodeData);
@@ -208,8 +204,7 @@ export const generateLattice = (settings: AppSettings, generationOrigins: Genera
         });
       }
 
-      // 2. Vertical Expansion relative to THIS Origin's Octave
-      // For every prime-coordinate found near this origin, generate octaves around the origin's octave.
+      // 2. Vertical Expansion
       foundBaseNodes.forEach(data => {
           for (let oct = origin.octave - OCTAVE_RANGE; oct <= origin.octave + OCTAVE_RANGE; oct++) {
                const shiftedRatio = data.ratio.shiftOctave(oct);
@@ -217,24 +212,13 @@ export const generateLattice = (settings: AppSettings, generationOrigins: Genera
                const coordKey = data.coords.join(',');
                const id = `${coordKey}:${oct}`;
 
-               // If node already exists (e.g. from another overlapping origin), skip or overwrite (values are deterministic so same)
                if (!nodesMap.has(id)) {
-                   let x = 0;
-                   x += data.coords[0] * X_VECTORS[3];
-                   x += data.coords[1] * X_VECTORS[5];
-                   x += data.coords[2] * X_VECTORS[7];
-                   x += data.coords[3] * X_VECTORS[11];
-                   x += data.coords[4] * X_VECTORS[13];
-                   
-                   // Apply Aspect Ratio Stretch/Squish
-                   x = x * (1.0 / settings.latticeAspectRatio);
-
-                   const PITCH_SCALE = 200; // Pixels per octave
-                   const y = -(Math.log2(absoluteRatio) * PITCH_SCALE);
-
                    const limitTop = getMaxPrime(shiftedRatio.n);
                    const limitBottom = getMaxPrime(shiftedRatio.d);
                    const maxPrime = Math.max(limitTop, limitBottom);
+
+                   // Use Unified Projection Service
+                   const { x, y } = projectCoordinates(data.coords, absoluteRatio, settings.latticeAspectRatio);
 
                    nodesMap.set(id, {
                       id,
@@ -253,16 +237,16 @@ export const generateLattice = (settings: AppSettings, generationOrigins: Genera
                }
           }
       });
-  });
+  }
 
   const nodes = Array.from(nodesMap.values());
   const lines: LatticeLine[] = [];
   
-  // Sort for rendering order (z-index logic mostly handled in CSS/Component, but good for stability)
+  // Sort for rendering order
   nodes.sort((a, b) => b.maxPrime - a.maxPrime);
 
+  // Line generation must run on ALL nodes (new + old) to ensure connectivity
   nodes.forEach(node => {
-      // Harmonic Neighbors (Lateral)
       PRIMES.forEach((prime, idx) => {
           if (settings.limitDepths[prime as 3|5|7|11|13] <= 0) return;
 
@@ -277,13 +261,10 @@ export const generateLattice = (settings: AppSettings, generationOrigins: Genera
               const target = nodesMap.get(targetId);
               
               if (target) {
-                  // Verify harmonic relationship (sanity check against aliasing)
                   const ratio = target.ratio / node.ratio;
                   const test = ratio / basePrimeRatio;
-                  const log2 = Math.log2(test);
-                  
-                  // Allow exact powers of 2 difference (should be 0 for standard lattice steps)
-                  if (Math.abs(log2 - Math.round(log2)) < 0.001) {
+                  // Use a slightly looser tolerance for floating point drift in complex ratios
+                  if (Math.abs(Math.log2(test) - Math.round(Math.log2(test))) < 0.001) {
                       lines.push({
                         id: `${node.id}-${target.id}`,
                         x1: node.x,
@@ -299,8 +280,6 @@ export const generateLattice = (settings: AppSettings, generationOrigins: Genera
           }
       });
       
-      // Vertical Octave Connections (Limit 1)
-      // Connect to node directly above
       const octUpId = `${node.coords.join(',')}:${node.octave + 1}`;
       const octUpNode = nodesMap.get(octUpId);
       if (octUpNode) {
@@ -310,7 +289,7 @@ export const generateLattice = (settings: AppSettings, generationOrigins: Genera
               y1: node.y,
               x2: octUpNode.x,
               y2: octUpNode.y,
-              limit: 1, // Octave "limit"
+              limit: 1, 
               sourceId: node.id,
               targetId: octUpNode.id
           });

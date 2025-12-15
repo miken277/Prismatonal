@@ -1,34 +1,12 @@
 
-export interface MidiDevice {
-    id: string;
-    name: string;
-}
+import { createHostAdapter, IHostAdapter, MidiDevice, TransportCallback } from './HostAdapter';
 
-// Interface for the Electron Preload Bridge
-interface ElectronMidiBridge {
-    send: (channel: string, ...args: any[]) => void;
-    invoke: (channel: string, ...args: any[]) => Promise<any>;
-}
-
-// Interface for a hypothetical VST Bridge (e.g., embedded WebView)
-interface VSTMidiBridge {
-    sendMidi: (bytes: number[]) => void;
-}
-
-declare global {
-    interface Window {
-        electronMidi?: ElectronMidiBridge;
-        vstMidi?: VSTMidiBridge;
-    }
-}
-
-type MidiBackendType = 'web' | 'electron' | 'vst' | 'none';
+// Re-export for consumers (SettingsModal, etc.)
+export type { MidiDevice };
 
 class MidiService {
-    private access: any = null;
-    private output: any = null;
+    private adapter: IHostAdapter | null = null;
     private initialized = false;
-    private backend: MidiBackendType = 'none';
     
     // Channel Management for Polyphonic Pitch Bend (MPE-style)
     private activeNotes: Map<string, { channel: number, note: number }> = new Map(); 
@@ -39,79 +17,40 @@ class MidiService {
     public async init(): Promise<boolean> {
         if (this.initialized) return true;
 
-        // 1. Check for Electron Bridge
-        if (window.electronMidi) {
-            console.log("Initializing MIDI: Electron Backend Detected");
-            this.backend = 'electron';
+        this.adapter = await createHostAdapter();
+        
+        if (this.adapter) {
+            console.log(`Initializing MIDI: ${this.adapter.type.toUpperCase()} Backend Detected`);
             this.initialized = true;
             return true;
+        } else {
+            console.warn("MIDI not supported in this environment");
+            return false;
         }
-
-        // 2. Check for VST Bridge
-        if (window.vstMidi) {
-             console.log("Initializing MIDI: VST Backend Detected");
-             this.backend = 'vst';
-             this.initialized = true;
-             return true;
-        }
-
-        // 3. Fallback to Standard Web MIDI
-        if ((navigator as any).requestMIDIAccess) {
-            console.log("Initializing MIDI: Web MIDI Backend Detected");
-            try {
-                this.access = await (navigator as any).requestMIDIAccess();
-                this.backend = 'web';
-                this.initialized = true;
-                return true;
-            } catch (e) {
-                console.error("Failed to access Web MIDI", e);
-                return false;
-            }
-        }
-
-        console.warn("MIDI not supported in this environment");
-        return false;
     }
 
-    public getOutputs(): MidiDevice[] {
-        // In Electron/VST mode, the "Device" is effectively the Virtual Port created by the host
-        if (this.backend === 'electron') {
-            return [{ id: 'virtual', name: 'PrismaTonal Virtual Output' }];
-        }
-        if (this.backend === 'vst') {
-            return [{ id: 'host', name: 'DAW Host' }];
-        }
-
-        if (this.backend === 'web' && this.access) {
-            const devices: MidiDevice[] = [];
-            this.access.outputs.forEach((output: any) => {
-                devices.push({
-                    id: output.id,
-                    name: output.name || `MIDI Output ${output.id}`
-                });
-            });
-            return devices;
-        }
-
-        return [];
+    public async getOutputs(): Promise<MidiDevice[]> {
+        if (!this.adapter) return [];
+        return this.adapter.getOutputs();
     }
 
     public setOutput(id: string | null) {
-        if (this.backend === 'web' && this.access && id) {
-            this.output = this.access.outputs.get(id) || null;
+        if (this.adapter) {
+            this.adapter.setOutput(id);
         }
-        // Electron/VST don't need explicit output selection as they route to the host/virtual port
+    }
+
+    public setTransportCallback(cb: TransportCallback) {
+        if (this.adapter) {
+            this.adapter.setTransportCallback(cb);
+        }
     }
 
     // --- MIDI MESSAGES ---
 
     private sendBytes(bytes: number[]) {
-        if (this.backend === 'web' && this.output) {
-            this.output.send(bytes);
-        } else if (this.backend === 'electron' && window.electronMidi) {
-            window.electronMidi.send('midi-message', bytes);
-        } else if (this.backend === 'vst' && window.vstMidi) {
-            window.vstMidi.sendMidi(bytes);
+        if (this.adapter) {
+            this.adapter.sendMidi(bytes);
         }
     }
 
@@ -124,7 +63,7 @@ class MidiService {
         const normalizedBend = bendSemitones / bendRange; 
         const bendValue = Math.min(16383, Math.max(0, Math.round(8192 + (normalizedBend * 8192))));
 
-        // Channel
+        // Channel Rotation for MPE
         let channel = this.nextChannel;
         this.nextChannel = (this.nextChannel + 1) % 16; 
         

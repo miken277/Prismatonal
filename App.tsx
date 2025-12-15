@@ -269,7 +269,8 @@ const App: React.FC = () => {
       {/* Main Canvas */}
       <TonalityDiamond 
         ref={diamondRef}
-        settings={settings} 
+        settings={settings}
+        updateSettings={updateSettings}
         audioEngine={audioEngine} 
         onLimitInteraction={handleLimitInteraction}
         activeChordIds={activeChordIds}
