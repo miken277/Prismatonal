@@ -155,6 +155,7 @@ export interface AppSettings {
   // MIDI Settings
   midiEnabled: boolean;
   midiOutputId: string | null;
+  midiInputId: string | null;
   midiPitchBendRange: number; // Semitones (typically 2, 12, 24, or 48)
 
   // UI Relocation

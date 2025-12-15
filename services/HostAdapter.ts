@@ -11,6 +11,7 @@ export interface TransportData {
 }
 
 export type TransportCallback = (data: TransportData) => void;
+export type MidiInputCallback = (bytes: number[]) => void;
 
 // Global augmentations for bridge detection
 declare global {
@@ -30,6 +31,9 @@ export interface IHostAdapter {
     init(): Promise<boolean>;
     getOutputs(): Promise<MidiDevice[]>;
     setOutput(id: string | null): void;
+    getInputs(): Promise<MidiDevice[]>;
+    setInput(id: string | null): void;
+    setInputCallback(cb: MidiInputCallback | null): void;
     sendMidi(bytes: number[]): void;
     setTransportCallback(cb: TransportCallback | null): void;
 }
@@ -41,6 +45,8 @@ export class WebHostAdapter implements IHostAdapter {
     type = 'web' as const;
     private access: any = null;
     private output: any = null;
+    private input: any = null;
+    private inputCallback: MidiInputCallback | null = null;
 
     async init(): Promise<boolean> {
         if ((navigator as any).requestMIDIAccess) {
@@ -72,6 +78,40 @@ export class WebHostAdapter implements IHostAdapter {
         }
     }
 
+    async getInputs(): Promise<MidiDevice[]> {
+        if (!this.access) return [];
+        const devices: MidiDevice[] = [];
+        this.access.inputs.forEach((input: any) => {
+            devices.push({ id: input.id, name: input.name || `Input ${input.id}` });
+        });
+        return devices;
+    }
+
+    setInput(id: string | null) {
+        // Clear previous
+        if (this.input) {
+            this.input.onmidimessage = null;
+            this.input = null;
+        }
+
+        if (this.access && id) {
+            this.input = this.access.inputs.get(id) || null;
+            if (this.input) {
+                this.input.onmidimessage = this.handleMidiMessage;
+            }
+        }
+    }
+
+    setInputCallback(cb: MidiInputCallback | null) {
+        this.inputCallback = cb;
+    }
+
+    private handleMidiMessage = (event: any) => {
+        if (this.inputCallback && event.data) {
+            this.inputCallback(Array.from(event.data));
+        }
+    }
+
     sendMidi(bytes: number[]) {
         if (this.output) {
             this.output.send(bytes);
@@ -95,11 +135,27 @@ export class ElectronHostAdapter implements IHostAdapter {
     }
 
     async getOutputs(): Promise<MidiDevice[]> {
-        return [{ id: 'virtual', name: 'PrismaTonal Virtual Output' }];
+        return [{ id: 'virtual_out', name: 'PrismaTonal Virtual Output' }];
+    }
+
+    async getInputs(): Promise<MidiDevice[]> {
+        return [{ id: 'virtual_in', name: 'PrismaTonal Virtual Input' }];
     }
 
     setOutput(id: string | null) {
         // Electron bridge typically routes to a virtual port managed by the main process
+    }
+
+    setInput(id: string | null) {
+        // Electron bridge manages input internally
+    }
+
+    setInputCallback(cb: MidiInputCallback | null) {
+        if (window.electronMidi && window.electronMidi.receive) {
+            window.electronMidi.receive('midi-message-in', (_: any, data: number[]) => {
+                 if (cb) cb(data);
+            });
+        }
     }
 
     sendMidi(bytes: number[]) {
@@ -128,11 +184,20 @@ export class VSTHostAdapter implements IHostAdapter {
     }
 
     async getOutputs(): Promise<MidiDevice[]> {
-        return [{ id: 'host', name: 'DAW Host Track' }];
+        return [{ id: 'host_out', name: 'DAW Host Track' }];
+    }
+    
+    async getInputs(): Promise<MidiDevice[]> {
+        return [{ id: 'host_in', name: 'DAW Input' }];
     }
 
-    setOutput(id: string | null) {
-        // Always routes to host track
+    setOutput(id: string | null) {}
+    setInput(id: string | null) {}
+
+    setInputCallback(cb: MidiInputCallback | null) {
+        // VST Bridge would need to expose a way to receive MIDI
+        // For now, this is a placeholder
+        // window.vstMidi.onMessage = cb;
     }
 
     sendMidi(bytes: number[]) {

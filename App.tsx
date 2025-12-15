@@ -9,6 +9,7 @@ import { audioEngine } from './services/AudioEngine'; // Import singleton
 import { useStore } from './services/Store';
 import { AppSettings, ChordDefinition, XYPos } from './types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH } from './constants';
+import { midiService } from './services/MidiService';
 
 const App: React.FC = () => {
   const { settings, preset, updateSettings, setPreset } = useStore();
@@ -50,6 +51,42 @@ const App: React.FC = () => {
         window.removeEventListener('touchstart', warmup);
     };
   }, []);
+
+  // MIDI Input Logic
+  useEffect(() => {
+    if (!settings.midiEnabled || !settings.midiInputId) return;
+
+    const handleMidiMessage = (message: number[]) => {
+        const [status, data1, data2] = message;
+        const command = status & 0xF0;
+        
+        // Note On (0x90) with velocity > 0
+        if (command === 0x90 && data2 > 0) {
+            const note = data1;
+            const velocity = data2 / 127.0;
+            // Calculate frequency relative to A440 for standard keyboard mapping
+            // But we scale it as a ratio relative to baseFrequency so the synth tuning matches the app state
+            const freq = 440 * Math.pow(2, (note - 69) / 12);
+            const ratio = freq / settings.baseFrequency;
+            
+            // Use 'midi-' prefix to avoid ID collisions with lattice nodes
+            audioEngine.startVoice(`midi-${note}`, ratio, settings.baseFrequency, velocity);
+        } 
+        // Note Off (0x80) or Note On with velocity 0
+        else if (command === 0x80 || (command === 0x90 && data2 === 0)) { 
+            const note = data1;
+            audioEngine.stopVoice(`midi-${note}`);
+        }
+    };
+
+    midiService.addInputListener(handleMidiMessage);
+    // Ensure the input device is connected (idempotent)
+    midiService.setInput(settings.midiInputId);
+
+    return () => {
+        midiService.removeInputListener(handleMidiMessage);
+    };
+  }, [settings.midiEnabled, settings.midiInputId, settings.baseFrequency]);
 
   // Sanitize UI Positions on Load to prevent off-screen elements
   useEffect(() => {

@@ -4,6 +4,8 @@ import { createHostAdapter, IHostAdapter, MidiDevice, TransportCallback } from '
 // Re-export for consumers (SettingsModal, etc.)
 export type { MidiDevice };
 
+type MidiMessageCallback = (data: number[]) => void;
+
 class MidiService {
     private adapter: IHostAdapter | null = null;
     private initialized = false;
@@ -11,6 +13,9 @@ class MidiService {
     // Channel Management for Polyphonic Pitch Bend (MPE-style)
     private activeNotes: Map<string, { channel: number, note: number }> = new Map(); 
     private nextChannel = 0; // 0-15 (corresponding to Ch 1-16)
+
+    // Input Listeners
+    private inputListeners: Set<MidiMessageCallback> = new Set();
 
     constructor() {}
 
@@ -21,6 +26,12 @@ class MidiService {
         
         if (this.adapter) {
             console.log(`Initializing MIDI: ${this.adapter.type.toUpperCase()} Backend Detected`);
+            
+            // Set up input forwarding
+            this.adapter.setInputCallback((data) => {
+                this.inputListeners.forEach(cb => cb(data));
+            });
+
             this.initialized = true;
             return true;
         } else {
@@ -38,6 +49,25 @@ class MidiService {
         if (this.adapter) {
             this.adapter.setOutput(id);
         }
+    }
+
+    public async getInputs(): Promise<MidiDevice[]> {
+        if (!this.adapter) return [];
+        return this.adapter.getInputs();
+    }
+
+    public setInput(id: string | null) {
+        if (this.adapter) {
+            this.adapter.setInput(id);
+        }
+    }
+
+    public addInputListener(cb: MidiMessageCallback) {
+        this.inputListeners.add(cb);
+    }
+
+    public removeInputListener(cb: MidiMessageCallback) {
+        this.inputListeners.delete(cb);
     }
 
     public setTransportCallback(cb: TransportCallback) {

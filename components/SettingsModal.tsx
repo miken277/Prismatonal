@@ -169,16 +169,16 @@ const KeyBindButton: React.FC<KeyBindButtonProps> = ({
 
 const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'behavior' | 'color' | 'midi'>('general');
-  const [midiDevices, setMidiDevices] = useState<MidiDevice[]>([]);
+  const [outputDevices, setOutputDevices] = useState<MidiDevice[]>([]);
+  const [inputDevices, setInputDevices] = useState<MidiDevice[]>([]);
   const [bindingKey, setBindingKey] = useState<keyof KeyMap | null>(null);
 
   useEffect(() => {
     if (isOpen && activeTab === 'midi') {
         midiService.init().then(success => {
             if (success) {
-                midiService.getOutputs().then(devices => {
-                    setMidiDevices(devices);
-                });
+                midiService.getOutputs().then(devices => setOutputDevices(devices));
+                midiService.getInputs().then(devices => setInputDevices(devices));
             }
         });
     }
@@ -699,12 +699,12 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700 space-y-4">
                             <label className="flex items-center space-x-3 cursor-pointer">
                                 <input type="checkbox" checked={settings.midiEnabled} onChange={(e) => handleChange('midiEnabled', e.target.checked)} className="w-6 h-6 rounded border-slate-600 text-green-500 focus:ring-green-500" />
-                                <div><span className={`font-bold block ${settings.midiEnabled ? 'text-green-400' : 'text-slate-300'}`}>Enable MIDI Output</span><span className="text-xs text-slate-400">Send notes to external synths/DAW</span></div>
+                                <div><span className={`font-bold block ${settings.midiEnabled ? 'text-green-400' : 'text-slate-300'}`}>Enable MIDI</span><span className="text-xs text-slate-400">Send notes to external synths/DAW & Receive input</span></div>
                             </label>
 
                             <div className={`${settings.midiEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'} transition-opacity space-y-4`}>
                                 <div>
-                                    <label className="block text-sm font-semibold mb-2">Output Device</label>
+                                    <label className="block text-sm font-semibold mb-2">Output Device (Send Notes)</label>
                                     <select 
                                         value={settings.midiOutputId || ''}
                                         onChange={(e) => {
@@ -715,11 +715,30 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                         className="w-full bg-slate-700 border border-slate-600 rounded p-2 text-white"
                                     >
                                         <option value="">Select MIDI Output...</option>
-                                        {midiDevices.map(device => (
+                                        {outputDevices.map(device => (
                                             <option key={device.id} value={device.id}>{device.name}</option>
                                         ))}
                                     </select>
-                                    {midiDevices.length === 0 && <p className="text-[10px] text-orange-400 mt-1">No MIDI devices found. Check connection or browser permissions.</p>}
+                                    {outputDevices.length === 0 && <p className="text-[10px] text-orange-400 mt-1">No MIDI output devices found.</p>}
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold mb-2">Input Device (Play Synth)</label>
+                                    <select 
+                                        value={settings.midiInputId || ''}
+                                        onChange={(e) => {
+                                            const id = e.target.value || null;
+                                            handleChange('midiInputId', id);
+                                            midiService.setInput(id);
+                                        }}
+                                        className="w-full bg-slate-700 border border-slate-600 rounded p-2 text-white"
+                                    >
+                                        <option value="">Select MIDI Input...</option>
+                                        {inputDevices.map(device => (
+                                            <option key={device.id} value={device.id}>{device.name}</option>
+                                        ))}
+                                    </select>
+                                    {inputDevices.length === 0 && <p className="text-[10px] text-orange-400 mt-1">No MIDI input devices found.</p>}
                                 </div>
 
                                 <div>

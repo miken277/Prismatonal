@@ -91,6 +91,7 @@ const FloatingControls: React.FC<Props> = ({
       left: uiPositions[key as keyof typeof uiPositions].x,
       top: uiPositions[key as keyof typeof uiPositions].y,
       touchAction: 'none' as React.CSSProperties['touchAction'],
+      willChange: uiUnlocked ? 'left, top' : 'auto'
   });
 
   const glassPanelClass = `bg-slate-800/80 border border-slate-600/50 shadow-xl rounded-2xl transition-all ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50 hover:bg-slate-700/80' : ''}`;
@@ -175,16 +176,15 @@ const FloatingControls: React.FC<Props> = ({
       </div>
 
       {/* Latch Button */}
-      {/* Container wrapper used for the animated border effect in Frozen state */}
       <div
-        className={`absolute w-16 h-16 z-[150] rounded-2xl ${uiUnlocked ? 'cursor-move' : ''}`}
+        className={`absolute w-16 h-16 z-[150] rounded-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={draggableStyle('latch')}
         onPointerDown={(e) => handleButtonPress(e, 'latch', onLatchToggle)}
       >
           {latchStatus === 2 && (
-              // Spinning Gradient Background for Frozen State
-              <div className="absolute inset-[-4px] rounded-2xl overflow-hidden animate-spin-slow opacity-80 pointer-events-none">
-                  <div className="w-full h-full bg-[conic-gradient(from_0deg,transparent_0deg,transparent_90deg,#22c55e_180deg,transparent_270deg,transparent_360deg)]"></div>
+              // Vivid Moving Green Glow for Frozen State
+              <div className="absolute inset-[-4px] rounded-2xl overflow-hidden pointer-events-none">
+                  <div className="absolute w-[200%] h-[200%] top-[-50%] left-[-50%] animate-[spin_4s_linear_infinite] bg-[conic-gradient(from_0deg,transparent_0deg,#4ade80_180deg,transparent_360deg)] opacity-100 blur-[3px]"></div>
               </div>
           )}
           
@@ -193,7 +193,7 @@ const FloatingControls: React.FC<Props> = ({
                 ${latchStatus === 1 
                     ? 'bg-green-500 text-white border-green-400 shadow-[0_0_15px_rgba(34,197,94,0.6)]' // Active
                     : latchStatus === 2 
-                        ? 'bg-slate-900 text-green-500 border-transparent' // Frozen (Background handled by wrapper)
+                        ? 'bg-slate-900 text-green-400 border-transparent' // Frozen
                         : 'bg-slate-800/80 text-green-700 border-slate-600/50 hover:text-green-500' // Off
                 }
                 ${uiUnlocked ? 'pointer-events-none' : 'active:scale-95'}
@@ -204,22 +204,38 @@ const FloatingControls: React.FC<Props> = ({
       </div>
 
       {/* Off Button */}
-      <button
-        className={`absolute w-16 h-16 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider shadow-[0_0_15px_rgba(234,179,8,0.2)] z-[150] select-none ${glassPanelClass} hover:bg-yellow-600/20 active:bg-yellow-600 active:text-white`}
+      <div
+        className={`absolute w-16 h-16 z-[150] rounded-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={draggableStyle('off')}
         onPointerDown={(e) => handleButtonPress(e, 'off', onOff)}
       >
-        OFF
-      </button>
+        <button
+            className={`w-full h-full flex items-center justify-center font-bold uppercase tracking-wider rounded-2xl select-none transition-all border bg-slate-800/80 backdrop-blur
+                border-slate-600/50 text-yellow-700 hover:text-yellow-500
+                active:text-yellow-300 active:border-yellow-500 active:shadow-[0_0_15px_rgba(234,179,8,0.4)]
+                ${uiUnlocked ? 'pointer-events-none' : 'active:scale-95'}
+            `}
+        >
+            OFF
+        </button>
+      </div>
 
       {/* Panic Button */}
-      <button
-        className={`absolute w-16 h-16 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider shadow-[0_0_15px_rgba(239,68,68,0.2)] z-[150] select-none ${glassPanelClass} hover:bg-red-600/20 active:bg-red-600 active:text-white`}
+      <div
+        className={`absolute w-16 h-16 z-[150] rounded-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={draggableStyle('panic')}
         onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)}
       >
-        PANIC
-      </button>
+        <button
+            className={`w-full h-full flex items-center justify-center font-bold uppercase tracking-wider rounded-2xl select-none transition-all border bg-slate-800/80 backdrop-blur
+                border-slate-600/50 text-red-800 hover:text-red-500
+                active:text-red-400 active:border-red-500 active:shadow-[0_0_15px_rgba(239,68,68,0.4)]
+                ${uiUnlocked ? 'pointer-events-none' : 'active:scale-95'}
+            `}
+        >
+            PANIC
+        </button>
+      </div>
 
       {/* Chords Group */}
       <div

@@ -196,6 +196,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // MIDI Defaults
   midiEnabled: false,
   midiOutputId: null,
+  midiInputId: null, // Added MIDI Input Default
   midiPitchBendRange: 24, // High default for smooth microtonality
 
   // UI Relocation

@@ -235,7 +235,7 @@ class AudioEngine {
     }
   }
 
-  public async startVoice(id: string, ratio: number, baseFrequency: number) {
+  public async startVoice(id: string, ratio: number, baseFrequency: number, velocity: number = 1.0) {
     await this.init();
     if (!this.workletNode) return;
 
@@ -243,7 +243,8 @@ class AudioEngine {
     this.workletNode.port.postMessage({ 
         type: 'note_on', 
         id: id, 
-        freq: freq 
+        freq: freq,
+        velocity: velocity
     });
   }
 

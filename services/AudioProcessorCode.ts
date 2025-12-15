@@ -224,7 +224,7 @@ class Voice {
     this.lfoVals = new Float32Array(3);
   }
 
-  trigger(id, freq) {
+  trigger(id, freq, velocity = 1.0) {
     this.id = id;
     this.baseFreq = freq;
     this.targetFreq = freq;
@@ -236,7 +236,7 @@ class Voice {
     
     // We trigger envelopes. If they are already running (stealing), they will ramp from current value.
     this.envs.forEach(env => {
-        env.trigger();
+        env.trigger(velocity);
     });
     
     // Filter state is reset to prevent blown filters from previous bad states
@@ -412,7 +412,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
       } else if (msg.type === 'config') {
          if (msg.polyphony) this.maxPolyphony = msg.polyphony;
       } else if (msg.type === 'note_on') {
-        this.triggerVoice(msg.id, msg.freq);
+        this.triggerVoice(msg.id, msg.freq, msg.velocity);
       } else if (msg.type === 'note_off') {
         this.releaseVoice(msg.id);
       } else if (msg.type === 'glide') {
@@ -436,12 +436,12 @@ class PrismaProcessor extends AudioWorkletProcessor {
       }));
   }
 
-  triggerVoice(id, freq) {
+  triggerVoice(id, freq, velocity = 1.0) {
     if (!Number.isFinite(freq) || freq <= 0) return; 
 
     for (let i = 0; i < this.voices.length; i++) {
         if (this.voices[i].active && this.voices[i].id === id) {
-            this.voices[i].trigger(id, freq);
+            this.voices[i].trigger(id, freq, velocity);
             return;
         }
     }
@@ -477,9 +477,9 @@ class PrismaProcessor extends AudioWorkletProcessor {
     }
 
     if (physicallyFree) {
-        physicallyFree.trigger(id, freq);
+        physicallyFree.trigger(id, freq, velocity);
     } else if (quietestVoice) {
-        quietestVoice.trigger(id, freq);
+        quietestVoice.trigger(id, freq, velocity);
     }
   }
 
