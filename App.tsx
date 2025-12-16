@@ -1,206 +1,235 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
 import SynthControls from './components/SynthControls';
 import FloatingControls from './components/FloatingControls';
 import LimitLayerControls from './components/LimitLayerControls';
 import { audioEngine } from './services/AudioEngine'; // Import singleton
+import { midiService } from './services/MidiService';
 import { useStore } from './services/Store';
 import { AppSettings, ChordDefinition, XYPos } from './types';
-import { MARGIN_3MM, SCROLLBAR_WIDTH } from './constants';
-import { midiService } from './services/MidiService';
+import { PIXELS_PER_MM } from './constants';
+
+const REFERENCE_SHORT_EDGE = 1080; // Baseline resolution for 1.0 scale
 
 const App: React.FC = () => {
-  const { settings, preset, updateSettings, setPreset } = useStore();
+  const { settings, presets, updateSettings, setPreset } = useStore();
 
   const [masterVolume, setMasterVolume] = useState(0.8);
+  const [spatialScale, setSpatialScale] = useState(1.0); 
   const [activeChordIds, setActiveChordIds] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   
-  // Latch State: 0 = Off, 1 = Active (Green), 2 = Frozen (Momentary Only)
-  const [latchStatus, setLatchStatus] = useState<0 | 1 | 2>(0);
-
+  // Adaptive Scaling State
+  const [autoScaleFactor, setAutoScaleFactor] = useState(1.0);
+  
+  // 0 = Off, 1 = Latch All, 2 = Sustain (Partial Latch)
+  const [latchMode, setLatchMode] = useState<0 | 1 | 2>(0);
+  
   // Modals
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSynthOpen, setIsSynthOpen] = useState(false);
-  
-  // Visual Focus Mode
-  const [showUI, setShowUI] = useState(true);
 
   const diamondRef = useRef<TonalityDiamondHandle>(null);
 
-  // Audio Warmup: Pre-initialize audio context on any user interaction
+  // Computed Effective Scale (Auto * User Preference)
+  const effectiveScale = autoScaleFactor * (settings.uiScale || 1.0);
+
+  // Audio Warmup - Reinforced for iOS
   useEffect(() => {
-    const warmup = () => {
-        audioEngine.init();
+    const warmup = (e: Event) => {
+        // Prevent default for touchend to ensure audio context can resume cleanly
+        // if this is the very first interaction
+        // However, we must be careful not to block clicking buttons
         
-        // Remove listeners once warmed up
+        // Resume/Init context immediately on user interaction
+        audioEngine.resume().then(() => {
+            // Optional: Log success
+        });
+        
+        // Remove listeners
         window.removeEventListener('pointerdown', warmup);
         window.removeEventListener('keydown', warmup);
         window.removeEventListener('touchstart', warmup);
+        window.removeEventListener('touchend', warmup);
+        window.removeEventListener('click', warmup);
     };
 
     window.addEventListener('pointerdown', warmup);
     window.addEventListener('keydown', warmup);
     window.addEventListener('touchstart', warmup);
+    window.addEventListener('touchend', warmup);
+    window.addEventListener('click', warmup);
 
     return () => {
         window.removeEventListener('pointerdown', warmup);
         window.removeEventListener('keydown', warmup);
         window.removeEventListener('touchstart', warmup);
+        window.removeEventListener('touchend', warmup);
+        window.removeEventListener('click', warmup);
     };
   }, []);
 
-  // MIDI Input Logic
+  // Update CSS Variable for global usage if needed
   useEffect(() => {
-    if (!settings.midiEnabled || !settings.midiInputId) return;
+      document.documentElement.style.setProperty('--ui-scale', effectiveScale.toString());
+  }, [effectiveScale]);
 
-    const handleMidiMessage = (message: number[]) => {
-        const [status, data1, data2] = message;
-        const command = status & 0xF0;
-        
-        // Note On (0x90) with velocity > 0
-        if (command === 0x90 && data2 > 0) {
-            const note = data1;
-            const velocity = data2 / 127.0;
-            // Calculate frequency relative to A440 for standard keyboard mapping
-            // But we scale it as a ratio relative to baseFrequency so the synth tuning matches the app state
-            const freq = 440 * Math.pow(2, (note - 69) / 12);
-            const ratio = freq / settings.baseFrequency;
-            
-            // Use 'midi-' prefix to avoid ID collisions with lattice nodes
-            audioEngine.startVoice(`midi-${note}`, ratio, settings.baseFrequency, velocity);
-        } 
-        // Note Off (0x80) or Note On with velocity 0
-        else if (command === 0x80 || (command === 0x90 && data2 === 0)) { 
-            const note = data1;
-            audioEngine.stopVoice(`midi-${note}`);
-        }
-    };
+  // Measure Safe Areas (Notches/Home Bars)
+  const getSafeAreas = () => {
+      if (typeof document === 'undefined') return { top: 0, right: 0, bottom: 0, left: 0 };
+      const div = document.createElement('div');
+      div.style.paddingTop = 'env(safe-area-inset-top)';
+      div.style.paddingRight = 'env(safe-area-inset-right)';
+      div.style.paddingBottom = 'env(safe-area-inset-bottom)';
+      div.style.paddingLeft = 'env(safe-area-inset-left)';
+      div.style.position = 'absolute';
+      div.style.visibility = 'hidden';
+      document.body.appendChild(div);
+      const computed = getComputedStyle(div);
+      const safe = {
+          top: parseInt(computed.paddingTop) || 0,
+          right: parseInt(computed.paddingRight) || 0,
+          bottom: parseInt(computed.paddingBottom) || 0,
+          left: parseInt(computed.paddingLeft) || 0
+      };
+      document.body.removeChild(div);
+      return safe;
+  };
 
-    midiService.addInputListener(handleMidiMessage);
-    // Ensure the input device is connected (idempotent)
-    midiService.setInput(settings.midiInputId);
+  // Central Layout Calculation Logic
+  const applyLayout = (w: number, h: number, scale: number) => {
+      const safeArea = getSafeAreas();
 
-    return () => {
-        midiService.removeInputListener(handleMidiMessage);
-    };
-  }, [settings.midiEnabled, settings.midiInputId, settings.baseFrequency]);
-
-  // Sanitize UI Positions on Load to prevent off-screen elements
-  useEffect(() => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      // Use configured margin, defaulting to 4mm if not set
+      const marginPx = (settings.uiEdgeMargin || 4) * PIXELS_PER_MM;
       
-      updateSettings(prev => {
-          const p = { ...prev.uiPositions };
-          let changed = false;
-          
-          // Helper to check and clamp
-          const checkAndFix = (key: keyof typeof p, width: number, height: number) => {
-              let x = p[key].x;
-              let y = p[key].y;
-              
-              const maxX = w - width - MARGIN_3MM;
-              const maxY = h - height - MARGIN_3MM;
-              const minX = MARGIN_3MM;
-              const minY = MARGIN_3MM;
+      const marginTop = marginPx + safeArea.top;
+      // Force extra margin on right if safe area is 0 to ensure visual gap from scrollbar
+      const marginRight = marginPx + safeArea.right + (safeArea.right === 0 ? 4 : 0);
+      const marginBottom = marginPx + safeArea.bottom;
+      const marginLeft = marginPx + safeArea.left;
+      
+      const baseGap = marginPx; // Spacing between buttons matches the margin
+      
+      // --- TOP CENTER (Space & Volume) ---
+      const sliderWidth = 290 * scale; // Restored to 290 for centering
+      const centerGap = 120 * scale; 
+      const totalTopWidth = (sliderWidth * 2) + centerGap;
+      const topStartX = (w / 2) - (totalTopWidth / 2);
 
-              // Clamp if out of bounds
-              if (x > maxX) { x = maxX; changed = true; }
-              if (x < minX) { x = minX; changed = true; }
-              if (y > maxY) { y = maxY; changed = true; }
-              if (y < minY) { y = minY; changed = true; }
-              
-              p[key] = { x, y };
-          };
+      const newPos = { ...settings.uiPositions };
 
-          // Estimates for element sizes (width, height)
-          checkAndFix('volume', 180, 48); // Increased width for new design
-          checkAndFix('panic', 64, 64);
-          checkAndFix('off', 64, 64);
-          checkAndFix('latch', 64, 64);
-          checkAndFix('center', 160, 48); // Increased width for grouped Navigation Bar
-          checkAndFix('chords', 300, 48); 
-          checkAndFix('layers', 90, 310);
+      newPos.space = { x: topStartX, y: marginTop };
+      newPos.volume = { x: topStartX + sliderWidth + centerGap, y: marginTop };
 
-          return changed ? { ...prev, uiPositions: p } : prev;
-      });
-  }, []); // Run once on mount
+      // --- RIGHT STACK (Layers + Buttons) ---
+      const largeBtn = 80 * scale; 
+      
+      // Precise width calculation
+      // Limit Bar: p-2(8) + icon(24*s) + gap-2(8) + btn(48*s) + p-2(8) = 24 + 72*s
+      // Note: scale here is effective scale
+      const limitBarWidth = 24 + (72 * scale); 
+      const largeBtnWidth = largeBtn;
 
-  // Resize Handler to snap UI elements to their anchors
-  const windowSize = useRef({ w: window.innerWidth, h: window.innerHeight });
+      // Calculate Layers Height
+      const layerRowHeight = 48 * scale;
+      const layerGap = 12;
+      const layerPadding = 16;
+      const layersHeight = (layerRowHeight * 6) + (layerGap * 5) + layerPadding;
+
+      const separatorGap = largeBtn;
+      const btnGap = 10 * scale;
+
+      const totalStackHeight = layersHeight + separatorGap + (4 * largeBtn) + (3 * btnGap);
+
+      // Start Y (Centered vertically)
+      let startY = (h / 2) - (totalStackHeight / 2);
+      if (startY < marginTop + 50) startY = marginTop + 50;
+
+      // X Positions (Right Aligned to Margin)
+      // Use window.innerWidth (w) but subtract scrollbar width manually if on desktop
+      // Since 'w' passed here is clientWidth from the resize handler, it already excludes scrollbar.
+      const limitBarX = w - marginRight - limitBarWidth;
+      const buttonsX = w - marginRight - largeBtnWidth;
+
+      newPos.layers = { x: limitBarX, y: startY };
+      
+      let currentY = startY + layersHeight + separatorGap;
+      
+      newPos.bend = { x: buttonsX, y: currentY };
+      currentY += largeBtn + btnGap;
+      
+      newPos.latch = { x: buttonsX, y: currentY };
+      currentY += largeBtn + btnGap;
+      
+      newPos.off = { x: buttonsX, y: currentY };
+      currentY += largeBtn + btnGap;
+      
+      newPos.panic = { x: buttonsX, y: currentY };
+
+      // --- BOTTOM LEFT ROW ---
+      const baseBtn = 48 * scale;
+      // Lifted by ~4mm (approx 15px at scale 1.0) to match Panic visual balance
+      const bottomLiftOffset = 15 * scale;
+      const bottomY = h - marginBottom - baseBtn - bottomLiftOffset; 
+      
+      let currentX = marginLeft;
+      
+      newPos.center = { x: currentX, y: bottomY };
+      currentX += (baseBtn + baseGap); 
+      
+      if (settings.showIncreaseDepthButton) {
+          newPos.depth = { x: currentX, y: bottomY };
+          currentX += (baseBtn + baseGap);
+          newPos.decreaseDepth = { x: currentX, y: bottomY };
+          currentX += (baseBtn + baseGap);
+      }
+      
+      currentX += 20 * scale; 
+      newPos.chords = { x: currentX, y: bottomY };
+
+      return newPos;
+  };
+
+  // Resize Handler & Scale Calculator
+  const windowSizeRef = useRef({ w: typeof window !== 'undefined' ? window.innerWidth : 1000, h: typeof window !== 'undefined' ? window.innerHeight : 800 });
 
   useEffect(() => {
     const handleResize = () => {
-      const newW = window.innerWidth;
-      const newH = window.innerHeight;
-      const oldW = windowSize.current.w;
-      const oldH = windowSize.current.h;
+        // Use clientWidth to exclude scrollbars for precise inner alignment
+        const w = document.documentElement.clientWidth;
+        const h = document.documentElement.clientHeight;
+        
+        const shortEdge = Math.min(w, h);
+        const newAutoScale = shortEdge / REFERENCE_SHORT_EDGE;
+        setAutoScaleFactor(newAutoScale);
 
-      updateSettings(prev => {
-        const p = prev.uiPositions;
-        const newPos = { ...p };
-
-        // 1. Panic (Anchor: Bottom-Right)
-        newPos.panic = {
-            x: newW - (oldW - p.panic.x),
-            y: newH - (oldH - p.panic.y)
-        };
-
-        // 2. Off (Anchor: Bottom-Right)
-        newPos.off = {
-            x: newW - (oldW - p.off.x),
-            y: newH - (oldH - p.off.y)
-        };
-
-        // 3. Latch (Anchor: Bottom-Right)
-        newPos.latch = {
-            x: newW - (oldW - p.latch.x),
-            y: newH - (oldH - p.latch.y)
-        };
-
-        // 4. Volume (Anchor: Top-Center)
-        const volOffsetFromCenter = p.volume.x - (oldW / 2);
-        newPos.volume = {
-            x: (newW / 2) + volOffsetFromCenter,
-            y: p.volume.y 
-        };
-
-        // 5. Center/Chords (Anchor: Bottom-Left)
-        const updateBottomLeft = (key: 'center' | 'chords') => {
-             newPos[key] = {
-                 x: p[key].x, 
-                 y: newH - (oldH - p[key].y)
-             };
-        };
-        updateBottomLeft('center');
-        updateBottomLeft('chords');
-
-        // 6. Layers (Anchor: Vertical Center on Right Edge)
-        newPos.layers = {
-            x: newW - (oldW - p.layers.x), // Maintain distance from right edge
-            y: (newH / 2) - 155 // Recenter vertically (height/2)
-        };
-
-        return {
+        const newEffectiveScale = newAutoScale * (settings.uiScale || 1.0);
+        
+        updateSettings(prev => ({
             ...prev,
-            uiPositions: newPos
-        };
-      });
-
-      windowSize.current = { w: newW, h: newH };
+            uiPositions: applyLayout(w, h, newEffectiveScale)
+        }));
+        
+        windowSizeRef.current = { w, h };
     };
+
+    handleResize();
 
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [updateSettings]);
+  }, [settings.uiScale, settings.uiEdgeMargin, settings.showIncreaseDepthButton]); 
 
   // Init Engine updates
   useEffect(() => {
     audioEngine.setMasterVolume(masterVolume);
   }, [masterVolume]);
+
+  useEffect(() => {
+    audioEngine.setGlobalSpatialScale(spatialScale);
+  }, [spatialScale]);
 
   const handleLimitInteraction = (limit: number) => {
     if (settings.layerOrder[settings.layerOrder.length - 1] !== limit) {
@@ -210,36 +239,40 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePanic = useCallback(() => {
+  const handlePanic = () => {
     audioEngine.stopAll(); 
+    midiService.panic(); // Robust MIDI Panic (All Notes Off)
     diamondRef.current?.clearLatches(); 
     setActiveChordIds([]); 
-    setLatchStatus(0); // Reset Latch
-  }, []);
+    setLatchMode(0);
+    setIsSettingsOpen(false);
+    setIsSynthOpen(false);
+  };
 
-  // Musical Off: Unlatch nodes but let tails fade
   const handleOff = () => {
     diamondRef.current?.clearLatches(); 
     setActiveChordIds([]);
-    setLatchStatus(0); // Reset Latch
+    setLatchMode(0);
   };
 
-  // Tri-State Logic: Off (0) -> Active (1) -> Frozen (2) -> Off (0)
   const handleLatchToggle = () => {
-      setLatchStatus(prev => {
-          if (prev === 0) return 1;
-          if (prev === 1) return 2;
-          if (prev === 2) {
-              diamondRef.current?.clearLatches(); // "Taking foot off pedal"
+      setLatchMode(prev => {
+          const next = prev + 1;
+          if (next > 2) {
+              diamondRef.current?.clearLatches();
               return 0;
           }
-          return 0;
+          return next as 0 | 1 | 2;
       });
   };
 
-  const handleCenter = useCallback(() => {
+  const handleBendToggle = () => {
+      updateSettings(prev => ({ ...prev, isPitchBendEnabled: !prev.isPitchBendEnabled }));
+  };
+
+  const handleCenter = () => {
       diamondRef.current?.centerView();
-  }, []);
+  };
 
   const handleIncreaseDepth = () => {
       diamondRef.current?.increaseDepth();
@@ -249,7 +282,7 @@ const App: React.FC = () => {
       diamondRef.current?.decreaseDepth();
   };
 
-  const handleAddChord = useCallback(() => {
+  const handleAddChord = () => {
       if (diamondRef.current) {
           const latchedNodes = diamondRef.current.getLatchedNodes();
           if (latchedNodes.length === 0) return;
@@ -262,9 +295,7 @@ const App: React.FC = () => {
           if (slotIndex !== -1) {
               const newChords = [...settings.savedChords];
               const simplifiedNodes = latchedNodes.map(n => ({
-                  id: n.id,
-                  n: n.n,
-                  d: n.d
+                  id: n.id, n: n.n, d: n.d
               }));
 
               newChords[slotIndex] = {
@@ -277,7 +308,7 @@ const App: React.FC = () => {
               updateSettings(prev => ({ ...prev, savedChords: newChords }));
           }
       }
-  }, [settings.savedChords, updateSettings]);
+  };
 
   const toggleChord = (id: string) => {
       setActiveChordIds(prev => {
@@ -292,125 +323,125 @@ const App: React.FC = () => {
   const handleUiPositionUpdate = (key: keyof AppSettings['uiPositions'], pos: XYPos) => {
       updateSettings(prev => ({
           ...prev,
-          uiPositions: {
-              ...prev.uiPositions,
-              [key]: pos
-          }
+          uiPositions: { ...prev.uiPositions, [key]: pos }
       }));
   };
 
   // --- Keyboard Shortcuts ---
-  const handleToggleLimit = useCallback((limit: number) => {
-      const isHidden = settings.hiddenLimits.includes(limit);
-      let newHidden = [...settings.hiddenLimits];
-      if (isHidden) {
-          newHidden = newHidden.filter(l => l !== limit);
-      } else {
-          newHidden.push(limit);
-      }
-      updateSettings(prev => ({ ...prev, hiddenLimits: newHidden }));
-  }, [settings.hiddenLimits, updateSettings]);
-
   useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
-          // Ignore if typing in an input
-          if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+          // Always allow Escape to close settings/synth if open
+          if (e.key === 'Escape' && (isSettingsOpen || isSynthOpen)) {
+              setIsSettingsOpen(false);
+              setIsSynthOpen(false);
+              return;
+          }
 
-          // Mapping
-          const map = settings.keyMap;
+          // Ignore if typing in an input field
+          const target = e.target as HTMLElement;
+          if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') return;
 
-          switch(e.code) {
-              case map.panic:
-                  e.preventDefault();
+          // Gate everything else behind the setting
+          if (!settings.enableKeyboardShortcuts) return;
+
+          const key = e.key.toLowerCase();
+
+          // Prevent defaults for app-control keys
+          if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+              e.preventDefault();
+          }
+
+          switch(key) {
+              case ' ': // Spacebar -> Latch
+                  handleLatchToggle();
+                  break;
+              case 'escape': // Esc -> Panic
                   handlePanic();
                   break;
-              case map.center:
-                  e.preventDefault();
+              case 'c': // C -> Center
                   handleCenter();
                   break;
-              case map.increaseDepth:
-                  e.preventDefault();
-                  handleIncreaseDepth();
+              case 's': // S -> Settings
+                  setIsSettingsOpen(prev => !prev);
+                  if(isSynthOpen) setIsSynthOpen(false);
                   break;
-              case map.decreaseDepth:
-                  e.preventDefault();
-                  handleDecreaseDepth();
+              case 'm': // M -> Synth (Menu)
+                  setIsSynthOpen(prev => !prev);
+                  if(isSettingsOpen) setIsSettingsOpen(false);
                   break;
-              case map.addChord:
-                  e.preventDefault();
+              case 'o': // O -> Off
+                  handleOff();
+                  break;
+              case 'b': // B -> Bend
+                  handleBendToggle();
+                  break;
+              case 'enter': // Enter -> Add Chord
+              case 'a': // A -> Add Chord (Alternative)
                   handleAddChord();
                   break;
-              case map.toggleSynth:
-                  e.preventDefault();
-                  setIsSynthOpen(prev => !prev);
+              case '.': // . -> Increase Depth
+                  handleIncreaseDepth();
                   break;
-              case map.toggleSettings:
-                  e.preventDefault();
-                  setIsSettingsOpen(prev => !prev);
-                  break;
-              case map.toggleUI:
-                  e.preventDefault();
-                  setShowUI(prev => !prev);
-                  break;
-              case map.closeModals:
-                  e.preventDefault();
-                  setIsSettingsOpen(false);
-                  setIsSynthOpen(false);
+              case ',': // , -> Decrease Depth
+                  handleDecreaseDepth();
                   break;
               
               // Volume Control
-              case map.volumeUp:
-                  e.preventDefault();
+              case 'arrowup': 
                   setMasterVolume(v => Math.min(1.0, v + 0.05));
                   break;
-              case map.volumeDown:
-                  e.preventDefault();
+              case 'arrowdown':
                   setMasterVolume(v => Math.max(0.0, v - 0.05));
                   break;
-
-              // Limits
-              case map.limit3: e.preventDefault(); handleToggleLimit(3); break;
-              case map.limit5: e.preventDefault(); handleToggleLimit(5); break;
-              case map.limit7: e.preventDefault(); handleToggleLimit(7); break;
-              case map.limit11: e.preventDefault(); handleToggleLimit(11); break;
-              case map.limit13: e.preventDefault(); handleToggleLimit(13); break;
+              
+              // Reverb Control (Right/Left)
+              case 'arrowright':
+                  setSpatialScale(s => Math.min(2.0, s + 0.05));
+                  break;
+              case 'arrowleft':
+                  setSpatialScale(s => Math.max(0.0, s - 0.05));
+                  break;
           }
       };
 
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handlePanic, handleCenter, handleAddChord, handleToggleLimit, settings.keyMap]);
+  }, [isSettingsOpen, isSynthOpen, settings.enableKeyboardShortcuts]);
+
+  // Header Safe Area Calculation
+  const marginPx = (settings.uiEdgeMargin || 4) * PIXELS_PER_MM;
+  const headerTop = `calc(${marginPx}px + env(safe-area-inset-top))`;
+  const headerLeft = `calc(${marginPx}px + env(safe-area-inset-left))`;
+  const headerRight = `calc(${marginPx}px + env(safe-area-inset-right))`;
 
   return (
-    <div 
-        className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white"
-        onContextMenu={(e) => e.preventDefault()} // Prevent native context menu for app-like feel
-    >
+    <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
       
-      {/* Top Bar - Fixed Position */}
+      {/* Top Left: Title */}
       <div 
-        className={`absolute w-full flex justify-between items-center z-40 pointer-events-none transition-opacity duration-300 ${showUI ? 'opacity-100' : 'opacity-0'}`}
-        style={{ 
-            top: `${MARGIN_3MM}px`, 
-            paddingLeft: `${MARGIN_3MM}px`,
-            paddingRight: `${MARGIN_3MM + SCROLLBAR_WIDTH}px` 
-        }}
+        className="absolute z-50 pointer-events-none"
+        style={{ top: headerTop, left: headerLeft }}
       >
-        <h1 className="text-xl font-bold tracking-widest text-slate-500 opacity-50">PRISMATONAL</h1>
-        <div className="flex gap-2 pointer-events-auto">
-          <button 
-            onClick={() => setIsSynthOpen(true)}
-            className="bg-slate-800/80 hover:bg-indigo-600 px-4 py-2 rounded-lg backdrop-blur transition border border-white/10"
-          >
-            Synth
-          </button>
+        <h1 className="text-sm font-bold tracking-widest text-slate-500 opacity-50 leading-none">PRISMATONAL</h1>
+      </div>
+
+      {/* Top Right: Synth & Settings Buttons */}
+      <div 
+        className="absolute z-50 flex gap-2 pointer-events-auto"
+        style={{ top: headerTop, right: headerRight }}
+      >
           <button 
             onClick={() => setIsSettingsOpen(true)}
-            className="bg-slate-800/80 hover:bg-slate-600 px-4 py-2 rounded-lg backdrop-blur transition border border-white/10"
+            className="bg-slate-800/80 hover:bg-slate-600 px-3 py-1 text-xs rounded backdrop-blur transition border border-white/10 h-8 flex items-center font-bold"
           >
             Settings
           </button>
-        </div>
+          <button 
+            onClick={() => setIsSynthOpen(true)}
+            className="bg-slate-800/80 hover:bg-indigo-600 px-3 py-1 text-xs rounded backdrop-blur transition border border-white/10 h-8 flex items-center font-bold"
+          >
+            Synth
+          </button>
       </div>
 
       {/* Main Canvas */}
@@ -422,43 +453,46 @@ const App: React.FC = () => {
         onLimitInteraction={handleLimitInteraction}
         activeChordIds={activeChordIds}
         uiUnlocked={settings.uiUnlocked}
-        latchStatus={latchStatus}
+        latchMode={latchMode}
+        globalScale={effectiveScale}
       />
 
       {/* Floating UI */}
-      {showUI && (
-          <FloatingControls 
-            volume={masterVolume}
-            setVolume={setMasterVolume}
-            onPanic={handlePanic}
-            onOff={handleOff}
-            latchStatus={latchStatus}
-            onLatchToggle={handleLatchToggle}
-            onCenter={handleCenter}
-            onIncreaseDepth={handleIncreaseDepth}
-            onDecreaseDepth={handleDecreaseDepth}
-            onAddChord={handleAddChord}
-            toggleChord={toggleChord}
-            activeChordIds={activeChordIds}
-            savedChords={settings.savedChords}
-            chordShortcutSizeScale={settings.chordShortcutSizeScale}
-            showIncreaseDepthButton={settings.showIncreaseDepthButton}
-            uiUnlocked={settings.uiUnlocked}
-            uiPositions={settings.uiPositions}
-            updatePosition={handleUiPositionUpdate}
-            draggingId={draggingId}
-            setDraggingId={setDraggingId}
-          />
-      )}
+      <FloatingControls 
+        volume={masterVolume}
+        setVolume={setMasterVolume}
+        spatialScale={spatialScale}
+        setSpatialScale={setSpatialScale}
+        onPanic={handlePanic}
+        onOff={handleOff}
+        onLatch={handleLatchToggle}
+        latchMode={latchMode}
+        onBend={handleBendToggle}
+        isBendEnabled={settings.isPitchBendEnabled}
+        onCenter={handleCenter}
+        onIncreaseDepth={handleIncreaseDepth}
+        onDecreaseDepth={handleDecreaseDepth}
+        onAddChord={handleAddChord}
+        toggleChord={toggleChord}
+        activeChordIds={activeChordIds}
+        savedChords={settings.savedChords}
+        chordShortcutSizeScale={settings.chordShortcutSizeScale}
+        showIncreaseDepthButton={settings.showIncreaseDepthButton}
+        uiUnlocked={settings.uiUnlocked}
+        uiPositions={settings.uiPositions}
+        updatePosition={handleUiPositionUpdate}
+        draggingId={draggingId}
+        setDraggingId={setDraggingId}
+        uiScale={effectiveScale}
+      />
 
-      {showUI && (
-          <LimitLayerControls 
-            settings={settings}
-            updateSettings={updateSettings}
-            draggingId={draggingId}
-            setDraggingId={setDraggingId}
-          />
-      )}
+      <LimitLayerControls 
+        settings={settings}
+        updateSettings={updateSettings}
+        draggingId={draggingId}
+        setDraggingId={setDraggingId}
+        uiScale={effectiveScale}
+      />
 
       {/* Modals */}
       <SettingsModal 
@@ -471,7 +505,7 @@ const App: React.FC = () => {
       <SynthControls 
         isOpen={isSynthOpen}
         onClose={() => setIsSynthOpen(false)}
-        preset={preset}
+        presets={presets}
         onChange={setPreset}
       />
     </div>

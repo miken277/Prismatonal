@@ -6,10 +6,14 @@ import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
 interface Props {
   volume: number;
   setVolume: (v: number) => void;
+  spatialScale: number;
+  setSpatialScale: (v: number) => void;
   onPanic: () => void;
   onOff: () => void;
-  latchStatus: 0 | 1 | 2; // 0=Off, 1=Active, 2=Frozen
-  onLatchToggle: () => void;
+  onLatch: () => void;
+  latchMode: 0 | 1 | 2;
+  onBend: () => void;
+  isBendEnabled: boolean;
   onCenter: () => void;
   onIncreaseDepth: () => void;
   onDecreaseDepth: () => void;
@@ -24,14 +28,16 @@ interface Props {
   updatePosition: (key: keyof AppSettings['uiPositions'], pos: XYPos) => void;
   draggingId: string | null;
   setDraggingId: (id: string | null) => void;
+  uiScale?: number;
 }
 
 const FloatingControls: React.FC<Props> = ({ 
-  volume, setVolume, onPanic, onOff, latchStatus, onLatchToggle, 
-  onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord,
+  volume, setVolume, spatialScale, setSpatialScale, 
+  onPanic, onOff, onLatch, latchMode, onBend, isBendEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
-  draggingId, setDraggingId
+  draggingId, setDraggingId,
+  uiScale = 1.0 
 }) => {
   
   // Generic Drag Handler
@@ -61,6 +67,7 @@ const FloatingControls: React.FC<Props> = ({
         let newY = initialTop + deltaY;
         
         // Clamp to window bounds with Margin + Scrollbar safety
+        // offsetWidth handles the scaled size automatically
         const maxX = window.innerWidth - el.offsetWidth - MARGIN_3MM - SCROLLBAR_WIDTH;
         const maxY = window.innerHeight - el.offsetHeight - MARGIN_3MM - SCROLLBAR_WIDTH;
         const minX = MARGIN_3MM;
@@ -76,25 +83,29 @@ const FloatingControls: React.FC<Props> = ({
         setDraggingId(null);
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
     };
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp); // Robustness: Handle Alt-Tab/Window leave
   };
 
   // Base size reference for buttons
-  const baseSize = 48; // 12 * 4px (w-12)
+  const baseSize = 48 * uiScale; 
   const chordSize = baseSize * chordShortcutSizeScale;
+  const largeBtnSize = 80 * uiScale;
+  
+  // RESTORED ORIGINAL SIZE: 290 and 40
+  const sliderWidth = 290 * uiScale; 
+  const sliderHeight = 40 * uiScale;
 
-  // Styles
+  // Common styles for draggable elements
   const draggableStyle = (key: string) => ({
       left: uiPositions[key as keyof typeof uiPositions].x,
       top: uiPositions[key as keyof typeof uiPositions].y,
-      touchAction: 'none' as React.CSSProperties['touchAction'],
-      willChange: uiUnlocked ? 'left, top' : 'auto'
+      touchAction: 'none' as React.CSSProperties['touchAction'], // Crucial for smooth drag
   });
-
-  const glassPanelClass = `bg-slate-800/80 border border-slate-600/50 shadow-xl rounded-2xl transition-all ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50 hover:bg-slate-700/80' : ''}`;
   
   // Helper to handle button press logic (Drag if unlocked, Action if locked)
   const handleButtonPress = (e: React.PointerEvent, key: keyof AppSettings['uiPositions'], action: () => void) => {
@@ -106,146 +117,182 @@ const FloatingControls: React.FC<Props> = ({
       }
   };
 
+  // Determine Latch Button Style based on Mode
+  const getLatchStyle = () => {
+      const base = "absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none shadow-lg";
+      const unlocked = uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : '';
+      
+      if (latchMode === 1) { // LATCH_ALL (Illuminated)
+          return `${base} ${unlocked} bg-green-500 text-white border-2 border-green-300 shadow-[0_0_20px_rgba(34,197,94,0.8)]`;
+      } else if (latchMode === 2) { // SUSTAIN (Halo)
+          return `${base} ${unlocked} bg-green-900/60 text-green-400 border-2 border-green-400 ring-4 ring-green-500/30 animate-pulse shadow-[0_0_15px_rgba(34,197,94,0.4)]`;
+      } else { // OFF
+          return `${base} ${unlocked} bg-green-900/40 border-2 border-green-500/50 text-green-500 hover:bg-green-800/60 active:bg-green-600 active:text-white shadow-[0_0_15px_rgba(34,197,94,0.2)]`;
+      }
+  };
+
   return (
     <>
-      {/* Volume Slider - Top Center */}
+      <style>{`
+        /* Reduced Slider Thumb Size (approx 1/3 smaller than default ~16px) */
+        .prismatonal-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: currentColor;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+        .prismatonal-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: currentColor;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+      `}</style>
+
+      {/* Volume Slider - Green Accent */}
       <div 
-        className={`absolute flex items-center gap-3 p-3 px-4 z-[150] ${glassPanelClass}`}
-        style={{ ...draggableStyle('volume'), width: 180 }}
+        className={`absolute bg-slate-900/60 p-2 rounded-full flex items-center gap-2 backdrop-blur-md border border-white/10 transition-colors z-[150] ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('volume'), width: sliderWidth, height: sliderHeight }}
         onPointerDown={(e) => handleDrag(e, 'volume')}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-slate-400">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-        </svg>
+        <span className="font-bold text-slate-300 select-none text-center" style={{ fontSize: 10 * uiScale, width: 60 * uiScale }}>VOLUME</span>
         <input 
           type="range" min="0" max="1" step="0.01" 
           value={volume}
           onChange={(e) => setVolume(parseFloat(e.target.value))}
           disabled={uiUnlocked}
-          className={`w-full h-1.5 bg-slate-600 rounded-lg appearance-none ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer accent-blue-500'}`}
+          className={`prismatonal-slider w-full rounded-lg appearance-none text-green-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
+          style={{ 
+              height: 4 * uiScale, 
+              background: `linear-gradient(to right, #22c55e 0%, #22c55e ${volume * 100}%, #334155 ${volume * 100}%, #334155 100%)` 
+          }}
           onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
         />
       </div>
 
-      {/* Navigation Bar (Center + Depths) - Bottom Left */}
-      <div
-         className={`absolute flex items-center p-2 gap-2 z-[150] ${glassPanelClass}`}
-         style={draggableStyle('center')}
-         onPointerDown={(e) => handleDrag(e, 'center')}
+      {/* Reverb Slider - Blue Accent */}
+      <div 
+        className={`absolute bg-slate-900/60 p-2 rounded-full flex items-center gap-2 backdrop-blur-md border border-white/10 transition-colors z-[150] ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('space'), width: sliderWidth, height: sliderHeight }}
+        onPointerDown={(e) => handleDrag(e, 'space')}
       >
-          {showIncreaseDepthButton && (
-             <button
-               className={`w-10 h-10 rounded-xl flex items-center justify-center text-green-400 hover:bg-white/10 active:bg-green-500 active:text-white transition-colors ${uiUnlocked ? 'pointer-events-none' : ''}`}
-               onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-               onClick={onDecreaseDepth}
-               title="Decrease Depth"
-             >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-6 h-6">
-                  <path fillRule="evenodd" d="M4 10a.75.75 0 01.75-.75h10.5a.75.75 0 010 1.5H4.75A.75.75 0 014 10z" clipRule="evenodd" />
-                </svg>
-             </button>
-          )}
-
-          <div className="w-px h-6 bg-slate-600/50"></div>
-
-          <button
-             className={`w-12 h-10 rounded-xl flex items-center justify-center text-yellow-500 font-bold hover:bg-white/10 active:bg-yellow-600 active:text-white transition-colors ${uiUnlocked ? 'pointer-events-none' : ''}`}
-             onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-             onClick={onCenter}
-             title="Center View"
-          >
-             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-             </svg>
-          </button>
-          
-          <div className="w-px h-6 bg-slate-600/50"></div>
-
-          {showIncreaseDepthButton && (
-             <button
-               className={`w-10 h-10 rounded-xl flex items-center justify-center text-blue-400 hover:bg-white/10 active:bg-blue-500 active:text-white transition-colors ${uiUnlocked ? 'pointer-events-none' : ''}`}
-               onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-               onClick={onIncreaseDepth}
-               title="Increase Depth"
-             >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-6 h-6">
-                  <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
-                </svg>
-             </button>
-          )}
+        <span className="font-bold text-slate-300 select-none text-center" style={{ fontSize: 10 * uiScale, width: 60 * uiScale }}>REVERB</span>
+        
+        <input 
+            type="range" min="0" max="2" step="0.01" 
+            value={spatialScale}
+            onChange={(e) => setSpatialScale(parseFloat(e.target.value))}
+            disabled={uiUnlocked}
+            className={`prismatonal-slider w-full rounded-lg appearance-none text-blue-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
+            style={{ 
+                height: 4 * uiScale,
+                background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(spatialScale/2) * 100}%, #334155 ${(spatialScale/2) * 100}%, #334155 100%)`
+            }}
+            onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
+        />
       </div>
+
+      {/* Bend Button */}
+      <button
+        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${
+            isBendEnabled 
+            ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' 
+            : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'
+        } ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('bend'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }}
+        onPointerDown={(e) => handleButtonPress(e, 'bend', onBend)}
+      >
+        BEND
+      </button>
 
       {/* Latch Button */}
-      <div
-        className={`absolute w-16 h-16 z-[150] rounded-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={draggableStyle('latch')}
-        onPointerDown={(e) => handleButtonPress(e, 'latch', onLatchToggle)}
+      <button
+        className={getLatchStyle()}
+        style={{ ...draggableStyle('latch'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }}
+        onPointerDown={(e) => handleButtonPress(e, 'latch', onLatch)}
       >
-          {latchStatus === 2 && (
-              // Vivid Moving Green Glow for Frozen State
-              <div className="absolute inset-[-4px] rounded-2xl overflow-hidden pointer-events-none">
-                  <div className="absolute w-[200%] h-[200%] top-[-50%] left-[-50%] animate-[spin_4s_linear_infinite] bg-[conic-gradient(from_0deg,transparent_0deg,#4ade80_180deg,transparent_360deg)] opacity-100 blur-[3px]"></div>
-              </div>
-          )}
-          
-          <button
-            className={`relative w-full h-full flex items-center justify-center font-bold uppercase tracking-wider rounded-2xl select-none transition-all border
-                ${latchStatus === 1 
-                    ? 'bg-green-500 text-white border-green-400 shadow-[0_0_15px_rgba(34,197,94,0.6)]' // Active
-                    : latchStatus === 2 
-                        ? 'bg-slate-900 text-green-400 border-transparent' // Frozen
-                        : 'bg-slate-800/80 text-green-700 border-slate-600/50 hover:text-green-500' // Off
-                }
-                ${uiUnlocked ? 'pointer-events-none' : 'active:scale-95'}
-            `}
-          >
-            LATCH
-          </button>
-      </div>
+        LATCH
+      </button>
 
       {/* Off Button */}
-      <div
-        className={`absolute w-16 h-16 z-[150] rounded-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={draggableStyle('off')}
+      <button
+        className={`absolute rounded-full bg-yellow-900/40 border-2 border-yellow-500/50 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-yellow-800/60 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('off'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }}
         onPointerDown={(e) => handleButtonPress(e, 'off', onOff)}
       >
-        <button
-            className={`w-full h-full flex items-center justify-center font-bold uppercase tracking-wider rounded-2xl select-none transition-all border bg-slate-800/80 backdrop-blur
-                border-slate-600/50 text-yellow-700 hover:text-yellow-500
-                active:text-yellow-300 active:border-yellow-500 active:shadow-[0_0_15px_rgba(234,179,8,0.4)]
-                ${uiUnlocked ? 'pointer-events-none' : 'active:scale-95'}
-            `}
-        >
-            OFF
-        </button>
-      </div>
+        OFF
+      </button>
 
       {/* Panic Button */}
-      <div
-        className={`absolute w-16 h-16 z-[150] rounded-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={draggableStyle('panic')}
+      <button
+        className={`absolute rounded-full bg-red-900/40 border-2 border-red-500/50 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-800/60 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('panic'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }}
         onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)}
       >
-        <button
-            className={`w-full h-full flex items-center justify-center font-bold uppercase tracking-wider rounded-2xl select-none transition-all border bg-slate-800/80 backdrop-blur
-                border-slate-600/50 text-red-800 hover:text-red-500
-                active:text-red-400 active:border-red-500 active:shadow-[0_0_15px_rgba(239,68,68,0.4)]
-                ${uiUnlocked ? 'pointer-events-none' : 'active:scale-95'}
-            `}
-        >
-            PANIC
-        </button>
-      </div>
+        PANIC
+      </button>
 
-      {/* Chords Group */}
+      {/* Center View Button */}
+      <button
+        className={`absolute rounded bg-yellow-600/20 border-2 border-yellow-500 flex items-center justify-center text-yellow-500 font-bold backdrop-blur hover:bg-yellow-600/40 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('center'), width: baseSize, height: baseSize }}
+        onPointerDown={(e) => handleButtonPress(e, 'center', onCenter)}
+        title="Center Display"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+        </svg>
+      </button>
+
+      {/* Increase Depth Button */}
+      {showIncreaseDepthButton && (
+        <button
+          className={`absolute rounded bg-blue-600/20 border-2 border-blue-500 flex items-center justify-center text-blue-500 font-bold backdrop-blur hover:bg-blue-600/40 active:bg-blue-600 active:text-white transition-all shadow-[0_0_15px_rgba(59,130,246,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+          style={{ ...draggableStyle('depth'), width: baseSize, height: baseSize }}
+          onPointerDown={(e) => handleButtonPress(e, 'depth', onIncreaseDepth)}
+          title="Increase Depth from Selection"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" fill="none" />
+          </svg>
+        </button>
+      )}
+
+      {/* Decrease Depth Button */}
+      {showIncreaseDepthButton && (
+        <button
+          className={`absolute rounded bg-green-600/20 border-2 border-green-500 flex items-center justify-center text-green-500 font-bold backdrop-blur hover:bg-green-600/40 active:bg-green-600 active:text-white transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+          style={{ ...draggableStyle('decreaseDepth'), width: baseSize, height: baseSize }}
+          onPointerDown={(e) => handleButtonPress(e, 'decreaseDepth', onDecreaseDepth)}
+          title="Undo Last Depth Increase"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4 L10 10 M10 10 L10 6 M10 10 L6 10" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20 4 L14 10 M14 10 L14 6 M14 10 L18 10" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 20 L10 14 M10 14 L10 18 M10 14 L6 14" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20 20 L14 14 M14 14 L14 18 M14 14 L18 14" />
+          </svg>
+        </button>
+      )}
+
+      {/* Chords Group - Wrapped in draggable container */}
       <div
-         className={`absolute flex gap-2 flex-wrap items-start z-[150] p-2 ${glassPanelClass}`}
+         className={`absolute flex gap-2 flex-wrap items-start z-[150] ${uiUnlocked ? 'cursor-move bg-white/5 rounded p-2 border border-yellow-500/30' : ''}`}
          style={{ ...draggableStyle('chords'), maxWidth: '80vw' }}
          onPointerDown={(e) => handleDrag(e, 'chords')}
       >
           {/* Add Chord Button */}
           <button
-            className={`rounded-lg border-2 border-slate-500 border-dashed flex items-center justify-center text-slate-500 font-bold hover:bg-slate-700/40 hover:text-white hover:border-white transition-all select-none ${uiUnlocked ? 'pointer-events-none' : ''}`}
+            className={`rounded border-2 border-slate-500 border-dashed flex items-center justify-center text-slate-500 font-bold backdrop-blur hover:bg-slate-700/40 hover:text-white hover:border-white transition-all select-none ${uiUnlocked ? 'pointer-events-none' : ''}`}
             style={{ width: chordSize, height: chordSize }}
             onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
             onClick={!uiUnlocked ? onAddChord : undefined}
@@ -262,10 +309,11 @@ const FloatingControls: React.FC<Props> = ({
               return (
                 <button
                     key={chord.id}
-                    className={`rounded-lg flex items-center justify-center font-bold transition-all shadow-lg select-none ${uiUnlocked ? 'pointer-events-none' : ''}`}
+                    className={`rounded flex items-center justify-center font-bold backdrop-blur transition-all shadow-lg select-none ${uiUnlocked ? 'pointer-events-none' : ''}`}
                     style={{
                         width: chordSize,
                         height: chordSize,
+                        fontSize: 12 * uiScale,
                         backgroundColor: isActive ? chord.color : `${chord.color}33`, 
                         borderColor: chord.color,
                         borderWidth: 2,

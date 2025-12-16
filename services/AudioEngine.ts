@@ -1,7 +1,7 @@
 
-import { SynthPreset, WaveformType, OscillatorConfig, AppSettings } from '../types';
+import { SynthPreset, AppSettings, ReverbType, PresetState, PlayMode } from '../types';
 import { store } from './Store';
-import { DEFAULT_PRESET } from '../constants';
+import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
 import { AUDIO_PROCESSOR_CODE } from './AudioProcessorCode';
 
 class AudioEngine {
@@ -19,18 +19,28 @@ class AudioEngine {
   private delayOutputGain: GainNode | null = null;
 
   private currentMasterVol: number = 0.8;
-  private activePreset: SynthPreset;
+  private globalSpatialScale: number = 1.0;
+  
+  // Cache active presets for FX updates
+  private activePresets: PresetState;
 
   constructor() {
-    // Initialize Preset safely to prevent NaN in Worklet
-    const rawPreset = store.getSnapshot().preset;
-    this.activePreset = this.ensurePresetSafety(rawPreset);
+    // Initialize Presets safely
+    const rawPresets = store.getSnapshot().presets;
+    this.activePresets = {
+        normal: this.ensurePresetSafety(rawPresets.normal),
+        latch: this.ensurePresetSafety(rawPresets.latch),
+        strum: this.ensurePresetSafety(rawPresets.strum)
+    };
 
     store.subscribe(() => {
-        const newPreset = store.getSnapshot().preset;
-        const safePreset = this.ensurePresetSafety(newPreset);
-        this.setPreset(safePreset);
+        const newPresets = store.getSnapshot().presets;
+        this.updatePresets(newPresets);
     });
+  }
+
+  private isMobile() {
+      return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   }
 
   private ensurePresetSafety(p: any): SynthPreset {
@@ -40,7 +50,64 @@ class AudioEngine {
      safe.osc2 = { ...DEFAULT_PRESET.osc2, ...(p.osc2 || {}) };
      safe.osc3 = { ...DEFAULT_PRESET.osc3, ...(p.osc3 || {}) };
      safe.modMatrix = p.modMatrix || [];
+     safe.reverbType = p.reverbType || 'hall'; 
+     if (safe.reverbSize === undefined) safe.reverbSize = REVERB_DEFAULTS[safe.reverbType || 'hall'].size;
+     if (safe.reverbDamping === undefined) safe.reverbDamping = REVERB_DEFAULTS[safe.reverbType || 'hall'].damping;
+     if (safe.reverbDiffusion === undefined) safe.reverbDiffusion = REVERB_DEFAULTS[safe.reverbType || 'hall'].diffusion;
      return safe;
+  }
+
+  private updatePresets(newPresets: PresetState) {
+      const modes: PlayMode[] = ['normal', 'latch', 'strum'];
+      let recomputeReverb = false;
+
+      // We use 'normal' preset as the master for Global FX settings like Reverb Type/Size
+      // to avoid conflict.
+      const oldMaster = this.activePresets.normal;
+      const newMaster = newPresets.normal;
+
+      if (
+          oldMaster.reverbType !== newMaster.reverbType ||
+          oldMaster.reverbSize !== newMaster.reverbSize ||
+          oldMaster.reverbDamping !== newMaster.reverbDamping ||
+          oldMaster.reverbDiffusion !== newMaster.reverbDiffusion
+      ) {
+          recomputeReverb = true;
+      }
+
+      this.activePresets = {
+          normal: this.ensurePresetSafety(newPresets.normal),
+          latch: this.ensurePresetSafety(newPresets.latch),
+          strum: this.ensurePresetSafety(newPresets.strum)
+      };
+
+      if (recomputeReverb && this.ctx) {
+          this.updateReverbBuffer();
+      }
+      this.updateFX();
+
+      if (this.workletNode) {
+          modes.forEach(mode => {
+              this.workletNode!.port.postMessage({ 
+                  type: 'update_preset', 
+                  mode: mode, 
+                  data: this.activePresets[mode] 
+              });
+          });
+      }
+  }
+
+  // Synchronous check and resume - Vital for iOS Chrome
+  public async resume() {
+      // CRITICAL: On iOS Chrome, if context doesn't exist yet, we must create it synchronously here
+      if (!this.ctx) {
+          // Trigger init immediately
+          await this.init(); 
+      }
+      
+      if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
+          await this.ctx.resume();
+      }
   }
 
   public async init() {
@@ -48,18 +115,38 @@ class AudioEngine {
 
     this.initPromise = (async () => {
         if (!this.ctx) {
-            this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)({
-                latencyHint: 'interactive',
+            const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+            
+            // Get user preference from store
+            const settings = store.getSnapshot().settings;
+            // Force 'playback' if user hasn't touched it (which default is 'playback')
+            // This is critical for iPad 7/Mobile static fix.
+            const latencyHint = settings.audioLatencyHint || 'playback';
+            
+            this.ctx = new AudioContextClass({
+                latencyHint: latencyHint,
             });
 
+            // Robustness: Auto-resume on state change (Desktop disconnect/reconnect or iOS interruptions)
+            this.ctx.onstatechange = () => {
+                if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
+                    // Attempt to resume immediately if user is active
+                    this.ctx.resume().catch(e => console.warn("Audio auto-resume failed:", e));
+                }
+            };
+
             try {
-                // Load AudioWorklet from Blob to guarantee no 404s in any environment
                 const blob = new Blob([AUDIO_PROCESSOR_CODE], { type: 'application/javascript' });
                 const workletUrl = URL.createObjectURL(blob);
                 
-                await this.ctx.audioWorklet.addModule(workletUrl);
+                // Polyfill check or standard addModule
+                if (this.ctx.audioWorklet && this.ctx.audioWorklet.addModule) {
+                    await this.ctx.audioWorklet.addModule(workletUrl);
+                } else {
+                    console.error("AudioWorklet not supported");
+                    return;
+                }
                 
-                // Clean up the object URL after loading
                 URL.revokeObjectURL(workletUrl);
                 
                 this.workletNode = new AudioWorkletNode(this.ctx, 'synth-processor', {
@@ -68,11 +155,20 @@ class AudioEngine {
                     outputChannelCount: [2]
                 });
                 
-                // Initial preset send
-                this.workletNode.port.postMessage({ type: 'preset', data: this.activePreset });
-                this.workletNode.port.postMessage({ type: 'config', polyphony: store.getSnapshot().settings.polyphony });
+                // Initial send
+                (['normal', 'latch', 'strum'] as PlayMode[]).forEach(mode => {
+                    this.workletNode!.port.postMessage({ 
+                        type: 'update_preset', 
+                        mode: mode, 
+                        data: this.activePresets[mode] 
+                    });
+                });
+                this.workletNode.port.postMessage({ 
+                    type: 'config', 
+                    polyphony: store.getSnapshot().settings.polyphony,
+                    strumDuration: store.getSnapshot().settings.strumDuration
+                });
 
-                // Connect logic
                 this.setupFX();
 
                 if (this.workletNode && this.dryGain && this.reverbGain && this.delayOutputGain) {
@@ -88,7 +184,7 @@ class AudioEngine {
             }
         }
 
-        if (this.ctx && this.ctx.state === 'suspended') {
+        if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
             await this.ctx.resume();
         }
     })();
@@ -99,7 +195,6 @@ class AudioEngine {
   private setupFX() {
     if (!this.ctx) return;
 
-    // Disconnect old nodes if they exist to clear state
     try {
         this.dryGain?.disconnect();
         this.reverbNode?.disconnect();
@@ -110,38 +205,32 @@ class AudioEngine {
         this.limiter?.disconnect();
     } catch(e) { /* ignore */ }
 
-    // Rebuild Graph
     this.limiter = this.ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -12.0; 
-    this.limiter.ratio.value = 12.0;
+    // Soften the limiter for mobile to avoid hard pumping which can sound like crackle
+    this.limiter.threshold.value = -8.0; 
+    this.limiter.ratio.value = 10.0;
+    this.limiter.attack.value = 0.005;
     this.limiter.connect(this.ctx.destination);
 
-    // Initialize Dry Gain at 0 to prevent connection pop
     this.dryGain = this.ctx.createGain();
-    this.dryGain.gain.value = 0; 
     this.dryGain.connect(this.limiter);
 
-    // Reverb Setup
     this.reverbNode = this.ctx.createConvolver();
-    this.reverbNode.buffer = this.createImpulseResponse(2.5, 2.0);
+    this.updateReverbBuffer();
+    
     this.reverbGain = this.ctx.createGain();
-    this.reverbGain.gain.value = 0; // Initialize at 0
     this.reverbGain.connect(this.reverbNode);
     this.reverbNode.connect(this.limiter);
 
-    // Delay Setup
     this.delayNode = this.ctx.createDelay(5.0);
     this.delayFeedbackGain = this.ctx.createGain();
-    this.delayFeedbackGain.gain.value = 0; // Initialize at 0 to prevent feedback loop on startup
     this.delayOutputGain = this.ctx.createGain();
-    this.delayOutputGain.gain.value = 0; // Initialize at 0
     
     this.delayOutputGain.connect(this.delayNode);
     this.delayNode.connect(this.limiter); 
     this.delayNode.connect(this.delayFeedbackGain);
     this.delayFeedbackGain.connect(this.delayNode);
     
-    // Reconnect Worklet to new graph
     if (this.workletNode) {
         this.workletNode.disconnect();
         this.workletNode.connect(this.dryGain);
@@ -149,32 +238,73 @@ class AudioEngine {
         this.workletNode.connect(this.delayOutputGain);
     }
 
-    // Ramp up the gains to current settings (Smooth Start)
-    this.updateFX(true);
+    this.updateFX();
+    this.setMasterVolume(this.currentMasterVol);
   }
 
-  private updateFX(isInit: boolean = false) {
+  private updateReverbBuffer() {
+      if (!this.reverbNode || !this.ctx) return;
+      
+      // Use NORMAL preset as the master for reverb tail generation
+      const master = this.activePresets.normal;
+      const type = master.reverbType || 'hall';
+      
+      const duration = master.reverbSize ?? REVERB_DEFAULTS[type].size;
+      const damping = master.reverbDamping ?? REVERB_DEFAULTS[type].damping;
+      const diffusion = master.reverbDiffusion ?? REVERB_DEFAULTS[type].diffusion;
+      
+      let brightness = 1.0 - damping; 
+      
+      let preDelay = 0.0;
+      let decay = 2.0;
+      let density = 0.5;
+
+      switch(type) {
+          case 'room': 
+              decay = 3.0; density = 0.8; 
+              break;
+          case 'hall': 
+              decay = 2.0; density = 0.6; preDelay = 0.02;
+              break;
+          case 'cathedral': 
+              decay = 1.5; density = 0.4; preDelay = 0.04;
+              break;
+          case 'plate': 
+              decay = 4.0; density = 1.0; 
+              break;
+          case 'shimmer': 
+              decay = 0.8; density = 0.2; 
+              break;
+          default: 
+              decay = 2.0; density = 0.5;
+      }
+      
+      this.reverbNode.buffer = this.createImpulseResponse(duration, decay, brightness, density, preDelay, diffusion);
+  }
+
+  private updateFX() {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      const ramp = 0.05; // Fast but smooth ramp to eliminate clicks
+      const ramp = 0.1;
+      
+      // Use NORMAL preset for global FX levels
+      const master = this.activePresets.normal;
 
-      // RESET FEEDBACK INSTANTLY if changing presets or initializing
-      // This kills the feedback loop from previous patches
-      if (this.delayFeedbackGain) {
-          this.delayFeedbackGain.gain.cancelScheduledValues(now);
-          this.delayFeedbackGain.gain.setValueAtTime(0, now); // Kill feedback
-          // Ramp back up to target
-          this.delayFeedbackGain.gain.linearRampToValueAtTime(this.activePreset.delayFeedback, now + 0.2); 
-      }
+      const scaledReverbMix = Math.min(1.0, master.reverbMix * this.globalSpatialScale);
+      const scaledDelayMix = Math.min(1.0, master.delayMix * this.globalSpatialScale);
 
-      if (this.reverbGain) this.reverbGain.gain.setTargetAtTime(this.activePreset.reverbMix, now, ramp);
-      if (this.delayOutputGain) this.delayOutputGain.gain.setTargetAtTime(this.activePreset.delayMix, now, ramp);
-      if (this.delayNode) this.delayNode.delayTime.setTargetAtTime(this.activePreset.delayTime, now, ramp);
+      if (this.reverbGain) this.reverbGain.gain.setTargetAtTime(scaledReverbMix, now, ramp);
+      if (this.delayOutputGain) this.delayOutputGain.gain.setTargetAtTime(scaledDelayMix, now, ramp);
+      
+      const scaledFeedback = Math.min(0.95, master.delayFeedback * Math.sqrt(this.globalSpatialScale));
+      if (this.delayFeedbackGain) this.delayFeedbackGain.gain.setTargetAtTime(scaledFeedback, now, ramp);
+
+      if (this.delayNode) this.delayNode.delayTime.setTargetAtTime(master.delayTime, now, ramp);
       
       if (this.limiter) {
-          const thresh = this.activePreset.compressorThreshold ?? -20.0;
-          const ratio = this.activePreset.compressorRatio ?? 12;
-          const release = this.activePreset.compressorRelease ?? 0.25;
+          const thresh = master.compressorThreshold ?? -20.0;
+          const ratio = master.compressorRatio ?? 12;
+          const release = master.compressorRelease ?? 0.25;
 
           this.limiter.threshold.setTargetAtTime(thresh, now, ramp);
           this.limiter.ratio.setTargetAtTime(ratio, now, ramp);
@@ -182,32 +312,62 @@ class AudioEngine {
       }
 
       if (this.dryGain) {
-          const dryLevel = Math.max(0.5, 1.0 - (this.activePreset.reverbMix * 0.4));
+          const dryLevel = Math.max(0.5, 1.0 - (scaledReverbMix * 0.4));
           this.dryGain.gain.setTargetAtTime(dryLevel * this.currentMasterVol, now, ramp);
       }
   }
 
-  private createImpulseResponse(duration: number, decay: number): AudioBuffer {
+  private createImpulseResponse(duration: number, baseDecayCurve: number, brightness: number, density: number, preDelay: number, diffusion: number): AudioBuffer {
     if (!this.ctx) throw new Error("No Context");
     const sampleRate = this.ctx.sampleRate;
-    const length = sampleRate * duration;
+    const length = Math.floor(sampleRate * duration);
     const impulse = this.ctx.createBuffer(2, length, sampleRate);
     const left = impulse.getChannelData(0);
     const right = impulse.getChannelData(1);
 
+    const startSample = Math.floor(preDelay * sampleRate);
+    let lpL = 0, lpR = 0;
+    const baseSmoothing = 0.01 + (1.0 - brightness) * 0.985; 
+    const decayCurve = baseDecayCurve + (1.0 - brightness) * 4.0;
+
+    for (let i = startSample; i < length; i++) {
+        let nL = (Math.random() * 2 - 1);
+        let nR = (Math.random() * 2 - 1);
+        const progress = (i - startSample) / (length - startSample);
+        const currentSmoothing = baseSmoothing * (0.8 + 0.2 * progress);
+        
+        lpL += (nL - lpL) * (1.0 - currentSmoothing);
+        lpR += (nR - lpR) * (1.0 - currentSmoothing);
+        
+        const env = Math.pow(1 - progress, decayCurve);
+        const diffMask = (Math.random() < (0.05 + 0.95 * diffusion)) ? 1 : 0;
+        const diffGain = diffMask > 0 ? 1.0 / Math.sqrt(0.05 + 0.95 * diffusion) : 0;
+
+        left[i] = lpL * env * diffMask * diffGain;
+        right[i] = lpR * env * diffMask * diffGain;
+    }
+
+    const erDuration = Math.floor(0.08 * sampleRate);
+    const erCount = Math.floor(8 + density * 12); 
+    
+    for (let k = 0; k < erCount; k++) {
+        const delay = startSample + Math.floor(Math.random() * erDuration);
+        if (delay < length) {
+            const erAmp = (1.0 - (k / erCount)) * 0.8; 
+            const pan = Math.random() * 2 - 1; 
+            const gainL = erAmp * (0.5 - 0.5 * pan);
+            const gainR = erAmp * (0.5 + 0.5 * pan);
+            left[delay] += (Math.random() * 2 - 1) * gainL;
+            right[delay] += (Math.random() * 2 - 1) * gainR;
+        }
+    }
+
     let maxVal = 0;
     for (let i = 0; i < length; i++) {
-        const n = i / length;
-        const amp = Math.pow(1 - n, decay);
-        // Use a simpler noise to avoid massive initial spikes
-        left[i] = (Math.random() * 2 - 1) * amp;
-        right[i] = (Math.random() * 2 - 1) * amp;
         if (Math.abs(left[i]) > maxVal) maxVal = Math.abs(left[i]);
         if (Math.abs(right[i]) > maxVal) maxVal = Math.abs(right[i]);
     }
-
-    // Normalize
-    const scale = 0.1 / Math.max(0.001, maxVal); 
+    const scale = 0.5 / Math.max(0.001, maxVal); 
     for (let i = 0; i < length; i++) {
         left[i] *= scale;
         right[i] *= scale;
@@ -222,20 +382,28 @@ class AudioEngine {
       }
   }
 
+  public setStrumDuration(duration: number) {
+      if (this.workletNode) {
+          this.workletNode.port.postMessage({ type: 'config', strumDuration: duration });
+      }
+  }
+
   public setMasterVolume(val: number) {
     this.currentMasterVol = val;
     this.updateFX();
   }
 
-  public setPreset(preset: SynthPreset) {
-    this.activePreset = preset;
-    this.updateFX();
-    if (this.workletNode) {
-        this.workletNode.port.postMessage({ type: 'preset', data: preset });
-    }
+  public setGlobalSpatialScale(val: number) {
+      this.globalSpatialScale = val;
+      this.updateFX();
   }
 
-  public async startVoice(id: string, ratio: number, baseFrequency: number, velocity: number = 1.0) {
+  public async startVoice(id: string, ratio: number, baseFrequency: number, type: PlayMode = 'normal') {
+    // Ensure active
+    if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
+        this.ctx.resume();
+    }
+    
     await this.init();
     if (!this.workletNode) return;
 
@@ -244,11 +412,11 @@ class AudioEngine {
         type: 'note_on', 
         id: id, 
         freq: freq,
-        velocity: velocity
+        voiceType: type
     });
   }
 
-  public stopVoice(id: string, immediate: boolean = false) {
+  public stopVoice(id: string) {
     if (!this.workletNode) return;
     this.workletNode.port.postMessage({ 
         type: 'note_off', 
@@ -256,7 +424,7 @@ class AudioEngine {
     });
   }
 
-  public glideVoice(id: string, newRatio: number, baseFrequency: number, glideTime: number = 0.1) {
+  public glideVoice(id: string, newRatio: number, baseFrequency: number) {
     if (!this.workletNode) return;
     const freq = baseFrequency * newRatio;
     this.workletNode.port.postMessage({ 
@@ -269,19 +437,7 @@ class AudioEngine {
   public stopAll() {
     if (!this.workletNode) return;
     this.workletNode.port.postMessage({ type: 'stop_all' });
-    
-    // Smoothly duck volume then rebuild to clear buffers
-    if (this.dryGain && this.ctx) {
-         this.dryGain.gain.cancelScheduledValues(this.ctx.currentTime);
-         this.dryGain.gain.setValueAtTime(this.dryGain.gain.value, this.ctx.currentTime);
-         this.dryGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.05);
-         
-         setTimeout(() => {
-             this.setupFX();
-         }, 100);
-    } else {
-        this.setupFX();
-    }
+    this.setupFX();
   }
 }
 

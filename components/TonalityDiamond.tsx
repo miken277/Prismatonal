@@ -1,11 +1,10 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { AppSettings, LatticeNode, LatticeLine } from '../types';
+import { AppSettings, LatticeNode, LatticeLine, ButtonShape } from '../types';
+import { getHarmonicDistance, generateLattice } from '../services/LatticeService';
+import { getPitchRatioFromScreenDelta, getRainbowPeriod } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
-import { useLatticeInteraction } from '../hooks/useLatticeInteraction';
-import { useLatticeGeneration } from '../hooks/useLatticeGeneration';
-import LatticeCanvas from './LatticeCanvas';
 
 export interface TonalityDiamondHandle {
   clearLatches: () => void;
@@ -22,117 +21,247 @@ interface Props {
   onLimitInteraction: (limit: number) => void;
   activeChordIds: string[];
   uiUnlocked: boolean;
-  latchStatus: 0 | 1 | 2;
+  latchMode: 0 | 1 | 2; // 0=Off, 1=LatchAll, 2=Sustain
+  globalScale?: number; // Adaptive scaling factor
 }
 
-const GRID_CELL_SIZE = 100;
+interface ActiveCursor {
+  pointerId: number;
+  currentX: number;
+  currentY: number;
+  originNodeId: string | null; // ID if started on a node (Held), Null if started on background (Strum)
+  hoverNodeId: string | null;  // Current node under pointer
+}
+
+// Spatial Grid Constants (Unscaled base size)
+const GRID_CELL_SIZE = 100; 
 
 const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) => {
-  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchStatus } = props;
+  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, globalScale = 1.0 } = props;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const dynamicCanvasRef = useRef<HTMLCanvasElement>(null);
   
-  // 1. Data Generation Hook
-  const { data, isGenerating, dynamicSize } = useLatticeGeneration(settings);
+  // Triple Canvas Strategy for correct layering
+  const bgLineCanvasRef = useRef<HTMLCanvasElement>(null);
+  const staticCanvasRef = useRef<HTMLCanvasElement>(null); 
+  const dynamicCanvasRef = useRef<HTMLCanvasElement>(null); 
+  
+  const animationFrameRef = useRef<number>(0);
+  
+  // Data State
+  const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  
+  // Auto-calculated Dimensions
+  const [dynamicSize, setDynamicSize] = useState(2000);
   const prevDynamicSizeRef = useRef(2000);
 
-  // 2. Memoized Lookups (Data Derivative)
-  const nodeMap = useMemo(() => new Map(data.nodes.map(n => [n.id, n])), [data.nodes]);
+  // Optimization: Memoized Lookups & Spatial Grid
+  const nodeMap = useMemo(() => {
+      return new Map(data.nodes.map(n => [n.id, n]));
+  }, [data.nodes]);
 
   const spatialGrid = useMemo(() => {
       const grid = new Map<string, LatticeNode[]>();
       const centerOffset = dynamicSize / 2;
-      const spacing = settings.buttonSpacingScale;
+      
+      // EFFECTIVE SPACING determines grid placement
+      const spacing = settings.buttonSpacingScale * globalScale;
 
       data.nodes.forEach(node => {
           const x = node.x * spacing + centerOffset;
           const y = node.y * spacing + centerOffset;
+          
           const col = Math.floor(x / GRID_CELL_SIZE);
           const row = Math.floor(y / GRID_CELL_SIZE);
           const key = `${col},${row}`;
+          
           if (!grid.has(key)) grid.set(key, []);
           grid.get(key)!.push(node);
       });
       return grid;
-  }, [data.nodes, settings.buttonSpacingScale, dynamicSize]);
+  }, [data.nodes, settings.buttonSpacingScale, dynamicSize, globalScale]);
 
-  // Refs for Hooks
-  const nodeMapRef = useRef(nodeMap);
-  const spatialGridRef = useRef(spatialGrid);
-  const dynamicSizeRef = useRef(dynamicSize);
+  // Interaction State
+  const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
+  const [persistentLatches, setPersistentLatches] = useState<Map<string, string>>(new Map());
 
-  useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
-  useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
-  useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
+  // --- 1. Audio Latched Nodes (Persistent Only) ---
+  // These drive the 'latch' voices via useEffect. 
+  // Strictly excludes cursors to prevent double-triggering.
+  const audioLatchedNodes = useMemo(() => {
+      const effective = new Map<string, string>(persistentLatches);
+      
+      // Add Chords
+      activeChordIds.forEach(chordId => {
+        const chordDef = settings.savedChords.find(c => c.id === chordId);
+        if (chordDef) {
+            chordDef.nodes.forEach(n => {
+                if (!effective.has(n.id)) effective.set(n.id, n.id);
+            });
+        }
+      });
 
-  // 3. Interaction Hook
-  const {
-      activeCursorsRef, // Ref only
-      manualLatchedNodes, // State
-      setManualLatchedNodes,
-      cursorPositionsRef,
-      lastTouchedLimitRef,
-      strummingNodesRef,
-      handlePointerDown,
-      handlePointerMove,
-      handlePointerUp
-  } = useLatticeInteraction({
-      settings,
-      audioEngine,
-      nodeMapRef,
-      spatialGridRef,
-      dynamicSizeRef,
-      dynamicCanvasRef,
-      scrollContainerRef,
-      onLimitInteraction,
-      uiUnlocked,
-      latchStatus
-  });
+      return effective;
+  }, [persistentLatches, activeChordIds, settings.savedChords]);
 
-  const [effectiveLatchedNodes, setEffectiveLatchedNodes] = useState<Map<string, string>>(new Map());
+  // --- 2. Visual Latched Nodes (All Active) ---
+  // These drive the visual rendering (highlighting).
+  // Includes Audio Latches + Active Cursors (Held/Strummed).
+  const visualLatchedNodes = useMemo(() => {
+      const visual = new Map(audioLatchedNodes);
+      
+      activeCursors.forEach(cursor => {
+          if (cursor.hoverNodeId) {
+              visual.set(cursor.hoverNodeId, cursor.hoverNodeId);
+          }
+      });
 
-  // Optimization: Pre-calculate active (both latched) and reinforced (one latched) lines
-  // This now ONLY runs when permanent latches or chords change, not on every momentary tap!
-  const { activeLines, reinforcedLines } = useMemo(() => {
-    const latched = effectiveLatchedNodes;
+      return visual;
+  }, [audioLatchedNodes, activeCursors]);
+
+  // --- ACTIVE LINES LOGIC (Visuals) ---
+  const activeLines = useMemo(() => {
+    // Use visual set for rendering lines
+    const latched = visualLatchedNodes;
     const lines = data.lines;
     const active: LatticeLine[] = [];
-    const reinforced: LatticeLine[] = [];
+    const reach = settings.voiceLeadingSteps || 1;
     
-    if (latched.size > 0) {
+    // Stability check using visual set is sufficient
+    const isStable = (id: string) => latched.has(id);
+
+    if (latched.size < 2) return [];
+
+    if (reach === 1) {
         for (const line of lines) {
-            const s = latched.has(line.sourceId);
-            const t = latched.has(line.targetId);
-            
-            if (s && t) {
+            const s = line.sourceId;
+            const t = line.targetId;
+            if (latched.has(s) && latched.has(t)) {
                 active.push(line);
-            } else if (s || t) {
-                reinforced.push(line);
+            }
+        }
+    } 
+    else if (reach === 2) {
+        const activeNodes = Array.from(latched.keys()).map(id => nodeMap.get(id)).filter(n => n) as LatticeNode[];
+        
+        for (let i=0; i<activeNodes.length; i++) {
+            for (let j=i+1; j<activeNodes.length; j++) {
+                const A = activeNodes[i];
+                const B = activeNodes[j];
+                
+                let dist = 0;
+                for (let k=0; k < A.coords.length; k++) {
+                    dist += Math.abs(A.coords[k] - B.coords[k]);
+                }
+                dist += Math.abs(A.octave - B.octave); 
+
+                if (dist <= 2) {
+                    const maxP = Math.max(A.maxPrime, B.maxPrime);
+                    active.push({
+                        id: `${A.id}-${B.id}`,
+                        x1: A.x, y1: A.y,
+                        x2: B.x, y2: B.y,
+                        limit: maxP,
+                        sourceId: A.id, targetId: B.id
+                    });
+                }
             }
         }
     }
-    return { activeLines: active, reinforcedLines: reinforced };
-  }, [data.lines, effectiveLatchedNodes]);
+
+    return active;
+  }, [data.lines, visualLatchedNodes, settings.voiceLeadingSteps, nodeMap]);
   
-  // Depth History for Undo/Redo Depth
+  // --- LINE BRIGHTENING LOGIC ---
+  const brightenedLines = useMemo(() => {
+      if (!settings.lineBrighteningEnabled || visualLatchedNodes.size === 0) return [];
+
+      const activeIds = new Set(visualLatchedNodes.keys());
+      const resultLines = new Set<LatticeLine>();
+      const step1Neighbors = new Set<string>();
+
+      data.lines.forEach(line => {
+          const sActive = activeIds.has(line.sourceId);
+          const tActive = activeIds.has(line.targetId);
+          
+          if (sActive || tActive) {
+              resultLines.add(line);
+              if (sActive) step1Neighbors.add(line.targetId);
+              if (tActive) step1Neighbors.add(line.sourceId);
+          }
+      });
+
+      if (settings.lineBrighteningSteps === 2) {
+          data.lines.forEach(line => {
+              if (resultLines.has(line)) return;
+              const sNeighbor = step1Neighbors.has(line.sourceId);
+              const tNeighbor = step1Neighbors.has(line.targetId);
+              if (sNeighbor || tNeighbor) {
+                  resultLines.add(line);
+              }
+          });
+      }
+
+      return Array.from(resultLines);
+  }, [visualLatchedNodes, data.lines, settings.lineBrighteningEnabled, settings.lineBrighteningSteps]);
+
+  // Refs for Render Loop
+  const settingsRef = useRef(settings);
+  const dataRef = useRef(data);
+  const activeCursorsRef = useRef<Map<number, ActiveCursor>>(activeCursors);
+  const visualLatchedRef = useRef(visualLatchedNodes);
+  const nodeMapRef = useRef(nodeMap);
+  const activeLinesRef = useRef(activeLines);
+  const brightenedLinesRef = useRef(brightenedLines);
+  const spatialGridRef = useRef(spatialGrid);
+  const dynamicSizeRef = useRef(dynamicSize);
+  const globalScaleRef = useRef(globalScale);
+  
+  const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
+
+  // Sync Refs
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => { dataRef.current = data; }, [data]);
+  useEffect(() => { activeCursorsRef.current = activeCursors; }, [activeCursors]);
+  useEffect(() => { visualLatchedRef.current = visualLatchedNodes; }, [visualLatchedNodes]);
+  useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
+  useEffect(() => { activeLinesRef.current = activeLines; }, [activeLines]);
+  useEffect(() => { brightenedLinesRef.current = brightenedLines; }, [brightenedLines]);
+  useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
+  useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
+  useEffect(() => { globalScaleRef.current = globalScale; }, [globalScale]);
+  
+  // Interaction State
+  const lastTouchedLimitRef = useRef<number | null>(null);
   const depthHistoryRef = useRef<number[]>([]);
-  const [hasCentered, setHasCentered] = useState(false);
   const prevActiveChordIds = useRef<string[]>([]);
+
+  // Window Blur Safety
+  useEffect(() => {
+      const handleBlur = () => {
+          if (activeCursorsRef.current.size > 0) {
+              setActiveCursors(new Map());
+              cursorPositionsRef.current.clear();
+              audioEngine.stopAll();
+              midiService.panic();
+          }
+      };
+      window.addEventListener('blur', handleBlur);
+      return () => window.removeEventListener('blur', handleBlur);
+  }, []);
 
   // --- External API ---
   useImperativeHandle(ref, () => ({
-    clearLatches: () => setManualLatchedNodes(new Map()),
-    centerView: () => centerScroll(),
+    clearLatches: () => setPersistentLatches(new Map()),
+    centerView: () => { centerScroll(); },
     increaseDepth: () => {
         const limit = lastTouchedLimitRef.current;
         if (limit && limit > 1) {
              updateSettings((prev: AppSettings) => {
                  const currentDepth = prev.limitDepths[limit as 3|5|7|11|13];
-                 return {
-                     ...prev,
-                     limitDepths: { ...prev.limitDepths, [limit]: currentDepth + 1 }
-                 };
+                 return { ...prev, limitDepths: { ...prev.limitDepths, [limit]: currentDepth + 1 } };
              });
              depthHistoryRef.current.push(limit);
         }
@@ -142,16 +271,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         if (limit) {
             updateSettings((prev: AppSettings) => {
                  const currentDepth = prev.limitDepths[limit as 3|5|7|11|13];
-                 return {
-                     ...prev,
-                     limitDepths: { ...prev.limitDepths, [limit]: Math.max(0, currentDepth - 1) }
-                 };
+                 return { ...prev, limitDepths: { ...prev.limitDepths, [limit]: Math.max(0, currentDepth - 1) } };
              });
         }
     },
     getLatchedNodes: () => {
         const result: LatticeNode[] = [];
-        effectiveLatchedNodes.forEach((_, id) => {
+        audioLatchedNodes.forEach((_, id) => {
             const n = nodeMap.get(id);
             if (n) result.push(n);
         });
@@ -169,45 +295,239 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
   };
 
+  useEffect(() => {
+      if (isInitialLoad && !isGenerating && data.nodes.length > 0) {
+          centerScroll();
+          setIsInitialLoad(false);
+      }
+  }, [isGenerating, data.nodes.length, isInitialLoad, dynamicSize]);
+
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    if (!hasCentered && dynamicSize > 0) {
-        centerScroll();
-        setHasCentered(true);
-    } else if (dynamicSize !== prevDynamicSizeRef.current) {
+    
+    if (!isInitialLoad && dynamicSize !== prevDynamicSizeRef.current) {
         const diff = (dynamicSize - prevDynamicSizeRef.current) / 2;
         container.scrollLeft += diff;
         container.scrollTop += diff;
     }
     prevDynamicSizeRef.current = dynamicSize;
-  }, [dynamicSize]);
+  }, [dynamicSize, isInitialLoad]);
 
-  // --- LOGIC: Effective Latches (Chords + Manual) ---
+  // --- Data Generation ---
+  const generationDeps = useMemo(() => {
+      return JSON.stringify({
+          depths: settings.limitDepths,
+          complexities: settings.limitComplexities,
+          hidden: settings.hiddenLimits,
+          ratio: settings.latticeAspectRatio
+      });
+  }, [settings.limitDepths, settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio]);
+
   useEffect(() => {
-    const newEffective = new Map<string, string>(manualLatchedNodes);
-    const nodes = nodeMap;
+    setIsGenerating(true);
+    const timerId = setTimeout(() => {
+        const effectiveSettings: AppSettings = JSON.parse(JSON.stringify(settings));
+        const hiddenLimits = effectiveSettings.hiddenLimits || [];
+        hiddenLimits.forEach((limit: number) => {
+            // @ts-ignore
+            if (effectiveSettings.limitDepths[limit] !== undefined) effectiveSettings.limitDepths[limit] = 0;
+        });
 
-    activeChordIds.forEach(chordId => {
-        const chordDef = settings.savedChords.find(c => c.id === chordId);
-        if (chordDef) {
-            chordDef.nodes.forEach(n => {
-                if (!newEffective.has(n.id)) newEffective.set(n.id, n.id);
-            });
+        const result = generateLattice(effectiveSettings);
+        const visibleNodeIds = new Set(result.nodes.map(n => n.id));
+        const visibleLines = result.lines.filter(l => {
+            if (hiddenLimits.includes(l.limit)) return false;
+            if (!visibleNodeIds.has(l.sourceId) || !visibleNodeIds.has(l.targetId)) return false;
+            return true;
+        });
+
+        let maxExtent = 0;
+        for (const n of result.nodes) {
+            const absX = Math.abs(n.x);
+            const absY = Math.abs(n.y);
+            if (absX > maxExtent) maxExtent = absX;
+            if (absY > maxExtent) maxExtent = absY;
         }
-    });
-    
-    // Always Relatch Chords Logic
+
+        const padding = 600; 
+        const spacing = settingsRef.current.buttonSpacingScale * globalScale; 
+        const calculatedSize = (maxExtent * spacing * 2) + padding;
+        const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
+
+        // Cap size to prevent OOM on mobile - STRICT CAP 2500 for safety
+        const MAX_CANVAS_SIZE = 2500;
+        const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
+
+        if (Math.abs(clampedSize - dynamicSizeRef.current) > 50) {
+            setDynamicSize(clampedSize);
+        }
+
+        setData({ nodes: result.nodes, lines: visibleLines });
+        setIsGenerating(false);
+    }, 10);
+    return () => clearTimeout(timerId);
+  }, [generationDeps]); 
+  
+  useEffect(() => {
+      let maxExtent = 0;
+      for (const n of data.nodes) {
+          const absX = Math.abs(n.x);
+          const absY = Math.abs(n.y);
+          if (absX > maxExtent) maxExtent = absX;
+          if (absY > maxExtent) maxExtent = absY;
+      }
+      const padding = 600; 
+      const spacing = settings.buttonSpacingScale * globalScale;
+      const calculatedSize = (maxExtent * spacing * 2) + padding;
+      const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
+      
+      const MAX_CANVAS_SIZE = 2500;
+      const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
+
+      if (Math.abs(clampedSize - dynamicSize) > 50) setDynamicSize(clampedSize);
+  }, [settings.buttonSpacingScale, globalScale]);
+
+
+  // --- STATIC CANVAS RENDERER ---
+  const visualDeps = useMemo(() => JSON.stringify({
+      size: settings.buttonSizeScale,
+      spacing: settings.buttonSpacingScale,
+      colors: settings.colors,
+      visuals: settings.limitVisuals,
+      shape: settings.buttonShape,
+      textScale: settings.nodeTextSizeScale,
+      fractionBar: settings.showFractionBar,
+      canvasSize: dynamicSize,
+      globalScale: globalScale 
+  }), [settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.limitVisuals, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale]);
+
+  useEffect(() => {
+      const canvas = staticCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d', { alpha: true });
+      if (!ctx) return;
+
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
+      const size = dynamicSize;
+      
+      if (canvas.width !== size * dpr || canvas.height !== size * dpr) {
+          canvas.width = size * dpr;
+          canvas.height = size * dpr;
+      }
+      
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(dpr, dpr);
+
+      const centerOffset = size / 2;
+      const spacing = settings.buttonSpacingScale * globalScale;
+      const baseRadius = (60 * settings.buttonSizeScale * globalScale) / 2;
+      const isDiamond = settings.buttonShape === ButtonShape.DIAMOND;
+      
+      const linesByLimit: Record<number, number[]> = {};
+      for (const line of data.lines) {
+          if (!linesByLimit[line.limit]) linesByLimit[line.limit] = [];
+          const arr = linesByLimit[line.limit];
+          arr.push(line.x1 * spacing + centerOffset, line.y1 * spacing + centerOffset, line.x2 * spacing + centerOffset, line.y2 * spacing + centerOffset);
+      }
+
+      ctx.lineCap = 'round';
+      // STATIC LINES (Passive)
+      for (const limitStr in linesByLimit) {
+          const limit = parseInt(limitStr);
+          const coords = linesByLimit[limit];
+          const color = settings.colors[limit] || '#666';
+          const visualSettings = settings.limitVisuals?.[limit] || { size: 1, opacity: 1 };
+          
+          ctx.beginPath();
+          for(let i=0; i<coords.length; i+=4) {
+              ctx.moveTo(coords[i], coords[i+1]);
+              ctx.lineTo(coords[i+2], coords[i+3]);
+          }
+          ctx.lineWidth = (limit === 1 ? 4 : 2) * visualSettings.size * globalScale; 
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.3 * visualSettings.opacity; 
+          
+          if (limit === 1) ctx.setLineDash([5 * globalScale, 5 * globalScale]);
+          else ctx.setLineDash([]);
+          ctx.stroke();
+      }
+      ctx.setLineDash([]); 
+
+      // STATIC NODES (Passive, Base Layer)
+      for (const node of data.nodes) {
+          const x = node.x * spacing + centerOffset;
+          const y = node.y * spacing + centerOffset;
+          const cTop = settings.colors[node.limitTop] || '#666';
+          const cBottom = settings.colors[node.limitBottom] || '#666';
+          const topVis = settings.limitVisuals?.[node.limitTop] || { size: 1, opacity: 1 };
+          const limitScale = topVis.size;
+          const limitOpacity = topVis.opacity;
+          const radius = baseRadius * limitScale;
+
+          ctx.globalAlpha = 1.0 * limitOpacity;
+          
+          ctx.beginPath();
+          if (isDiamond) {
+              ctx.moveTo(x, y - radius);
+              ctx.lineTo(x + radius, y);
+              ctx.lineTo(x, y + radius);
+              ctx.lineTo(x - radius, y);
+          } else {
+              ctx.arc(x, y, radius, 0, Math.PI * 2);
+          }
+          ctx.closePath();
+
+          const grad = ctx.createLinearGradient(x, y - radius, x, y + radius);
+          grad.addColorStop(0.45, cTop);
+          grad.addColorStop(0.55, cBottom);
+          ctx.fillStyle = grad;
+          ctx.fill();
+
+          const combinedScale = settings.buttonSizeScale * limitScale;
+          if (combinedScale > 0.4) {
+              ctx.fillStyle = 'white';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              let fontSize = Math.max(10, Math.min(18, 14 * combinedScale)) * settings.nodeTextSizeScale * globalScale;
+              ctx.font = `bold ${fontSize}px sans-serif`; 
+              
+              const spacingY = settings.showFractionBar ? 0.55 : 0.50;
+              ctx.fillText(node.n.toString(), x, y - (radius * spacingY));
+              if (settings.showFractionBar) {
+                  ctx.beginPath();
+                  ctx.moveTo(x - (radius * 0.4), y);
+                  ctx.lineTo(x + (radius * 0.4), y);
+                  ctx.lineWidth = 1 * globalScale;
+                  ctx.strokeStyle = `rgba(255,255,255,${0.8 * limitOpacity})`;
+                  ctx.stroke();
+              }
+              ctx.fillText(node.d.toString(), x, y + (radius * spacingY));
+          }
+      }
+  }, [data, visualDeps]); 
+
+
+  // --- Logic: Latches & Audio Sync ---
+  
+  // NOTE: Logic updated to separate 'audioLatchedNodes' (Persistent/Effect-Driven) from cursor interactions.
+  // The useEffect below handles ONLY the persistent/chord 'latch' voices.
+  // Normal and Strum voices are triggered directly in handlers.
+
+  useEffect(() => {
     if (settings.chordsAlwaysRelatch) {
          const newChords = activeChordIds.filter(id => !prevActiveChordIds.current.includes(id));
          if (newChords.length > 0) {
+             const nodes = nodeMap;
              newChords.forEach(chordId => {
                  const chordDef = settings.savedChords.find(c => c.id === chordId);
                  if (chordDef) {
                      chordDef.nodes.forEach(n => {
                         const fullNode = nodes.get(n.id);
                         if (fullNode) {
-                            audioEngine.startVoice(`node-${n.id}`, fullNode.ratio, settings.baseFrequency);
+                            audioEngine.startVoice(`node-${n.id}`, fullNode.ratio, settings.baseFrequency, 'latch');
                             if (settings.midiEnabled) midiService.noteOn(`node-${n.id}`, fullNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                         }
                      });
@@ -215,23 +535,21 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              });
          }
     }
-    
-    setEffectiveLatchedNodes(newEffective);
     prevActiveChordIds.current = activeChordIds;
-  }, [manualLatchedNodes, activeChordIds, settings.savedChords, settings.chordsAlwaysRelatch, nodeMap]);
+  }, [activeChordIds, settings.savedChords, settings.chordsAlwaysRelatch, nodeMap]);
 
-  // Audio Diffing (For Permanent Latches Only)
-  const prevEffectiveRef = useRef<Map<string, string>>(new Map());
+  const prevAudioLatchedRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
-      const current = effectiveLatchedNodes;
-      const prev = prevEffectiveRef.current;
+      const current = audioLatchedNodes;
+      const prev = prevAudioLatchedRef.current;
       const nodes = nodeMap;
       
       current.forEach((originId, nodeId) => {
           if (!prev.has(nodeId)) {
                const node = nodes.get(nodeId); 
                if (node) {
-                   audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency);
+                   // Only trigger if tracked by audioLatchedNodes (Effect driven)
+                   audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency, 'latch');
                    if (settings.midiEnabled) midiService.noteOn(`node-${nodeId}`, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                }
           }
@@ -243,8 +561,510 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           }
       });
 
-      prevEffectiveRef.current = current;
-  }, [effectiveLatchedNodes, nodeMap, settings.baseFrequency]);
+      prevAudioLatchedRef.current = current;
+  }, [audioLatchedNodes, nodeMap, settings.baseFrequency, settings.midiEnabled]);
+
+  useEffect(() => {
+    audioEngine.setPolyphony(settings.polyphony);
+  }, [settings.polyphony]);
+
+  // Helper for Hit Testing
+  const getHitNode = (clientX: number, clientY: number): LatticeNode | null => {
+      if (!dynamicCanvasRef.current) return null;
+      const rect = dynamicCanvasRef.current.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+
+      const centerOffset = dynamicSizeRef.current / 2;
+      const spacing = settings.buttonSpacingScale * globalScale;
+      const baseRadius = (60 * settings.buttonSizeScale * globalScale) / 2;
+
+      const col = Math.floor(x / GRID_CELL_SIZE);
+      const row = Math.floor(y / GRID_CELL_SIZE);
+      
+      const cellsToCheck = [
+          `${col},${row}`, `${col+1},${row}`, `${col-1},${row}`,
+          `${col},${row+1}`, `${col},${row-1}`,
+          `${col+1},${row+1}`, `${col-1},${row-1}`,
+          `${col+1},${row-1}`, `${col-1},${row+1}`
+      ];
+      
+      const grid = spatialGridRef.current;
+      
+      for(const key of cellsToCheck) {
+          const nodesInCell = grid.get(key);
+          if (nodesInCell) {
+              for (const node of nodesInCell) {
+                  const nx = node.x * spacing + centerOffset;
+                  const ny = node.y * spacing + centerOffset;
+                  const vis = settings.limitVisuals?.[node.limitTop] || { size: 1 };
+                  const r = baseRadius * vis.size;
+                  
+                  if (x < nx - r || x > nx + r || y < ny - r || y > ny + r) continue;
+                  
+                  const dx = x - nx;
+                  const dy = y - ny;
+                  if (dx*dx + dy*dy < r*r) return node;
+              }
+          }
+      }
+      return null;
+  };
+
+  // --- Interaction Handlers ---
+  const handlePointerDown = (e: React.PointerEvent) => {
+      if (audioEngine) audioEngine.resume();
+
+      if (uiUnlocked || !dynamicCanvasRef.current) return;
+      e.preventDefault();
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+
+      cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      const hitNode = getHitNode(e.clientX, e.clientY);
+      const nodeId = hitNode ? hitNode.id : null;
+
+      setActiveCursors(prev => {
+          const next = new Map(prev);
+          next.set(e.pointerId, {
+              pointerId: e.pointerId,
+              currentX: e.clientX,
+              currentY: e.clientY,
+              originNodeId: nodeId, 
+              hoverNodeId: nodeId
+          });
+          return next;
+      });
+
+      if (hitNode) {
+        const topLayer = settings.layerOrder[settings.layerOrder.length - 1];
+        if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
+        lastTouchedLimitRef.current = hitNode.maxPrime;
+
+        const isPersistentlyLatched = persistentLatches.has(hitNode.id);
+        const isAudioLatched = audioLatchedNodes.has(hitNode.id);
+
+        if (latchMode === 1) {
+             // LATCH MODE 1: Toggle on hit
+             setPersistentLatches(prev => {
+                 const next = new Map(prev);
+                 if (isPersistentlyLatched) next.delete(hitNode.id);
+                 else next.set(hitNode.id, hitNode.id);
+                 return next;
+             });
+        }
+        // OTHERWISE (Mode 0/2)
+        else {
+            if (isPersistentlyLatched) {
+                // ALLOW DE-LATCH: Pressing a persistently latched node turns it off
+                setPersistentLatches(prev => {
+                    const next = new Map(prev);
+                    next.delete(hitNode.id);
+                    return next;
+                });
+            } else if (!isAudioLatched) {
+                // Not latched (Persistent or Chord) -> Normal voice (Direct touch)
+                audioEngine.startVoice(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency, 'normal');
+                if (settings.midiEnabled) midiService.noteOn(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
+            }
+        }
+      }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (uiUnlocked) return;
+    if (!activeCursorsRef.current.has(e.pointerId)) return;
+
+    cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    
+    const cursor = activeCursorsRef.current.get(e.pointerId)!;
+    const hitNode = getHitNode(e.clientX, e.clientY);
+    const hitId = hitNode ? hitNode.id : null;
+
+    // --- 1. PITCH BEND LOGIC ---
+    // Explicitly disabled in Full Latch (Mode 1)
+    if (cursor.originNodeId && settings.isPitchBendEnabled && latchMode !== 1 && scrollContainerRef.current) {
+         const centerOffset = dynamicSizeRef.current / 2;
+         const rect = scrollContainerRef.current.getBoundingClientRect();
+         const originNode = nodeMapRef.current.get(cursor.originNodeId);
+         if (originNode) {
+             const spacing = settings.buttonSpacingScale * globalScaleRef.current;
+             const originScreenY = (originNode.y * spacing + centerOffset) + rect.top - scrollContainerRef.current.scrollTop;
+             const deltaY = e.clientY - originScreenY;
+             const bentRatio = getPitchRatioFromScreenDelta(deltaY, settings.buttonSpacingScale * globalScaleRef.current);
+             const finalRatio = originNode.ratio * bentRatio;
+             
+             audioEngine.glideVoice(`cursor-${e.pointerId}`, finalRatio, settings.baseFrequency);
+             if (settings.midiEnabled) midiService.pitchBend(`cursor-${e.pointerId}`, finalRatio, settings.baseFrequency, settings.midiPitchBendRange);
+         }
+    }
+
+    // --- 2. STRUM / LATCH LOGIC ---
+    // Triggers when entering a NEW node
+    if (cursor.hoverNodeId !== hitId) {
+        if (hitNode) {
+             const topLayer = settingsRef.current.layerOrder[settingsRef.current.layerOrder.length - 1];
+             if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
+             
+             // LATCH PAINT (Mode 1)
+             if (latchMode === 1) {
+                // TOGGLE ON ENTER
+                const isAlreadyLatched = persistentLatches.has(hitNode.id);
+                setPersistentLatches(prev => {
+                    const next = new Map(prev);
+                    if (isAlreadyLatched) next.delete(hitNode.id);
+                    else next.set(hitNode.id, hitNode.id);
+                    return next;
+                });
+             } 
+             // STRUM TRIGGER (Mode 0/2)
+             else {
+                 const isAlreadyLatched = audioLatchedNodes.has(hitNode.id);
+                 const isBending = settingsRef.current.isPitchBendEnabled && cursor.originNodeId;
+                 
+                 if (!isAlreadyLatched && !isBending) {
+                     audioEngine.startVoice(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency, 'strum');
+                     if (settings.midiEnabled) midiService.noteOn(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
+                 }
+             }
+        }
+        
+        setActiveCursors((prev: Map<number, ActiveCursor>) => {
+            const next = new Map(prev);
+            const c = next.get(e.pointerId);
+            if(c) { 
+                const updatedCursor = { ...c, hoverNodeId: hitId };
+                next.set(e.pointerId, updatedCursor); 
+            }
+            return next;
+        });
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (activeCursorsRef.current.has(e.pointerId)) {
+        const cursor = activeCursorsRef.current.get(e.pointerId)!;
+        
+        // Stop cursor voice if it was active
+        if (cursor.originNodeId) {
+            // Logic for stopping voices:
+            // If Latch Mode 1, voices are handled by persistent map, so cursor release does nothing to audio.
+            // If Latch Mode 0/2, we stop the direct touch voice.
+            if (latchMode !== 1) {
+                audioEngine.stopVoice(`cursor-${e.pointerId}`);
+                if (settings.midiEnabled) midiService.noteOff(`cursor-${e.pointerId}`);
+            }
+        }
+        
+        cursorPositionsRef.current.delete(e.pointerId);
+        setActiveCursors(prev => {
+            const next = new Map(prev);
+            next.delete(e.pointerId);
+            return next;
+        });
+    }
+  };
+
+  // ... rest of the file (Animation Loop, Background, Render) ...
+  // [No changes below this point, keep existing render loop and return]
+  
+  // --- Animation Loop ---
+  useEffect(() => {
+    const bgCanvas = bgLineCanvasRef.current;
+    const activeCanvas = dynamicCanvasRef.current;
+    
+    if (!bgCanvas || !activeCanvas) return;
+    
+    const bgCtx = bgCanvas.getContext('2d', { alpha: true });
+    const activeCtx = activeCanvas.getContext('2d', { alpha: true });
+    
+    if (!bgCtx || !activeCtx) return;
+
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
+
+    const render = (time: number) => {
+        const currentSettings = settingsRef.current;
+        const currentVisualLatched = visualLatchedRef.current; // Use VISUAL set for rendering
+        const currentActiveLines = activeLinesRef.current;
+        const currentBrightenedLines = brightenedLinesRef.current;
+        const size = dynamicSizeRef.current;
+        const cursors = activeCursorsRef.current;
+        const currentGlobalScale = globalScaleRef.current;
+        
+        if (bgCanvas.width !== size * dpr || bgCanvas.height !== size * dpr) {
+            bgCanvas.width = size * dpr;
+            bgCanvas.height = size * dpr;
+            activeCanvas.width = size * dpr;
+            activeCanvas.height = size * dpr;
+            bgCtx.scale(dpr, dpr);
+            activeCtx.scale(dpr, dpr);
+        }
+
+        let viewX = 0, viewY = 0, viewW = size, viewH = size;
+        if (scrollContainerRef.current) {
+            viewX = scrollContainerRef.current.scrollLeft;
+            viewY = scrollContainerRef.current.scrollTop;
+            viewW = scrollContainerRef.current.clientWidth;
+            viewH = scrollContainerRef.current.clientHeight;
+        }
+        
+        bgCtx.clearRect(viewX, viewY, viewW, viewH);
+        activeCtx.clearRect(viewX, viewY, viewW, viewH);
+
+        const centerOffset = size / 2;
+        const spacing = currentSettings.buttonSpacingScale * currentGlobalScale;
+        const baseRadius = (60 * currentSettings.buttonSizeScale * currentGlobalScale) / 2;
+        const isDiamond = currentSettings.buttonShape === ButtonShape.DIAMOND;
+        const colorCache = currentSettings.colors;
+
+        const animationSpeed = (currentSettings.voiceLeadingAnimationSpeed || 2.0) * 0.33;
+        const rawPhase = (time * 0.001 * animationSpeed);
+        const flowPhase = currentSettings.voiceLeadingReverseDir ? (1.0 - (rawPhase % 1.0)) : (rawPhase % 1.0);
+        
+        bgCtx.lineCap = 'round';
+        activeCtx.lineCap = 'round';
+
+        const viewPad = 100;
+        const leftBound = viewX - viewPad;
+        const rightBound = viewX + viewW + viewPad;
+        const topBound = viewY - viewPad;
+        const bottomBound = viewY + viewH + viewPad;
+        
+        if (currentBrightenedLines.length > 0) {
+            bgCtx.setLineDash([]);
+            for (const line of currentBrightenedLines) {
+                const x1 = line.x1 * spacing + centerOffset;
+                const y1 = line.y1 * spacing + centerOffset;
+                const x2 = line.x2 * spacing + centerOffset;
+                const y2 = line.y2 * spacing + centerOffset;
+                
+                if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
+
+                const limitColor = colorCache[line.limit] || '#666';
+
+                bgCtx.beginPath();
+                bgCtx.moveTo(x1, y1);
+                bgCtx.lineTo(x2, y2);
+                bgCtx.lineWidth = 2 * currentGlobalScale;
+                bgCtx.strokeStyle = limitColor;
+                bgCtx.globalAlpha = 0.8; 
+                bgCtx.stroke();
+            }
+        }
+
+        bgCtx.setLineDash([]); 
+        for (const line of currentActiveLines) {
+            const x1 = line.x1 * spacing + centerOffset;
+            const y1 = line.y1 * spacing + centerOffset;
+            const x2 = line.x2 * spacing + centerOffset;
+            const y2 = line.y2 * spacing + centerOffset;
+            
+            if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
+
+            const limitColor = colorCache[line.limit] || '#666';
+
+            bgCtx.beginPath();
+            bgCtx.moveTo(x1, y1);
+            bgCtx.lineTo(x2, y2);
+            bgCtx.lineWidth = 4 * currentGlobalScale;
+            bgCtx.strokeStyle = limitColor;
+            bgCtx.globalAlpha = 1.0;
+            bgCtx.stroke();
+
+            if (currentSettings.isVoiceLeadingAnimationEnabled) {
+                const grad = bgCtx.createLinearGradient(x1, y1, x2, y2);
+                const p = flowPhase;
+                
+                grad.addColorStop(0, 'rgba(255,255,255,0)');
+                const pulseWidth = 0.2;
+                const start = Math.max(0, p - pulseWidth);
+                const end = Math.min(1, p + pulseWidth);
+                if (start > 0) grad.addColorStop(start, 'rgba(255,255,255,0)');
+                grad.addColorStop(p, 'rgba(255,255,255,0.7)'); 
+                if (end < 1) grad.addColorStop(end, 'rgba(255,255,255,0)');
+                grad.addColorStop(1, 'rgba(255,255,255,0)');
+
+                bgCtx.strokeStyle = grad;
+                bgCtx.lineWidth = 10 * (0.5 + currentSettings.voiceLeadingGlowAmount) * currentGlobalScale;
+                bgCtx.globalAlpha = 0.3; 
+                bgCtx.stroke();
+                
+                bgCtx.lineWidth = 4 * currentGlobalScale;
+                bgCtx.globalAlpha = 1.0;
+                bgCtx.stroke();
+            }
+        }
+
+        // Render Latched Nodes (using VISUAL set)
+        for (const id of currentVisualLatched.keys()) {
+             const node = nodeMapRef.current.get(id);
+             if (!node) continue;
+
+             const x = node.x * spacing + centerOffset;
+             const y = node.y * spacing + centerOffset;
+             
+             if (x < leftBound || x > rightBound || y < topBound || y > bottomBound) continue;
+
+             const cTop = colorCache[node.limitTop] || '#666';
+             const cBottom = colorCache[node.limitBottom] || '#666';
+             
+             const vis = currentSettings.limitVisuals?.[node.limitTop] || { size: 1 };
+             const limitScale = vis.size;
+             const zoomScale = currentSettings.latchedZoomScale;
+             const radius = baseRadius * limitScale * zoomScale;
+
+             activeCtx.globalAlpha = 1.0; 
+             activeCtx.beginPath();
+             if (isDiamond) {
+                activeCtx.moveTo(x, y - radius);
+                activeCtx.lineTo(x + radius, y);
+                activeCtx.lineTo(x, y + radius);
+                activeCtx.lineTo(x - radius, y);
+             } else {
+                activeCtx.arc(x, y, radius, 0, Math.PI * 2);
+             }
+             activeCtx.closePath();
+
+             const grad = activeCtx.createLinearGradient(x, y - radius, x, y + radius);
+             grad.addColorStop(0.45, cTop);
+             grad.addColorStop(0.55, cBottom);
+             activeCtx.fillStyle = grad;
+             activeCtx.fill();
+
+             if (currentSettings.isColoredIlluminationEnabled) {
+                 const rp = getRainbowPeriod(currentSettings.buttonSpacingScale * currentGlobalScale);
+                 const phase = (y % rp) / rp;
+                 const hue = (currentSettings.rainbowOffset + phase * 360) % 360;
+                 const sat = currentSettings.isRainbowModeEnabled ? currentSettings.rainbowSaturation : 100;
+                 activeCtx.strokeStyle = `hsl(${hue}, ${sat}%, 60%)`;
+                 activeCtx.lineWidth = 4 * currentGlobalScale;
+             } else {
+                 activeCtx.strokeStyle = 'white';
+                 activeCtx.lineWidth = 3 * currentGlobalScale;
+             }
+             activeCtx.stroke();
+
+             const combinedScale = currentSettings.buttonSizeScale * limitScale * zoomScale;
+             if (combinedScale > 0.4) {
+                activeCtx.fillStyle = 'white';
+                activeCtx.textAlign = 'center';
+                activeCtx.textBaseline = 'middle';
+                let fontSize = Math.max(12, Math.min(22, 16 * combinedScale)) * currentSettings.nodeTextSizeScale * currentGlobalScale;
+                activeCtx.font = `bold ${fontSize}px sans-serif`; 
+                const spacingY = currentSettings.showFractionBar ? 0.55 : 0.50;
+                activeCtx.fillText(node.n.toString(), x, y - (radius * spacingY));
+                if (currentSettings.showFractionBar) {
+                    activeCtx.beginPath();
+                    activeCtx.moveTo(x - (radius * 0.4), y);
+                    activeCtx.lineTo(x + (radius * 0.4), y);
+                    activeCtx.lineWidth = 1 * currentGlobalScale;
+                    activeCtx.strokeStyle = 'white';
+                    activeCtx.stroke();
+                }
+                activeCtx.fillText(node.d.toString(), x, y + (radius * spacingY));
+             }
+        }
+        
+        if (currentSettings.isPitchBendEnabled) {
+            cursors.forEach(c => {
+                if (c.originNodeId) { 
+                    const node = nodeMapRef.current.get(c.originNodeId);
+                    if(node) {
+                         const nx = node.x * spacing + centerOffset;
+                         const ny = node.y * spacing + centerOffset;
+                         const pos = cursorPositionsRef.current.get(c.pointerId);
+                         if (!pos) return;
+                         
+                         let cx = 0, cy = 0;
+                         if (scrollContainerRef.current) {
+                             const r = scrollContainerRef.current.getBoundingClientRect();
+                             cx = (pos.x - r.left) + scrollContainerRef.current.scrollLeft;
+                             cy = (pos.y - r.top) + scrollContainerRef.current.scrollTop;
+                         }
+                         
+                         activeCtx.beginPath();
+                         activeCtx.moveTo(nx, ny);
+                         activeCtx.lineTo(cx, cy);
+                         activeCtx.strokeStyle = 'white';
+                         activeCtx.lineWidth = 2 * currentGlobalScale;
+                         activeCtx.globalAlpha = 0.5;
+                         activeCtx.stroke();
+                    }
+                }
+            });
+        }
+
+        animationFrameRef.current = requestAnimationFrame(render);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(animationFrameRef.current);
+  }, []); 
+
+  // Background Style Calculator
+  const getBackgroundStyle = () => {
+      const mode = settings.backgroundMode;
+      const offset = settings.backgroundYOffset || 0;
+      
+      const baseStyle: React.CSSProperties = {
+          minWidth: '100%',
+          minHeight: '100%',
+          width: dynamicSize, 
+          height: dynamicSize,
+          pointerEvents: uiUnlocked ? 'none' : 'auto',
+          backgroundPosition: `center calc(50% + ${offset}px)`,
+          backgroundRepeat: 'no-repeat',
+          backgroundSize: 'cover'
+      };
+
+      switch(mode) {
+          case 'rainbow':
+              const period = getRainbowPeriod(settings.buttonSpacingScale * globalScale);
+              const stops = [];
+              for(let i=0; i<=6; i++) {
+                  const pct = (i/6)*100;
+                  const hue = (settings.rainbowOffset + i*60);
+                  stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${pct}%`);
+              }
+              return {
+                  ...baseStyle,
+                  backgroundImage: `linear-gradient(to bottom, ${stops.join(', ')})`,
+                  backgroundSize: `100% ${period}px`,
+                  backgroundRepeat: 'repeat',
+                  backgroundPosition: `0px calc(50% + ${offset}px)`
+              };
+          
+          case 'charcoal':
+              return { ...baseStyle, backgroundColor: '#18181b' }; 
+          case 'midnight_blue':
+              return { ...baseStyle, backgroundColor: '#0a0a23' }; 
+          case 'deep_maroon':
+              return { ...baseStyle, backgroundColor: '#3e0000' };
+          case 'forest_green':
+              return { ...baseStyle, backgroundColor: '#002200' };
+          case 'slate_grey':
+              return { ...baseStyle, backgroundColor: '#334155' };
+
+          case 'image':
+              if (settings.backgroundImageData) {
+                  return {
+                      ...baseStyle,
+                      backgroundImage: `url(${settings.backgroundImageData})`,
+                      backgroundRepeat: settings.backgroundTiling ? 'repeat' : 'no-repeat',
+                      backgroundSize: settings.backgroundTiling ? 'auto' : 'contain',
+                      backgroundPosition: settings.backgroundTiling 
+                          ? `center calc(50% + ${offset}px)` 
+                          : `center calc(50% + ${offset}px)`
+                  };
+              }
+              return { ...baseStyle, backgroundColor: 'black' };
+
+          case 'none':
+          default:
+              return { ...baseStyle, backgroundColor: 'black' };
+      }
+  };
 
   return (
     <div 
@@ -257,23 +1077,36 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         onPointerLeave={handlePointerUp}
         onPointerCancel={handlePointerUp}
     >
-        <LatticeCanvas 
-            settings={settings}
-            data={data}
-            dynamicSize={dynamicSize}
-            activeLines={activeLines}
-            reinforcedLines={reinforcedLines}
-            effectiveLatchedNodes={effectiveLatchedNodes}
-            activeCursorsRef={activeCursorsRef}
-            cursorPositionsRef={cursorPositionsRef}
-            nodeMapRef={nodeMapRef}
-            scrollContainerRef={scrollContainerRef}
-            dynamicCanvasRef={dynamicCanvasRef}
-            isGenerating={isGenerating}
-            uiUnlocked={uiUnlocked}
-            latchStatus={latchStatus}
-            strummingNodesRef={strummingNodesRef}
-        />
+        <div 
+            className="relative"
+            style={getBackgroundStyle()}
+        >
+           <canvas 
+             ref={bgLineCanvasRef}
+             className="absolute top-0 left-0 z-[5] pointer-events-none"
+             style={{ width: '100%', height: '100%' }}
+           />
+           <canvas 
+             ref={staticCanvasRef}
+             className="absolute top-0 left-0 z-[10] pointer-events-none"
+             style={{ width: '100%', height: '100%' }}
+           />
+           <canvas 
+             ref={dynamicCanvasRef}
+             className="absolute top-0 left-0 z-[20] pointer-events-none"
+             style={{ width: '100%', height: '100%' }}
+           />
+
+           {isGenerating && (
+             <div className="absolute top-4 right-4 z-50 flex items-center gap-2 bg-slate-900/80 p-2 rounded-full backdrop-blur-sm border border-white/10 shadow-xl">
+                 <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                 </svg>
+                 <span className="text-xs font-bold text-slate-300 pr-2">Calculating...</span>
+             </div>
+           )}
+        </div>
     </div>
   );
 });

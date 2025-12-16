@@ -4,8 +4,6 @@ import { createHostAdapter, IHostAdapter, MidiDevice, TransportCallback } from '
 // Re-export for consumers (SettingsModal, etc.)
 export type { MidiDevice };
 
-type MidiMessageCallback = (data: number[]) => void;
-
 class MidiService {
     private adapter: IHostAdapter | null = null;
     private initialized = false;
@@ -13,9 +11,6 @@ class MidiService {
     // Channel Management for Polyphonic Pitch Bend (MPE-style)
     private activeNotes: Map<string, { channel: number, note: number }> = new Map(); 
     private nextChannel = 0; // 0-15 (corresponding to Ch 1-16)
-
-    // Input Listeners
-    private inputListeners: Set<MidiMessageCallback> = new Set();
 
     constructor() {}
 
@@ -26,12 +21,6 @@ class MidiService {
         
         if (this.adapter) {
             console.log(`Initializing MIDI: ${this.adapter.type.toUpperCase()} Backend Detected`);
-            
-            // Set up input forwarding
-            this.adapter.setInputCallback((data) => {
-                this.inputListeners.forEach(cb => cb(data));
-            });
-
             this.initialized = true;
             return true;
         } else {
@@ -49,25 +38,6 @@ class MidiService {
         if (this.adapter) {
             this.adapter.setOutput(id);
         }
-    }
-
-    public async getInputs(): Promise<MidiDevice[]> {
-        if (!this.adapter) return [];
-        return this.adapter.getInputs();
-    }
-
-    public setInput(id: string | null) {
-        if (this.adapter) {
-            this.adapter.setInput(id);
-        }
-    }
-
-    public addInputListener(cb: MidiMessageCallback) {
-        this.inputListeners.add(cb);
-    }
-
-    public removeInputListener(cb: MidiMessageCallback) {
-        this.inputListeners.delete(cb);
     }
 
     public setTransportCallback(cb: TransportCallback) {
@@ -136,6 +106,21 @@ class MidiService {
         const msb = (bendValue >> 7) & 0x7F;
 
         this.sendBytes([0xE0 | data.channel, lsb, msb]);
+    }
+
+    // Standard MIDI Panic: Sends All Notes Off (CC 123) and All Sound Off (CC 120) to all channels
+    public panic() {
+        this.activeNotes.clear();
+        if (!this.adapter) return;
+
+        for (let ch = 0; ch < 16; ch++) {
+            // CC 123: All Notes Off
+            this.sendBytes([0xB0 | ch, 123, 0]);
+            // CC 120: All Sound Off (Immediate mute)
+            this.sendBytes([0xB0 | ch, 120, 0]);
+            // Reset Pitch Bend
+            this.sendBytes([0xE0 | ch, 0, 64]);
+        }
     }
 }
 

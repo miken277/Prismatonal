@@ -1,43 +1,53 @@
 
 import { useSyncExternalStore } from 'react';
-import { AppSettings, SynthPreset } from '../types';
-import { DEFAULT_SETTINGS, DEFAULT_PRESET, DEFAULT_KEY_MAP } from '../constants';
+import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState } from '../types';
+import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_USER_BANK } from '../constants';
+import { XmlService } from './XmlService';
 
-interface StoreState {
-    settings: AppSettings;
-    preset: SynthPreset;
-}
+const SETTINGS_KEY = 'prismatonal_settings_v5'; 
+const PRESET_KEY = 'prismatonal_presets_v5';
+const USER_BANK_KEY = 'prismatonal_user_bank_v1';
 
 class PrismaStore {
   private state: StoreState;
   private listeners: Set<() => void> = new Set();
-  
-  // Debounce timers for persistence
-  private settingsSaveTimer: number | null = null;
-  private presetSaveTimer: number | null = null;
 
   constructor() {
     // Load Settings
-    const savedSettings = localStorage.getItem('prismatonal_settings');
-    let loadedSettings = savedSettings ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) } : DEFAULT_SETTINGS;
+    const savedSettings = localStorage.getItem(SETTINGS_KEY);
+    const loadedSettings = savedSettings ? { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) } : DEFAULT_SETTINGS;
     
-    // Safety merge for nested UI Positions
     loadedSettings.uiPositions = { ...DEFAULT_SETTINGS.uiPositions, ...(loadedSettings.uiPositions || {}) };
 
-    // Safety merge for KeyMap (handle old versions)
-    loadedSettings.keyMap = { ...DEFAULT_KEY_MAP, ...(loadedSettings.keyMap || {}) };
+    // Load Presets
+    const savedPresets = localStorage.getItem(PRESET_KEY);
+    let loadedPresets: PresetState;
+    
+    if (savedPresets) {
+        loadedPresets = JSON.parse(savedPresets);
+    } else {
+        loadedPresets = {
+            normal: JSON.parse(JSON.stringify(DEFAULT_NORMAL_PRESET)),
+            latch: JSON.parse(JSON.stringify(DEFAULT_LATCH_PRESET)),
+            strum: JSON.parse(JSON.stringify(DEFAULT_STRUM_PRESET))
+        };
+    }
 
-    // Load Preset
-    const savedPreset = localStorage.getItem('prismatonal_preset');
-    const loadedPreset = savedPreset ? JSON.parse(savedPreset) : DEFAULT_PRESET;
+    // Load User Bank
+    const savedUserBank = localStorage.getItem(USER_BANK_KEY);
+    let loadedUserBank: SynthPreset[] = DEFAULT_USER_BANK;
+    if (savedUserBank) {
+        loadedUserBank = JSON.parse(savedUserBank);
+    }
 
     this.state = {
         settings: loadedSettings,
-        preset: loadedPreset
+        presets: loadedPresets,
+        userBank: loadedUserBank
     };
   }
 
-  // --- ACTIONS (Arrow functions for stability) ---
+  // --- ACTIONS ---
   
   updateSettings = (partial: Partial<AppSettings> | ((prev: AppSettings) => AppSettings)) => {
     const current = this.state.settings;
@@ -51,40 +61,57 @@ class PrismaStore {
 
     if (next === current) return;
 
-    // 1. Update In-Memory State Immediately (UI Responsiveness)
     this.state = { ...this.state, settings: next };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
     this.notify();
-
-    // 2. Debounce Disk Write (Prevent blocking main thread on sliders/drag)
-    if (this.settingsSaveTimer) {
-        clearTimeout(this.settingsSaveTimer);
-    }
-    this.settingsSaveTimer = setTimeout(() => {
-        localStorage.setItem('prismatonal_settings', JSON.stringify(next));
-        this.settingsSaveTimer = null;
-    }, 1000) as unknown as number;
   };
 
-  setPreset = (newPreset: SynthPreset) => {
-    if (newPreset === this.state.preset) return;
+  setPreset = (mode: PlayMode, newPreset: SynthPreset) => {
+    const current = this.state.presets[mode];
+    if (newPreset === current) return;
     
-    // 1. Update In-Memory State Immediately
-    this.state = { ...this.state, preset: newPreset };
+    const nextPresets = { ...this.state.presets, [mode]: newPreset };
+    this.state = { ...this.state, presets: nextPresets };
+    
+    localStorage.setItem(PRESET_KEY, JSON.stringify(nextPresets));
     this.notify();
-
-    // 2. Debounce Disk Write
-    if (this.presetSaveTimer) {
-        clearTimeout(this.presetSaveTimer);
-    }
-    this.presetSaveTimer = setTimeout(() => {
-        localStorage.setItem('prismatonal_preset', JSON.stringify(newPreset));
-        this.presetSaveTimer = null;
-    }, 1000) as unknown as number;
   };
 
-  updatePresetGlobal = (key: keyof SynthPreset, value: any) => {
-    const next = { ...this.state.preset, [key]: value };
-    this.setPreset(next);
+  saveUserPatch = (slotIndex: number, preset: SynthPreset) => {
+      if (slotIndex < 0 || slotIndex >= 20) return;
+      const newBank = [...this.state.userBank];
+      newBank[slotIndex] = { ...preset, category: 'User' };
+      
+      this.state = { ...this.state, userBank: newBank };
+      localStorage.setItem(USER_BANK_KEY, JSON.stringify(newBank));
+      this.notify();
+  };
+
+  exportXML = () => {
+      const xml = XmlService.exportState(this.state);
+      XmlService.downloadFile(xml);
+  };
+
+  importXML = async (file: File) => {
+      try {
+          const partial = await XmlService.parseImport(file);
+          if (partial) {
+              const nextState = { ...this.state, ...partial };
+              
+              // Persist imported state
+              localStorage.setItem(SETTINGS_KEY, JSON.stringify(nextState.settings));
+              localStorage.setItem(PRESET_KEY, JSON.stringify(nextState.presets));
+              localStorage.setItem(USER_BANK_KEY, JSON.stringify(nextState.userBank));
+              
+              this.state = nextState;
+              this.notify();
+              return true;
+          }
+      } catch (e) {
+          console.error(e);
+          alert("Failed to import XML file.");
+      }
+      return false;
   };
 
   // --- SUBSCRIPTION ---
@@ -110,9 +137,12 @@ export function useStore() {
 
   return {
     settings: state.settings,
-    preset: state.preset,
+    presets: state.presets, 
+    userBank: state.userBank,
     updateSettings: store.updateSettings,
     setPreset: store.setPreset,
-    updatePresetGlobal: store.updatePresetGlobal
+    saveUserPatch: store.saveUserPatch,
+    exportXML: store.exportXML,
+    importXML: store.importXML
   };
 }

@@ -19,6 +19,8 @@ export enum ButtonShape {
   DIAMOND = '0%',
 }
 
+export type BackgroundMode = 'rainbow' | 'charcoal' | 'midnight_blue' | 'deep_maroon' | 'forest_green' | 'slate_grey' | 'image' | 'none';
+
 export interface LimitColorMap {
   [key: number]: string;
 }
@@ -50,25 +52,6 @@ export interface ChordDefinition {
 export interface XYPos {
   x: number;
   y: number;
-}
-
-export interface KeyMap {
-    panic: string;
-    center: string;
-    increaseDepth: string;
-    decreaseDepth: string;
-    addChord: string;
-    toggleSynth: string;
-    toggleSettings: string;
-    volumeUp: string;
-    volumeDown: string;
-    limit3: string;
-    limit5: string;
-    limit7: string;
-    limit11: string;
-    limit13: string;
-    closeModals: string;
-    toggleUI: string;
 }
 
 export interface AppSettings {
@@ -106,6 +89,7 @@ export interface AppSettings {
   
   // Audio Settings
   baseFrequency: number; // Hz for 1/1
+  audioLatencyHint: 'interactive' | 'balanced' | 'playback'; // Buffer size control
 
   // Voice Leading / Focus Mode
   isVoiceLeadingEnabled: boolean;
@@ -116,13 +100,17 @@ export interface AppSettings {
   voiceLeadingAnimationSpeed: number; // seconds
   voiceLeadingReverseDir: boolean; // Reverse the direction of the flow animation
   voiceLeadingGlowAmount: number; // 0.0 to 1.0 (Controls width/intensity of the lobe)
+  voiceLeadingSteps: number; // 1 or 2 (Reach for active voice leading lines)
   
-  // Interaction Behavior
-  autoLatchOnDrag: boolean; // If true, dragging cursor over nodes latches/plays them
-  strumDurationMs: number; // Duration of strummed notes in ms
+  // Line Brightening
+  lineBrighteningEnabled: boolean;
+  lineBrighteningSteps: number; // 1 or 2
 
-  // Momentum is deprecated/greyed out
+  // Momentum is deprecated/greyed out in favor of Latch Mode
   isMomentumEnabled: boolean; 
+
+  // Latch Settings
+  latchedZoomScale: number; // Scale factor for active nodes (1.0 to 2.0)
 
   // Appearance
   buttonSizeScale: number; // Global Scalar 0.5 to 2.0
@@ -145,35 +133,46 @@ export interface AppSettings {
   pitchOffLocked: boolean;
   volumeLocked: boolean;
 
-  // Visuals - Rainbow
-  isRainbowModeEnabled: boolean;
+  // Visuals - Background
+  backgroundMode: BackgroundMode;
+  backgroundImageData: string | null; // Base64 string for custom image
+  backgroundTiling: boolean; // True = Repeat, False = No Repeat (Centered)
+  backgroundYOffset: number; // Vertical offset in pixels
+  
+  // Legacy Rainbow params (still used if mode is 'rainbow')
+  isRainbowModeEnabled: boolean; 
   rainbowSaturation: number; // 0-100
   rainbowBrightness: number; // 0-100
   rainbowOffset: number; // 0-360 (Hue shift)
+  
   isColoredIlluminationEnabled: boolean;
 
   // MIDI Settings
   midiEnabled: boolean;
   midiOutputId: string | null;
-  midiInputId: string | null;
   midiPitchBendRange: number; // Semitones (typically 2, 12, 24, or 48)
 
-  // UI Relocation
+  // Behavior
+  enableKeyboardShortcuts: boolean;
+  strumDuration: number; // seconds, 0.1 to 2.0
+
+  // UI Relocation & Scaling
   uiUnlocked: boolean;
+  uiScale: number; // 0.5 (Tiny) to 1.5 (Huge)
+  uiEdgeMargin: number; // in Millimeters (1-10)
   uiPositions: {
     volume: XYPos;
+    space: XYPos;
     panic: XYPos;
     off: XYPos;
-    latch: XYPos; // Added Latch Position
+    latch: XYPos;
+    bend: XYPos;
     center: XYPos;
     depth: XYPos;
     decreaseDepth: XYPos;
     chords: XYPos;
     layers: XYPos;
   };
-
-  // Keyboard Shortcuts
-  keyMap: KeyMap;
 }
 
 export interface OscillatorConfig {
@@ -213,10 +212,12 @@ export interface ModulationRow {
     amount: number; // -100 to 100
 }
 
+export type ReverbType = 'room' | 'hall' | 'cathedral' | 'plate' | 'shimmer';
+
 export interface SynthPreset {
-  id: string; // changed to string for UUIDs if needed, or keeping number
+  id: number | string;
   name: string;
-  category?: string;
+  category?: string; // New field for categorization
   
   osc1: OscillatorConfig;
   osc2: OscillatorConfig;
@@ -228,11 +229,19 @@ export interface SynthPreset {
   // Master Gain for the preset
   gain: number; 
 
-  // Voice Effects
-  spread: number; // 0.0 (Mono) to 1.0 (Full Stereo Width)
-
-  // Effects (Global)
+  // Stereo & Pan
+  spread?: number; // 0 to 1 (Voice Stereo Width)
+  stereoPanSpeed?: number; // Hz
+  stereoPanDepth?: number; // 0 to 1 (Auto-Pan amount)
+  
+  // Reverb Unit
+  reverbType?: ReverbType; // Convolution Preset (Logic base)
   reverbMix: number; // 0 to 1
+  reverbSize: number; // Duration in seconds (0.1 to 10.0)
+  reverbDamping: number; // 0 (Bright) to 1 (Dark)
+  reverbDiffusion?: number; // 0 (Grainy) to 1 (Smooth)
+
+  // Delay Unit
   delayMix: number; // 0 to 1
   delayTime: number; // Seconds
   delayFeedback: number; // 0 to 0.95
@@ -243,10 +252,19 @@ export interface SynthPreset {
   compressorRelease: number; // seconds
 }
 
-export interface SynthBank {
-    id: string;
-    name: string;
-    presets: SynthPreset[];
+// Slot Types
+export type PlayMode = 'normal' | 'latch' | 'strum';
+
+export interface PresetState {
+    normal: SynthPreset;
+    latch: SynthPreset;
+    strum: SynthPreset;
+}
+
+export interface StoreState {
+    settings: AppSettings;
+    presets: PresetState;
+    userBank: SynthPreset[]; // 20 Save Slots
 }
 
 export interface LatticeNode {

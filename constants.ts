@@ -1,5 +1,5 @@
 
-import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, LimitVisualsMap, KeyMap, SynthBank } from './types';
+import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, LimitVisualsMap, ReverbType } from './types';
 
 export const DEFAULT_COLORS: LimitColorMap = {
   1: '#EF4444', // Red (Unity)
@@ -19,23 +19,13 @@ export const DEFAULT_LIMIT_VISUALS: LimitVisualsMap = {
     13: { size: 0.6, opacity: 0.6 }
 };
 
-export const DEFAULT_KEY_MAP: KeyMap = {
-    panic: 'Space',
-    center: 'KeyC',
-    increaseDepth: 'BracketRight', // ]
-    decreaseDepth: 'BracketLeft',  // [
-    addChord: 'KeyA',
-    toggleSynth: 'KeyS',
-    toggleSettings: 'Comma',
-    volumeUp: 'F12',
-    volumeDown: 'F11',
-    limit3: 'Digit1',
-    limit5: 'Digit2',
-    limit7: 'Digit3',
-    limit11: 'Digit4',
-    limit13: 'Digit5',
-    closeModals: 'Escape',
-    toggleUI: 'KeyF' // Focus Mode
+// Reverb Defaults Helper
+export const REVERB_DEFAULTS: Record<ReverbType, { size: number, damping: number, diffusion: number }> = {
+    'room': { size: 1.5, damping: 0.3, diffusion: 0.8 },
+    'hall': { size: 3.0, damping: 0.6, diffusion: 0.7 }, // Increased damping (was 0.5)
+    'cathedral': { size: 6.0, damping: 0.85, diffusion: 0.85 }, // Increased damping (was 0.8)
+    'plate': { size: 2.0, damping: 0.1, diffusion: 1.0 },
+    'shimmer': { size: 8.0, damping: 0.2, diffusion: 0.5 }
 };
 
 // Generate empty chord slots A-Z + 6 more to make 32
@@ -56,72 +46,29 @@ const generateChordSlots = (): ChordDefinition[] => {
 };
 
 // UI Dimensions Constants
-// 3mm physical approx 12px
-export const MARGIN_3MM = 12; 
+export const PIXELS_PER_MM = 3.78; // Standard 96 DPI approximation
+export const MARGIN_3MM = 10; // Legacy constant, mainly used for initialization before settings load
 export const GAP_5MM = 20;
 export const SCROLLBAR_WIDTH = 12; 
 
 // Helper to get defaults
 const getDefaults = () => {
-    // Check for window existence for SSR safety
     const w = typeof window !== 'undefined' ? window.innerWidth : 1000;
     const h = typeof window !== 'undefined' ? window.innerHeight : 800;
-
-    // Component Dimensions Estimates
-    const LAYERS_HEIGHT = 310; 
-    const LAYERS_WIDTH = 90; 
-    const BOTTOM_BAR_HEIGHT = 48;
-    const PANIC_SIZE = 64; // w-16 = 4rem = 64px
-    
-    // Bottom Safe Area: Margin + Scrollbar
-    const BOTTOM_SAFE_Y = h - MARGIN_3MM - SCROLLBAR_WIDTH;
-
-    // Panic Position (Bottom Right)
-    const panicX = w - PANIC_SIZE - MARGIN_3MM - SCROLLBAR_WIDTH;
-    const panicY = BOTTOM_SAFE_Y - PANIC_SIZE;
-
-    // Off Position (Above Panic)
-    const offY = panicY - PANIC_SIZE - GAP_5MM;
-
-    // Latch Position (Above Off)
-    const latchY = offY - PANIC_SIZE - GAP_5MM;
+    const margin = 4 * PIXELS_PER_MM; // Updated to 4mm default
 
     return {
-        volume: { 
-            x: (w / 2) - 90, // Centered (Width 180)
-            y: MARGIN_3MM 
-        },
-        panic: { 
-            x: panicX, 
-            y: panicY 
-        },
-        off: {
-            x: panicX,
-            y: offY 
-        },
-        latch: {
-            x: panicX,
-            y: latchY
-        },
-        center: { 
-            // Navigation Bar (Left)
-            x: MARGIN_3MM, 
-            y: BOTTOM_SAFE_Y - BOTTOM_BAR_HEIGHT 
-        },
-        // Legacy keys kept for type compatibility but unused in new grouped layout
-        depth: { x: 0, y: 0 },
-        decreaseDepth: { x: 0, y: 0 },
-        chords: { 
-            // Placed to the right of Center Nav (160px width + gap)
-            x: MARGIN_3MM + 160 + GAP_5MM, 
-            y: BOTTOM_SAFE_Y - BOTTOM_BAR_HEIGHT 
-        },
-        layers: { 
-            // Vertically Centered on Right Side
-            // Right edge = Width - LayerWidth - Margin - Scrollbar
-            x: w - LAYERS_WIDTH - MARGIN_3MM - SCROLLBAR_WIDTH, 
-            y: (h / 2) - (LAYERS_HEIGHT / 2) 
-        }
+        volume: { x: (w / 2) - 80, y: margin },
+        space: { x: margin, y: h / 2 },
+        panic: { x: w - 80 - margin, y: h - 80 - margin },
+        off: { x: w - 80 - margin, y: h - 180 },
+        latch: { x: w - 80 - margin, y: h - 280 },
+        bend: { x: w - 80 - margin, y: h - 380 },
+        center: { x: margin, y: h - 48 - margin },
+        depth: { x: margin + 60, y: h - 48 - margin },
+        decreaseDepth: { x: margin + 120, y: h - 48 - margin },
+        chords: { x: margin + 180, y: h - 48 - margin },
+        layers: { x: w - 90 - margin, y: margin + 60 }
     };
 };
 
@@ -155,20 +102,24 @@ export const DEFAULT_SETTINGS: AppSettings = {
   layerOrder: [13, 11, 7, 5, 3, 1], 
   
   baseFrequency: 196.00, // G3
+  audioLatencyHint: 'playback', // Default to High Stability (Playback) for iPads
 
   isVoiceLeadingEnabled: true, 
   voiceLeadingStrength: 0.3, 
   
   isVoiceLeadingAnimationEnabled: true,
-  voiceLeadingReverseDir: false,
   voiceLeadingAnimationSpeed: 2.0,
+  voiceLeadingReverseDir: false,
   voiceLeadingGlowAmount: 0.5,
+  voiceLeadingSteps: 1,
   
-  autoLatchOnDrag: true, // Enabled by default
-  strumDurationMs: 300, // Default Strum Length
-  
+  lineBrighteningEnabled: true,
+  lineBrighteningSteps: 1,
+
   isMomentumEnabled: false, // Disabled by default
   
+  latchedZoomScale: 1.3,
+
   buttonSizeScale: 0.8, // Reduced from 1.0 per request
   buttonSpacingScale: 1.5, 
   latticeAspectRatio: 0.7, // "Wide" default per request
@@ -180,45 +131,54 @@ export const DEFAULT_SETTINGS: AppSettings = {
   nodeTextSizeScale: 1.0,
   showFractionBar: false,
 
-  isPitchBendEnabled: true,
+  isPitchBendEnabled: false, // Default to OFF per request
   isPitchSnapEnabled: true,
-  polyphony: 10,
+  polyphony: 4, // Conservative default for older iPads
   pitchOffLocked: false,
   volumeLocked: false,
 
-  // Visuals - Rainbow
-  isRainbowModeEnabled: true, // Enabled by default
-  rainbowSaturation: 50, // 50% default
-  rainbowBrightness: 50, // 50% default
-  rainbowOffset: 0,
-  isColoredIlluminationEnabled: true, // Enabled by default per request
+  // Visuals - Background
+  backgroundMode: 'rainbow',
+  backgroundImageData: null,
+  backgroundTiling: false,
+  backgroundYOffset: 0,
+
+  isRainbowModeEnabled: true, // Legacy flag kept true for compatibility
+  rainbowSaturation: 50, 
+  rainbowBrightness: 50, 
+  rainbowOffset: 300, // Aligns Green (120deg) to Center
+  isColoredIlluminationEnabled: true, 
   
   // MIDI Defaults
   midiEnabled: false,
   midiOutputId: null,
-  midiInputId: null, // Added MIDI Input Default
   midiPitchBendRange: 24, // High default for smooth microtonality
 
-  // UI Relocation
+  // Behavior
+  enableKeyboardShortcuts: false,
+  strumDuration: 0.5, // Default strum duration in seconds
+
+  // UI Relocation & Scaling
   uiUnlocked: false,
-  uiPositions: DEFAULT_UI_POSITIONS,
-  
-  keyMap: DEFAULT_KEY_MAP
+  uiScale: 1.0, // Default to Medium
+  uiEdgeMargin: 4, // Default 4mm
+  uiPositions: DEFAULT_UI_POSITIONS
 };
 
+// ... existing oscillators and presets ...
 // Helper for default disabled oscillator
 const defaultDisabledOsc: OscillatorConfig = {
     enabled: false,
     waveform: WaveformType.SINE,
     coarseDetune: 0,
-    fineDetune: 0, // Reset default fine detune to 0
+    fineDetune: 5,
     gain: 0.5,
     attack: 0.1,
     decay: 0.5,
     sustain: 0.7,
     release: 1.0,
     filterCutoff: 2000,
-    filterResonance: 0.5, 
+    filterResonance: 0.5, // Changed from 0 to 0.5 for stability
     lfoRate: 1,
     lfoDepth: 0,
     lfoTarget: 'none'
@@ -227,13 +187,20 @@ const defaultDisabledOsc: OscillatorConfig = {
 const generateInitPatch = (name: string, id: string): SynthPreset => ({
     id: id,
     name: name,
+    category: 'User',
     gain: 0.5,
     modMatrix: [],
     osc1: { ...defaultDisabledOsc, enabled: true, gain: 0.5 },
     osc2: { ...defaultDisabledOsc },
     osc3: { ...defaultDisabledOsc },
-    spread: 0.5,
+    spread: 0.0,
+    stereoPanSpeed: 0,
+    stereoPanDepth: 0,
+    reverbType: 'room',
     reverbMix: 0.1,
+    reverbSize: REVERB_DEFAULTS['room'].size,
+    reverbDamping: REVERB_DEFAULTS['room'].damping,
+    reverbDiffusion: REVERB_DEFAULTS['room'].diffusion,
     delayMix: 0,
     delayTime: 0.25,
     delayFeedback: 0.2,
@@ -242,19 +209,600 @@ const generateInitPatch = (name: string, id: string): SynthPreset => ({
     compressorRelease: 0.2
 });
 
-export const DEFAULT_PRESET: SynthPreset = generateInitPatch("Init Patch", "init");
+const p = (name: string, cat: string, osc1: Partial<OscillatorConfig>, osc2: Partial<OscillatorConfig>, osc3: Partial<OscillatorConfig>, extra: Partial<SynthPreset> = {}): SynthPreset => {
+    const base = generateInitPatch(name, `${cat}-${name.replace(/\s+/g, '-').toLowerCase()}-${Math.random().toString(36).substr(2,5)}`);
+    // Ensure category is stored
+    base.category = cat;
+    
+    if (osc1) base.osc1 = { ...base.osc1, ...osc1 };
+    if (osc2) base.osc2 = { ...base.osc2, ...osc2 };
+    if (osc3) base.osc3 = { ...base.osc3, ...osc3 };
+    
+    // Auto-fill Reverb params if type is provided but params are not
+    if (extra.reverbType && (extra.reverbSize === undefined || extra.reverbDamping === undefined || extra.reverbDiffusion === undefined)) {
+        const defaults = REVERB_DEFAULTS[extra.reverbType];
+        if (extra.reverbSize === undefined) extra.reverbSize = defaults.size;
+        if (extra.reverbDamping === undefined) extra.reverbDamping = defaults.damping;
+        if (extra.reverbDiffusion === undefined) extra.reverbDiffusion = defaults.diffusion;
+    }
 
-// --- BANKS DEFINITION ---
-const PADS_BANK: SynthPreset[] = [DEFAULT_PRESET];
-const LEADS_BANK: SynthPreset[] = [DEFAULT_PRESET];
-const BASS_BANK: SynthPreset[] = [DEFAULT_PRESET];
-const KEYS_BANK: SynthPreset[] = [DEFAULT_PRESET];
-const MALLETS_BANK: SynthPreset[] = [DEFAULT_PRESET];
+    return { ...base, ...extra };
+};
 
-export const PRESET_BANKS: SynthBank[] = [
-    { id: 'pads', name: 'Pads', presets: PADS_BANK },
-    { id: 'leads', name: 'Leads', presets: LEADS_BANK },
-    { id: 'bass', name: 'Bass', presets: BASS_BANK },
-    { id: 'keys', name: 'Keys', presets: KEYS_BANK },
-    { id: 'mallets', name: 'Mallets', presets: MALLETS_BANK },
+// --- PRESERVED PATCHES (With Categories) ---
+const preservedDeepOcean: SynthPreset = {
+    ...generateInitPatch("Deep Ocean", "1"), // ID is override below
+    id: 1,
+    category: 'Atmosphere',
+    gain: 0.6,
+    modMatrix: [
+        { id: 'm1', enabled: true, source: 'env2', target: 'osc1_cutoff', amount: 30 },
+        { id: 'm2', enabled: true, source: 'lfo3', target: 'osc2_gain', amount: 20 }
+    ],
+    spread: 0.7, stereoPanSpeed: 0.1, stereoPanDepth: 0.5,
+    osc1: {
+        enabled: true,
+        waveform: WaveformType.TRIANGLE,
+        coarseDetune: 0, fineDetune: 0, gain: 0.4, 
+        attack: 1.5, decay: 0.5, sustain: 0.8, release: 2.0,
+        filterCutoff: 800, filterResonance: 0.5,
+        lfoRate: 0.2, lfoDepth: 25, 
+        lfoTarget: 'filter'
+    },
+    osc2: {
+        enabled: true,
+        waveform: WaveformType.SINE,
+        coarseDetune: 0, fineDetune: -4, 
+        gain: 0.3, 
+        attack: 2.0, decay: 1.0, sustain: 0.7, release: 2.5,
+        filterCutoff: 600, filterResonance: 0.5, 
+        lfoRate: 0.15, lfoDepth: 15,
+        lfoTarget: 'tremolo' 
+    },
+    osc3: { 
+        enabled: true,
+        waveform: WaveformType.SINE,
+        coarseDetune: -1200, fineDetune: 0, gain: 0.4, 
+        attack: 1.0, decay: 2.0, sustain: 0.8, release: 3.0,
+        filterCutoff: 500, filterResonance: 0,
+        lfoTarget: 'tremolo', lfoRate: 4, lfoDepth: 10
+    },
+    reverbType: 'cathedral',
+    reverbMix: 0.85,
+    reverbSize: REVERB_DEFAULTS['cathedral'].size,
+    reverbDamping: REVERB_DEFAULTS['cathedral'].damping,
+    reverbDiffusion: REVERB_DEFAULTS['cathedral'].diffusion,
+    delayMix: 0.5,
+    delayTime: 0.6,
+    delayFeedback: 0.5,
+    compressorThreshold: -30,
+    compressorRatio: 8,
+    compressorRelease: 0.5
+};
+
+const preservedAnalogStrings: SynthPreset = {
+    ...generateInitPatch("Analog Strings", "4"),
+    id: 4,
+    category: 'Strings',
+    gain: 0.6,
+    modMatrix: [
+        { id: 'm1', enabled: true, source: 'lfo1', target: 'osc1_cutoff', amount: 20 },
+        { id: 'm2', enabled: true, source: 'lfo2', target: 'osc1_pitch', amount: 2 } // Gentle analog drift
+    ],
+    spread: 0.8, stereoPanSpeed: 0.05, stereoPanDepth: 0.3,
+    osc1: {
+        enabled: true,
+        waveform: WaveformType.SAWTOOTH,
+        coarseDetune: 0, fineDetune: -1, // Reduced from -2
+        gain: 0.3,
+        attack: 0.6, decay: 0.5, sustain: 0.8, release: 1.2,
+        filterCutoff: 2000, filterResonance: 0.2,
+        lfoRate: 0.1, lfoDepth: 30, 
+        lfoTarget: 'filter'
+    },
+    osc2: {
+        enabled: true,
+        waveform: WaveformType.SAWTOOTH,
+        coarseDetune: 0, fineDetune: 1, // Reduced from 2
+        gain: 0.3,
+        attack: 0.6, decay: 0.5, sustain: 0.8, release: 1.2,
+        filterCutoff: 2000, filterResonance: 0.2,
+        lfoRate: 3.5, lfoDepth: 10,
+        lfoTarget: 'tremolo'
+    },
+    osc3: { 
+        enabled: true,
+        waveform: WaveformType.SAWTOOTH,
+        coarseDetune: 1200, fineDetune: 0, gain: 0.12, // Reduced gain slightly
+        attack: 1.0, decay: 0.5, sustain: 0.7, release: 2.0,
+        filterCutoff: 1500, filterResonance: 0.5, 
+        lfoRate: 0.2, lfoDepth: 20, lfoTarget: 'filter'
+    },
+    reverbType: 'hall',
+    reverbMix: 0.7,
+    reverbSize: REVERB_DEFAULTS['hall'].size,
+    reverbDamping: REVERB_DEFAULTS['hall'].damping,
+    reverbDiffusion: REVERB_DEFAULTS['hall'].diffusion,
+    delayMix: 0.3,
+    delayTime: 0.4,
+    delayFeedback: 0.3,
+    compressorThreshold: -20,
+    compressorRatio: 6,
+    compressorRelease: 0.3
+};
+
+const preservedNoiseWash: SynthPreset = {
+    ...generateInitPatch("Noise Wash", "8"),
+    id: 8,
+    category: 'Atmosphere',
+    gain: 0.5,
+    modMatrix: [],
+    spread: 0, stereoPanSpeed: 0, stereoPanDepth: 0,
+    osc1: {
+        enabled: true,
+        waveform: WaveformType.SAWTOOTH,
+        coarseDetune: -2400, fineDetune: 0, gain: 0.3,
+        attack: 2.0, decay: 3.0, sustain: 0.8, release: 4.0,
+        filterCutoff: 300, filterResonance: 15,
+        lfoRate: 0.1, lfoDepth: 80, lfoTarget: 'filter'
+    },
+    osc2: {
+        enabled: true,
+        waveform: WaveformType.SQUARE,
+        coarseDetune: -1200, fineDetune: 0, gain: 0.2,
+        attack: 2.0, decay: 3.0, sustain: 0.8, release: 4.0,
+        filterCutoff: 400, filterResonance: 10,
+        lfoRate: 0.15, lfoDepth: 60, lfoTarget: 'filter'
+    },
+    osc3: { ...defaultDisabledOsc },
+    reverbType: 'hall', 
+    reverbMix: 0.9,
+    reverbSize: 3.5, 
+    reverbDamping: 0.4,
+    reverbDiffusion: 0.7,
+    delayMix: 0.7,
+    delayTime: 0.8,
+    delayFeedback: 0.7,
+    compressorThreshold: -30,
+    compressorRatio: 2,
+    compressorRelease: 1.0
+};
+
+// --- NEW PATCH BANKS ---
+
+const STRINGS_PATCHES = [
+    p("Solo Violin", "Strings",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 5 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 4, gain: 0.4, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.2, filterCutoff: 800 },
+        { spread: 0.3, reverbType: 'hall', reverbMix: 0.4, compressorThreshold: -15 }
+    ),
+    p("Cello Section", "Strings",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.5, attack: 0.4, release: 0.8, filterCutoff: 1000 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1205, gain: 0.4, attack: 0.5, release: 0.9, filterCutoff: 800 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1195, gain: 0.4, attack: 0.4, release: 0.8 },
+        { spread: 0.6, reverbType: 'hall', reverbMix: 0.6 }
+    ),
+    p("Pizzicato", "Strings",
+        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.8, attack: 0.01, decay: 0.25, sustain: 0, release: 0.25 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3, attack: 0.01, decay: 0.2, sustain: 0 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.2, attack: 0.02, decay: 0.15, sustain: 0, filterCutoff: 1200 },
+        { spread: 0.4, reverbType: 'room', reverbMix: 0.2 }
+    ),
+    p("Tremolo Strings", "Strings",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.2, sustain: 0.8, lfoTarget: 'tremolo', lfoRate: 6, lfoDepth: 40 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 5, gain: 0.5, attack: 0.25, sustain: 0.8, lfoTarget: 'tremolo', lfoRate: 6.2, lfoDepth: 40 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.3 },
+        { spread: 0.7, reverbType: 'hall', reverbMix: 0.5 }
+    ),
+    p("Synth Strings 80s", "Strings",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 0.5, release: 1.0, fineDetune: -8 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 0.5, release: 1.0, fineDetune: 8 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, gain: 0.1, attack: 0.5, release: 1.0, filterCutoff: 4000 },
+        { spread: 0.8, stereoPanSpeed: 0.2, stereoPanDepth: 0.3, reverbType: 'plate', reverbMix: 0.6 }
+    ),
+    p("Cinematic Swell", "Strings",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 1.5, decay: 2.0, sustain: 1.0, release: 2.0, filterCutoff: 600, lfoTarget: 'filter', lfoRate: 0.1, lfoDepth: 60 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 7, gain: 0.4, attack: 1.8, release: 2.5 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.4, attack: 1.0, release: 3.0 },
+        { spread: 0.9, reverbType: 'cathedral', reverbMix: 0.8 }
+    ),
+    p("Chamber Quartet", "Strings",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.3, decay: 0.5, sustain: 0.7, filterCutoff: 1500 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 3, gain: 0.4, attack: 0.35, sustain: 0.7 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -5, gain: 0.2, filterCutoff: 1000 },
+        { spread: 0.5, reverbType: 'room', reverbMix: 0.35 }
+    )
 ];
+
+const ATMOSPHERE_PATCHES = [
+    p("Wind Chimes", "Atmosphere",
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.5, attack: 0.01, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 5, lfoDepth: 100 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3102, gain: 0.4, attack: 0.05, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 7, lfoDepth: 100 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, gain: 0.3, attack: 0.02, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 3, lfoDepth: 100 },
+        { spread: 0.9, reverbType: 'shimmer', reverbMix: 0.85, delayMix: 0.5, delayTime: 0.33, delayFeedback: 0.6 }
+    ),
+    p("Dark Drone", "Atmosphere",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2400, gain: 0.5, filterCutoff: 150, filterResonance: 10, lfoTarget: 'filter', lfoRate: 0.05, lfoDepth: 40 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.4, filterCutoff: 200, filterResonance: 8, lfoTarget: 'filter', lfoRate: 0.07, lfoDepth: 30 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2405, gain: 0.3, filterCutoff: 100 },
+        { spread: 0.7, reverbType: 'cathedral', reverbMix: 0.9, compressorThreshold: -25 }
+    ),
+    p("Swamp", "Atmosphere",
+        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.6, lfoTarget: 'pitch', lfoRate: 6, lfoDepth: 20, filterCutoff: 600 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.4, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 15 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, filterCutoff: 400 },
+        { spread: 0.6, reverbType: 'plate', reverbMix: 0.6 }
+    ),
+    p("Industrial", "Atmosphere",
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.6, coarseDetune: -1200, lfoTarget: 'pitch', lfoRate: 50, lfoDepth: 5 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, coarseDetune: -2400, filterCutoff: 800, filterResonance: 15, lfoTarget: 'filter', lfoRate: 8, lfoDepth: 30 },
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.7, coarseDetune: -1200, lfoTarget: 'tremolo', lfoRate: 15, lfoDepth: 60 },
+        { spread: 0.5, reverbType: 'plate', reverbMix: 0.5, compressorThreshold: -15, compressorRatio: 12 }
+    ),
+    p("Glass Texture", "Atmosphere",
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.6, attack: 0.5, release: 2.0, lfoTarget: 'pitch', lfoRate: 6, lfoDepth: 15 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1900, gain: 0.4, attack: 1.0, release: 2.5, lfoTarget: 'tremolo', lfoRate: 8, lfoDepth: 20 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.3, attack: 1.5, release: 3.0, filterCutoff: 4000, filterResonance: 5 },
+        { spread: 0.8, reverbType: 'plate', reverbMix: 0.7, delayMix: 0.4 }
+    ),
+    p("Abyss", "Atmosphere",
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -2400, gain: 0.9, attack: 2.0, release: 6.0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.5, attack: 3.0, release: 6.0 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -3600, gain: 0.3, filterCutoff: 120, filterResonance: 0, lfoTarget: 'filter', lfoRate: 0.05, lfoDepth: 30 },
+        { spread: 0.6, reverbType: 'cathedral', reverbMix: 0.95, stereoPanSpeed: 0.1, stereoPanDepth: 0.6 }
+    )
+];
+
+const NEW_PLUCKED_PATCHES = [
+    p("Koto", "Plucked",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.7, attack: 0.01, decay: 0.3, sustain: 0, filterCutoff: 1200, filterResonance: 3 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 700, gain: 0.3, attack: 0.01, decay: 0.25, sustain: 0 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.4, attack: 0.02, decay: 0.4, sustain: 0 },
+        { spread: 0.4, reverbType: 'room', reverbMix: 0.3 }
+    ),
+    p("Sitarish", "Plucked",
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.5, attack: 0.02, decay: 1.5, sustain: 0, filterCutoff: 2000, filterResonance: 10 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 1200, gain: 0.3, attack: 0.02, decay: 1.0, sustain: 0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 700, gain: 0.2, attack: 0.05, decay: 2.0, sustain: 0 },
+        { spread: 0.6, reverbType: 'plate', reverbMix: 0.5, delayMix: 0.3 }
+    )
+];
+
+// --- NEW PLUCKED PATCHES ---
+const PLUCKED_PATCHES = [
+    p("Celestial Harp", "Plucked", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, attack: 0.005, decay: 1.2, sustain: 0, release: 1.2, gain: 0.7 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, attack: 0.01, decay: 0.8, sustain: 0, gain: 0.3 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, attack: 0.02, decay: 0.5, sustain: 0, gain: 0.1, filterCutoff: 1500 },
+        { spread: 0.3, reverbType: 'hall', reverbMix: 0.3, delayMix: 0.25, delayTime: 0.33, delayFeedback: 0.4 }
+    ),
+    p("Neon Koto", "Plucked", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, attack: 0.01, decay: 0.3, sustain: 0, release: 0.3, filterCutoff: 3000, filterResonance: 2, gain: 0.6 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 700, attack: 0.01, decay: 0.2, sustain: 0, gain: 0.4, filterCutoff: 4000 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, attack: 0.01, decay: 0.4, sustain: 0, gain: 0.5 },
+        { spread: 0.8, stereoPanSpeed: 0, stereoPanDepth: 0, reverbType: 'plate', reverbMix: 0.2, delayMix: 0 }
+    ),
+    p("Ceramic", "Plucked", 
+        { enabled: true, waveform: WaveformType.SINE, attack: 0.005, decay: 0.4, sustain: 0, release: 0.1, gain: 0.8 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, attack: 0.005, decay: 0.1, sustain: 0, gain: 0.3 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, attack: 0.005, decay: 0.2, sustain: 0, gain: 0.2 },
+        { spread: 0.4, reverbType: 'room', reverbMix: 0.15, compressorThreshold: -15, compressorRatio: 4 }
+    ),
+    p("Rubber Bass", "Plucked", 
+        { enabled: true, waveform: WaveformType.SINE, attack: 0.01, decay: 0.6, sustain: 0, release: 0.2, gain: 0.9 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, attack: 0.01, decay: 0.3, sustain: 0, gain: 0.4, filterCutoff: 600 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2400, attack: 0.01, decay: 0.4, sustain: 0, gain: 0.3, filterCutoff: 300 },
+        { spread: 0.2, reverbType: 'room', reverbMix: 0.1 }
+    ),
+    p("Digi-Pizz", "Plucked", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, attack: 0.01, decay: 0.15, sustain: 0, release: 0.15, filterCutoff: 800, gain: 0.6, lfoTarget: 'filter', lfoRate: 0, lfoDepth: 0 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, attack: 0.01, decay: 0.1, sustain: 0, gain: 0.3, filterCutoff: 1200 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, attack: 0.01, decay: 0.15, sustain: 0, gain: 0.4 },
+        { spread: 0.7, stereoPanSpeed: 4, stereoPanDepth: 0.3, reverbType: 'plate', reverbMix: 0.2, modMatrix: [{ id: 'm1', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 60 }] }
+    ),
+    p("Solar Flare", "Plucked",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, attack: 0.01, decay: 0.8, sustain: 0, release: 1.0, filterCutoff: 4000, filterResonance: 8, gain: 0.5 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, attack: 0.05, decay: 1.0, sustain: 0, gain: 0.4 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, attack: 0.01, decay: 1.2, sustain: 0, gain: 0.6 },
+        { spread: 0.8, reverbType: 'shimmer', reverbMix: 0.5, delayMix: 0.4, delayFeedback: 0.5 }
+    ),
+    ...NEW_PLUCKED_PATCHES
+];
+
+// --- BANKS (Updated to use categories via 'p') ---
+
+const ETHEREAL_PADS = [
+    p("Astral Plane", "Pads", 
+        { enabled: true, waveform: WaveformType.SINE, attack: 2.0, release: 3.0, lfoTarget: 'filter', lfoRate: 0.2, lfoDepth: 40 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 702, attack: 2.5, release: 3.0, lfoTarget: 'tremolo', lfoRate: 3.5, lfoDepth: 30 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.15, filterCutoff: 600, lfoTarget: 'filter', lfoRate: 0.33, lfoDepth: 30 }, 
+        { spread: 0.9, stereoPanSpeed: 0.1, stereoPanDepth: 0.6, reverbType: 'shimmer', reverbMix: 0.85, delayMix: 0.5, 
+          modMatrix: [{ id: 'm1', enabled: true, source: 'lfo1', target: 'osc3_gain', amount: 30 }] } 
+    ),
+    p("Nebula Drift", "Pads", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 400, attack: 3.0, lfoTarget: 'filter', lfoRate: 0.13, lfoDepth: 60 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, filterCutoff: 300, lfoTarget: 'filter', lfoRate: 0.2, lfoDepth: 40 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -2400, gain: 0.3, filterCutoff: 200, lfoTarget: 'tremolo', lfoRate: 0.08, lfoDepth: 50 }, 
+        { spread: 1.0, stereoPanSpeed: 0.05, stereoPanDepth: 0.8, reverbType: 'cathedral', reverbMix: 0.9, delayMix: 0.4 }
+    ),
+    p("Cosmic Dust", "Pads", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, lfoTarget: 'tremolo', lfoRate: 4, lfoDepth: 30 }, 
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, attack: 0.1, decay: 0.5, lfoTarget: 'tremolo', lfoRate: 6, lfoDepth: 20 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, attack: 0.2, decay: 0.4, lfoTarget: 'tremolo', lfoRate: 5, lfoDepth: 20 },
+        { spread: 0.8, stereoPanSpeed: 2.0, stereoPanDepth: 0.5, reverbType: 'plate', reverbMix: 0.6, delayMix: 0.4,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'env1', target: 'osc2_gain', amount: 30 }] }
+    ),
+    p("Void Choir", "Pads", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 800, filterResonance: 10, attack: 1.0, lfoTarget: 'filter', lfoRate: 0.1, lfoDepth: 20 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -12, filterCutoff: 1000, filterResonance: 5, lfoTarget: 'tremolo', lfoRate: 0.2, lfoDepth: 40 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 7, filterCutoff: 1200, gain: 0.3, lfoTarget: 'filter', lfoRate: 0.15, lfoDepth: 25 }, 
+        { spread: 0.8, stereoPanSpeed: 0.15, stereoPanDepth: 0.5, reverbType: 'cathedral', reverbMix: 0.8,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'lfo2', target: 'osc1_cutoff', amount: 15 }] }
+    ),
+    p("Prismatic", "Pads", 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.6, lfoTarget: 'tremolo', lfoRate: 4, lfoDepth: 10 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 400, gain: 0.3, lfoTarget: 'tremolo', lfoRate: 5, lfoDepth: 10 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 700, gain: 0.3, lfoTarget: 'tremolo', lfoRate: 6, lfoDepth: 10 },
+        { spread: 0.9, stereoPanSpeed: 0.3, stereoPanDepth: 0.5, reverbType: 'hall', reverbMix: 0.5, delayMix: 0.3 }
+    ),
+    p("Event Horizon", "Pads", 
+        { enabled: true, waveform: WaveformType.SQUARE, filterCutoff: 200, gain: 0.8, lfoTarget: 'filter', lfoRate: 0.05, lfoDepth: 40 }, 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2400, gain: 0.5 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, gain: 0.2, filterCutoff: 4000, lfoTarget: 'filter', lfoRate: 0.1, lfoDepth: 50 },
+        { spread: 0.6, stereoPanSpeed: 0.1, stereoPanDepth: 0.7, reverbType: 'shimmer', reverbMix: 0.9, compressorThreshold: -25 }
+    ),
+    p("Starlight", "Pads", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, attack: 0.1, decay: 2.0, sustain: 0.5 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1902, attack: 0.5, gain: 0.2 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 3102, attack: 1.0, gain: 0.1, filterCutoff: 1000 },
+        { spread: 0.8, stereoPanSpeed: 1.5, stereoPanDepth: 0.4, reverbType: 'plate', reverbMix: 0.7, delayTime: 0.5, delayFeedback: 0.6,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'lfo1', target: 'osc2_gain', amount: 40 }] }
+    ),
+    p("Solar Wind", "Pads", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 3000, filterResonance: 2, lfoTarget: 'filter', lfoRate: 8, lfoDepth: 10 }, 
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 702, gain: 0.4 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.5, lfoTarget: 'tremolo', lfoRate: 0.1, lfoDepth: 20 },
+        { spread: 0.5, stereoPanSpeed: 4.0, stereoPanDepth: 0.6, reverbType: 'shimmer', reverbMix: 0.6 }
+    )
+];
+
+const ETHEREAL_LEADS = [
+    p("Liquid Light", "Leads", 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.8, attack: 0.05 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 4, gain: 0.6 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, gain: 0.2, filterCutoff: 2000, lfoTarget: 'filter', lfoRate: 6, lfoDepth: 20 },
+        { spread: 0.4, stereoPanSpeed: 2.0, stereoPanDepth: 0.5, reverbType: 'hall', delayMix: 0.4, reverbMix: 0.4 }
+    ),
+    p("Laser Harp", "Leads", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 4000, decay: 0.3, sustain: 0 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, gain: 0.3, decay: 0.2, sustain: 0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.2, decay: 0.1 },
+        { spread: 0.6, stereoPanSpeed: 6.0, stereoPanDepth: 0.3, reverbType: 'plate', delayMix: 0.5, delayTime: 0.3,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 50 }] }
+    ),
+    p("Ghost Flute", "Leads", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, attack: 0.1, lfoTarget: 'tremolo', lfoRate: 5, lfoDepth: 20 }, 
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.2 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1205, gain: 0.2 }, 
+        { spread: 0.5, stereoPanSpeed: 0.5, stereoPanDepth: 0.6, reverbType: 'hall', reverbMix: 0.8 }
+    ),
+    p("Warp Drive", "Leads", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 2000, lfoTarget: 'pitch', lfoRate: 8, lfoDepth: 5 }, 
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.5 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.3, lfoTarget: 'filter', lfoRate: 2, lfoDepth: 40 },
+        { spread: 0.3, stereoPanSpeed: 8.0, stereoPanDepth: 0.4, reverbType: 'room', delayMix: 0.3 }
+    ),
+    p("Crystal Solo", "Leads", 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.7, decay: 0.5, sustain: 0.5 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 2400, decay: 0.2, gain: 0.4 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 3600, decay: 0.1, gain: 0.1, filterCutoff: 5000 },
+        { spread: 0.4, stereoPanSpeed: 1.0, stereoPanDepth: 0.3, reverbType: 'plate', reverbMix: 0.5,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'lfo1', target: 'osc1_gain', amount: 10 }] }
+    ),
+    p("Acid Trip", "Leads", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 800, filterResonance: 15, lfoTarget: 'filter', lfoRate: 3, lfoDepth: 30 }, 
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.4, filterCutoff: 600, lfoTarget: 'filter', lfoRate: 2.5, lfoDepth: 40 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -2400, gain: 0.4, filterCutoff: 400, lfoTarget: 'filter', lfoRate: 2.0, lfoDepth: 50 },
+        { spread: 0.2, stereoPanSpeed: 4.0, stereoPanDepth: 0.7, reverbType: 'room', delayMix: 0.4 }
+    ),
+    p("Phase Shift", "Leads", 
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.6 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 5, gain: 0.6 }, 
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 10, gain: 0.6 },
+        { spread: 0.8, stereoPanSpeed: 0.2, stereoPanDepth: 0.8, reverbType: 'plate', delayMix: 0.3 }
+    ),
+    p("Soft Glow", "Leads", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, filterCutoff: 1500, attack: 0.2 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 702, gain: 0.3 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1404, gain: 0.15 },
+        { spread: 0.5, stereoPanSpeed: 1.0, stereoPanDepth: 0.4, reverbType: 'hall', reverbMix: 0.6,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'lfo1', target: 'osc1_cutoff', amount: 20 }] }
+    )
+];
+
+const ETHEREAL_BASS = [
+    p("Void Bass", "Bass", 
+        { enabled: true, waveform: WaveformType.SINE, gain: 1.0, attack: 0.1 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.5 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -2400, gain: 0.3, filterCutoff: 200 },
+        { spread: 0.2, stereoPanSpeed: 0.1, stereoPanDepth: 0.2, reverbType: 'room', reverbMix: 0.4,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'env1', target: 'osc1_gain', amount: 10 }] }
+    ),
+    p("Pulsar", "Bass", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 400, lfoTarget: 'filter', lfoRate: 6, lfoDepth: 15 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.6 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 0, gain: 0.4, lfoTarget: 'tremolo', lfoRate: 3, lfoDepth: 30 },
+        { spread: 0.4, stereoPanSpeed: 6.0, stereoPanDepth: 0.3, reverbType: 'room', delayMix: 0.2 }
+    ),
+    p("Deep Space", "Bass", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, filterCutoff: 200, lfoTarget: 'tremolo', lfoRate: 0.1, lfoDepth: 30 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -2400, gain: 0.7 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -3600, gain: 0.2, filterCutoff: 150 }, 
+        { spread: 0.6, stereoPanSpeed: 0.05, stereoPanDepth: 0.5, reverbType: 'cathedral', reverbMix: 0.8 }
+    ),
+    p("Wobble Void", "Bass", 
+        { enabled: true, waveform: WaveformType.SQUARE, filterCutoff: 600, lfoTarget: 'filter', lfoRate: 2, lfoDepth: 30 }, 
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.5 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -2400, gain: 0.5 },
+        { spread: 0.5, stereoPanSpeed: 2.0, stereoPanDepth: 0.6, reverbType: 'room' }
+    ),
+    p("Sub Drone", "Bass", 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.9 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3, gain: 0.5 }, 
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.1, filterCutoff: 100 },
+        { spread: 0.6, stereoPanSpeed: 0.05, stereoPanDepth: 0.5, reverbType: 'cathedral', reverbMix: 0.5 }
+    ),
+    p("Reso Bass", "Bass", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 500, filterResonance: 8 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 1200, gain: 0.3, filterCutoff: 800, filterResonance: 5 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.5 },
+        { spread: 0.2, stereoPanSpeed: 0.5, stereoPanDepth: 0.3, reverbType: 'plate', delayMix: 0.3,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 40 }] }
+    ),
+    p("Pluck Abyss", "Bass", 
+        { enabled: true, waveform: WaveformType.SQUARE, decay: 0.4, sustain: 0, filterCutoff: 800 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.6 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 0, gain: 0.3, decay: 0.1, sustain: 0 },
+        { spread: 0.3, stereoPanSpeed: 1.0, stereoPanDepth: 0.2, reverbType: 'room', reverbMix: 0.3 }
+    ),
+    p("Growling Star", "Bass", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 300, gain: 0.8 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 8, filterCutoff: 300, gain: 0.6 }, 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -8, filterCutoff: 300, gain: 0.6 }, 
+        { spread: 0.8, stereoPanSpeed: 0.2, stereoPanDepth: 0.5, compressorThreshold: -15, reverbType: 'plate' }
+    )
+];
+
+const ETHEREAL_KEYS = [
+    p("Dream Rhodes", "Keys", 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.7, decay: 1.5 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, gain: 0.2, decay: 1.0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.1, decay: 0.5 },
+        { spread: 0.6, stereoPanSpeed: 0.3, stereoPanDepth: 0.5, reverbType: 'hall', reverbMix: 0.6, delayMix: 0.4,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'lfo1', target: 'osc1_gain', amount: 20 }] }
+    ),
+    p("Space Organ", "Keys", 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, lfoTarget: 'filter', lfoRate: 2.0, lfoDepth: 15 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, gain: 0.4, lfoTarget: 'tremolo', lfoRate: 3.5, lfoDepth: 20 }, 
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1902, gain: 0.3 },
+        { spread: 0.8, stereoPanSpeed: 2.0, stereoPanDepth: 0.4, reverbType: 'cathedral', reverbMix: 0.6 }
+    ),
+    p("Underwater", "Keys", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, filterCutoff: 800, lfoTarget: 'filter', lfoRate: 1, lfoDepth: 15 }, 
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 702, gain: 0.3 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.4, filterCutoff: 300 },
+        { spread: 0.5, stereoPanSpeed: 0.5, stereoPanDepth: 0.6, reverbType: 'plate', delayMix: 0.5 }
+    ),
+    p("Frozen Time", "Keys", 
+        { enabled: true, waveform: WaveformType.SQUARE, filterCutoff: 1500, decay: 2.0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 2400, gain: 0.15, lfoTarget: 'tremolo', lfoRate: 4, lfoDepth: 30 },
+        { spread: 0.8, stereoPanSpeed: 0.1, stereoPanDepth: 0.5, reverbType: 'shimmer', reverbMix: 0.8,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'lfo2', target: 'osc1_cutoff', amount: 10 }] }
+    ),
+    p("Glitch Keys", "Keys", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, decay: 0.2, sustain: 0, filterCutoff: 2000 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, decay: 0.1, gain: 0.4 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 700, decay: 0.15, gain: 0.3 },
+        { spread: 0.9, stereoPanSpeed: 8.0, stereoPanDepth: 0.7, reverbType: 'room', delayTime: 0.1, delayFeedback: 0.6 }
+    ),
+    p("Vaporwave", "Keys", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, lfoTarget: 'pitch', lfoRate: 0.5, lfoDepth: 8 }, 
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.4 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.3 },
+        { spread: 0.4, stereoPanSpeed: 0.2, stereoPanDepth: 0.4, reverbType: 'plate', delayMix: 0.4, delayFeedback: 0.7 }
+    ),
+    p("Halo", "Keys", 
+        { enabled: true, waveform: WaveformType.SINE, attack: 0.5, decay: 1.0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.2 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, gain: 0.1 },
+        { spread: 0.7, stereoPanSpeed: 2.0, stereoPanDepth: 0.3, reverbType: 'shimmer', reverbMix: 0.7 }
+    ),
+    p("Echoes", "Keys", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, decay: 0.5 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 702, gain: 0.4 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1900, gain: 0.1, filterCutoff: 1000 },
+        { spread: 0.6, stereoPanSpeed: 0.6, stereoPanDepth: 0.5, reverbType: 'hall', delayMix: 0.6, delayTime: 0.6 }
+    )
+];
+
+const ETHEREAL_MALLETS = [
+    p("Crystal Rain", "Mallets", 
+        { enabled: true, waveform: WaveformType.SINE, decay: 0.5, sustain: 0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, decay: 0.4, gain: 0.4 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, decay: 0.3, gain: 0.2 },
+        { spread: 0.9, stereoPanSpeed: 2.0, stereoPanDepth: 0.6, reverbType: 'hall', delayMix: 0.5, reverbMix: 0.4,
+          modMatrix: [{ id: 'm1', enabled: true, source: 'lfo1', target: 'osc1_pitch', amount: 5 }] }
+    ),
+    p("Spirit Chime", "Mallets", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, decay: 1.5, sustain: 0, filterCutoff: 3000 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 500, decay: 1.0, gain: 0.3 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, decay: 2.0, gain: 0.2 },
+        { spread: 0.7, stereoPanSpeed: 0.5, stereoPanDepth: 0.4, reverbType: 'cathedral', reverbMix: 0.7 }
+    ),
+    p("Alien Kalimba", "Mallets", 
+        { enabled: true, waveform: WaveformType.SQUARE, decay: 0.3, sustain: 0, filterCutoff: 1000 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.5 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.3, decay: 0.2 },
+        { spread: 0.5, stereoPanSpeed: 5.0, stereoPanDepth: 0.3, reverbType: 'plate', delayMix: 0.3 }
+    ),
+    p("Glass Marimba", "Mallets", 
+        { enabled: true, waveform: WaveformType.SINE, decay: 0.4, gain: 0.8 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, decay: 0.3, gain: 0.3 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, decay: 0.2, gain: 0.2 },
+        { spread: 0.6, stereoPanSpeed: 1.0, stereoPanDepth: 0.5, reverbType: 'room', reverbMix: 0.5 }
+    ),
+    p("Spectral Bells", "Mallets", 
+        { enabled: true, waveform: WaveformType.SINE, decay: 3.0, gain: 0.6 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 700, decay: 2.5, gain: 0.4 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 1900, decay: 0.1, gain: 0.15, filterCutoff: 4000, lfoTarget: 'tremolo', lfoRate: 12, lfoDepth: 50 }, 
+        { spread: 0.9, stereoPanSpeed: 0.2, stereoPanDepth: 0.6, reverbType: 'shimmer', reverbMix: 0.85 }
+    ),
+    p("Psychedelic Wood", "Mallets", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, decay: 0.2, sustain: 0 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, decay: 0.1, gain: 0.2 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, decay: 0.3, gain: 0.3, filterCutoff: 500 },
+        { spread: 1.0, stereoPanSpeed: 8.0, stereoPanDepth: 0.6, reverbType: 'hall', delayMix: 0.4 }
+    ),
+    p("Aurora", "Mallets", 
+        { enabled: true, waveform: WaveformType.SINE, attack: 0.1, decay: 1.0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, attack: 0.2, decay: 0.8, gain: 0.5 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1900, attack: 0.5, decay: 1.5, gain: 0.3 },
+        { spread: 0.7, stereoPanSpeed: 0.3, stereoPanDepth: 0.7, reverbType: 'shimmer', reverbMix: 0.6 }
+    ),
+    p("Star Drops", "Mallets", 
+        { enabled: true, waveform: WaveformType.SINE, decay: 0.1, sustain: 0 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, decay: 0.1, gain: 0.3 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 2400, decay: 0.2, gain: 0.2 },
+        { spread: 0.9, stereoPanSpeed: 4.0, stereoPanDepth: 0.5, reverbType: 'plate', delayMix: 0.6, delayTime: 0.2 }
+    )
+];
+
+// Create User Bank with 100 Empty Slots (Increased from 20)
+export const DEFAULT_USER_BANK: SynthPreset[] = Array.from({ length: 100 }).map((_, i) => ({
+    ...generateInitPatch(`User Slot ${i + 1}`, `user-${i}`),
+    category: 'User'
+}));
+
+// Combine all presets into one flat list for the UI
+export const PRESETS: SynthPreset[] = [
+    preservedNoiseWash, // Default
+    preservedDeepOcean,
+    preservedAnalogStrings,
+    ...PLUCKED_PATCHES,
+    ...STRINGS_PATCHES,
+    ...ATMOSPHERE_PATCHES,
+    ...ETHEREAL_PADS,
+    ...ETHEREAL_LEADS,
+    ...ETHEREAL_BASS,
+    ...ETHEREAL_KEYS,
+    ...ETHEREAL_MALLETS
+];
+
+export const DEFAULT_NORMAL_PRESET = preservedAnalogStrings; 
+export const DEFAULT_STRUM_PRESET = PLUCKED_PATCHES[0]; // Celestial Harp
+export const DEFAULT_LATCH_PRESET = preservedNoiseWash; // Noise Wash
+
+// Legacy support if needed
+export const DEFAULT_PRESET = preservedAnalogStrings; 
