@@ -45,15 +45,33 @@ class AudioEngine {
 
   private ensurePresetSafety(p: any): SynthPreset {
      if (!p) return DEFAULT_PRESET;
-     const safe = { ...DEFAULT_PRESET, ...p };
-     safe.osc1 = { ...DEFAULT_PRESET.osc1, ...(p.osc1 || {}) };
-     safe.osc2 = { ...DEFAULT_PRESET.osc2, ...(p.osc2 || {}) };
-     safe.osc3 = { ...DEFAULT_PRESET.osc3, ...(p.osc3 || {}) };
-     safe.modMatrix = p.modMatrix || [];
-     safe.reverbType = p.reverbType || 'hall'; 
-     if (safe.reverbSize === undefined) safe.reverbSize = REVERB_DEFAULTS[safe.reverbType || 'hall'].size;
-     if (safe.reverbDamping === undefined) safe.reverbDamping = REVERB_DEFAULTS[safe.reverbType || 'hall'].damping;
-     if (safe.reverbDiffusion === undefined) safe.reverbDiffusion = REVERB_DEFAULTS[safe.reverbType || 'hall'].diffusion;
+     
+     // 1. Strict Validation of Reverb Type to satisfy TypeScript indexer
+     const validReverbTypes: ReverbType[] = ['room', 'hall', 'cathedral', 'plate', 'shimmer'];
+     let rType: ReverbType = 'hall';
+     
+     // Check if p.reverbType exists and is a valid ReverbType string
+     if (p.reverbType && validReverbTypes.includes(p.reverbType)) {
+         rType = p.reverbType as ReverbType;
+     }
+
+     const safe: SynthPreset = {
+         ...DEFAULT_PRESET,
+         ...p,
+         // Ensure nested objects are merged, not overwritten by partials
+         osc1: { ...DEFAULT_PRESET.osc1, ...(p.osc1 || {}) },
+         osc2: { ...DEFAULT_PRESET.osc2, ...(p.osc2 || {}) },
+         osc3: { ...DEFAULT_PRESET.osc3, ...(p.osc3 || {}) },
+         modMatrix: p.modMatrix || [],
+         reverbType: rType
+     };
+
+     // 2. Apply Defaults using the validated rType
+     const defaults = REVERB_DEFAULTS[rType];
+     if (safe.reverbSize === undefined) safe.reverbSize = defaults.size;
+     if (safe.reverbDamping === undefined) safe.reverbDamping = defaults.damping;
+     if (safe.reverbDiffusion === undefined) safe.reverbDiffusion = defaults.diffusion;
+     
      return safe;
   }
 
