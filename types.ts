@@ -49,9 +49,56 @@ export interface ChordDefinition {
   position: { x: number; y: number }; // Relative position or legacy absolute
 }
 
+export interface ArpeggioStep {
+    nodeId: string;
+    ratio: number;
+    n?: number;
+    d?: number;
+    muted?: boolean;
+    limit?: number; // For quality indication (maxPrime)
+}
+
+export type ArpDirection = 'order' | 'up' | 'down' | 'updown' | 'random';
+export type ArpDivision = '1/1' | '1/2' | '1/4' | '1/8' | '1/16' | '1/32' | '1/4T' | '1/8T' | '1/16T';
+
+export interface ArpConfig {
+    direction: ArpDirection;
+    division: ArpDivision;
+    octaves: number; // 1 to 4
+    gate: number; // 0.1 to 1.0
+    swing: number; // 0 to 100
+    length: number; // 1 to 32 (Pattern Length)
+    probability: number; // 0.0 to 1.0 (Chance to play)
+    humanize: number; // 0 to 100 (ms of jitter)
+}
+
+export interface ArpeggioDefinition {
+    id: string; // "A" - "G"
+    steps: ArpeggioStep[];
+    isPlaying: boolean;
+    config: ArpConfig;
+}
+
 export interface XYPos {
   x: number;
   y: number;
+}
+
+export interface KeyMappings {
+    volumeUp: string;
+    volumeDown: string;
+    spatialScaleUp: string;
+    spatialScaleDown: string;
+    latch: string;
+    panic: string;
+    center: string;
+    settings: string;
+    synth: string;
+    off: string;
+    bend: string;
+    addChord: string;
+    increaseDepth: string;
+    decreaseDepth: string;
 }
 
 export interface AppSettings {
@@ -82,6 +129,10 @@ export interface AppSettings {
   chordShortcutSizeScale: number; // 0.33 to 1.0 relative to main buttons
   chordsAlwaysRelatch: boolean; // If true, activating a chord re-triggers notes even if playing
   
+  // Arpeggios
+  arpeggios: ArpeggioDefinition[];
+  arpBpm: number;
+
   // Visible toggle for lower limits (View only)
   hiddenLimits: number[]; 
   
@@ -154,6 +205,7 @@ export interface AppSettings {
 
   // Behavior
   enableKeyboardShortcuts: boolean;
+  keyMappings: KeyMappings;
   strumDuration: number; // seconds, 0.1 to 2.0
 
   // UI Relocation & Scaling
@@ -172,6 +224,7 @@ export interface AppSettings {
     decreaseDepth: XYPos;
     chords: XYPos;
     layers: XYPos;
+    arpeggioBar: XYPos;
   };
 }
 
@@ -250,15 +303,19 @@ export interface SynthPreset {
   compressorThreshold: number; // dB (-60 to 0)
   compressorRatio: number; // 1 to 20
   compressorRelease: number; // seconds
+
+  // Arp Settings
+  arpConfig?: ArpConfig;
 }
 
 // Slot Types
-export type PlayMode = 'normal' | 'latch' | 'strum';
+export type PlayMode = 'normal' | 'latch' | 'strum' | 'arpeggio';
 
 export interface PresetState {
     normal: SynthPreset;
     latch: SynthPreset;
     strum: SynthPreset;
+    arpeggio: SynthPreset;
 }
 
 export interface StoreState {

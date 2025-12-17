@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect } from 'react';
-import { AppSettings, ButtonShape, ChordDefinition, BackgroundMode, LimitColorMap } from '../types';
+import { AppSettings, ButtonShape, ChordDefinition, BackgroundMode, LimitColorMap, KeyMappings } from '../types';
 import { DEFAULT_COLORS } from '../constants';
 import { midiService, MidiDevice } from '../services/MidiService';
 import { useStore } from '../services/Store'; 
@@ -117,6 +117,9 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   const { exportXML, importXML } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bgImageInputRef = useRef<HTMLInputElement>(null);
+  
+  // Key Binder State
+  const [listeningFor, setListeningFor] = useState<keyof KeyMappings | null>(null);
 
   useEffect(() => {
     if (isOpen && activeTab === 'midi') {
@@ -129,6 +132,34 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
         });
     }
   }, [isOpen, activeTab]);
+
+  // Key Listener Effect
+  useEffect(() => {
+      const handleBinderKeyDown = (e: KeyboardEvent) => {
+          if (!listeningFor) return;
+          e.preventDefault();
+          e.stopPropagation();
+          
+          let key = e.key.toLowerCase();
+          if (key === ' ') key = 'Space'; // Visual nicety for Spacebar
+          
+          updateSettings({
+              ...settings,
+              keyMappings: {
+                  ...settings.keyMappings,
+                  [listeningFor]: key
+              }
+          });
+          setListeningFor(null);
+      };
+
+      if (listeningFor) {
+          window.addEventListener('keydown', handleBinderKeyDown);
+      }
+      return () => {
+          window.removeEventListener('keydown', handleBinderKeyDown);
+      };
+  }, [listeningFor, settings, updateSettings]);
 
   if (!isOpen) return null;
 
@@ -244,7 +275,9 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   };
 
   const handleImportClick = () => {
-      fileInputRef.current?.click();
+      if (window.confirm("Warning: Importing an XML file will overwrite all current settings, user bank patches, and active presets. This action cannot be undone. Continue?")) {
+          fileInputRef.current?.click();
+      }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -274,12 +307,29 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
       if (bgImageInputRef.current) bgImageInputRef.current.value = '';
   };
 
+  const renderKeyBinding = (label: string, actionKey: keyof KeyMappings) => {
+      const isListening = listeningFor === actionKey;
+      const currentKey = settings.keyMappings[actionKey].toUpperCase();
+      
+      return (
+          <div className="flex justify-between items-center bg-slate-800 p-2 rounded border border-slate-700 hover:border-slate-600 transition-colors">
+              <span className="text-sm font-bold text-slate-300">{label}</span>
+              <button 
+                  onClick={() => setListeningFor(actionKey)}
+                  className={`px-3 py-1 text-xs font-mono font-bold rounded min-w-[80px] border transition-all ${isListening ? 'bg-red-900 border-red-500 text-white animate-pulse' : 'bg-slate-700 border-slate-600 text-blue-300 hover:bg-slate-600'}`}
+              >
+                  {isListening ? 'Press Key...' : currentKey}
+              </button>
+          </div>
+      );
+  };
+
   return (
     <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center backdrop-blur-sm">
       <div className="bg-slate-800 rounded-xl w-[95%] max-w-4xl max-h-[90vh] overflow-hidden text-slate-200 shadow-2xl border border-slate-700 flex flex-col">
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-slate-700 bg-slate-800 flex-shrink-0 relative z-10">
-          <h2 className="text-2xl font-bold text-white">Lattice Configuration</h2>
+          <h2 className="text-2xl font-bold text-white">System Settings</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition group" title="Close">
              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -341,7 +391,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
                           <label className="block text-sm font-semibold text-slate-300">Lattice Depth</label>
                           
-                          {/* Safe iteration using optional chaining */}
                           {[3, 5, 7, 11, 13].map(limit => (
                               <div key={limit} className="flex items-center gap-3">
                                   <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
@@ -359,7 +408,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                        <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
                           <label className="block text-sm font-semibold text-slate-300">Lattice Complexity</label>
                           
-                          {/* Safe iteration */}
                           {[3, 5, 7, 11, 13].map(limit => (
                               <div key={`comp-${limit}`} className="flex items-center gap-3">
                                   <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
@@ -468,15 +516,26 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
                   <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50">
                         <h4 className="font-bold text-slate-300 mb-2">Keyboard Shortcuts</h4>
-                        <label className="flex items-center space-x-3 cursor-pointer mb-3">
+                        <label className="flex items-center space-x-3 cursor-pointer mb-4">
                             <input type="checkbox" checked={settings.enableKeyboardShortcuts} onChange={(e) => handleChange('enableKeyboardShortcuts', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
                             <span className="text-sm text-slate-200">Enable Desktop Shortcuts</span>
                         </label>
-                        <div className={`text-[10px] text-slate-400 grid grid-cols-2 gap-x-4 gap-y-1 transition-opacity ${settings.enableKeyboardShortcuts ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                            <div>Volume Up/Down</div>
-                            <div>Reverb Left/Right</div>
-                            <div>Space (Latch)</div>
-                            <div>Esc (Panic)</div>
+                        
+                        <div className={`space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar ${settings.enableKeyboardShortcuts ? 'opacity-100' : 'opacity-40 pointer-events-none grayscale'}`}>
+                            {renderKeyBinding('Latch', 'latch')}
+                            {renderKeyBinding('Panic', 'panic')}
+                            {renderKeyBinding('Volume Up', 'volumeUp')}
+                            {renderKeyBinding('Volume Down', 'volumeDown')}
+                            {renderKeyBinding('Reverb Size Up', 'spatialScaleUp')}
+                            {renderKeyBinding('Reverb Size Down', 'spatialScaleDown')}
+                            {renderKeyBinding('Center View', 'center')}
+                            {renderKeyBinding('Pitch Bend', 'bend')}
+                            {renderKeyBinding('Settings', 'settings')}
+                            {renderKeyBinding('Synth', 'synth')}
+                            {renderKeyBinding('Off', 'off')}
+                            {renderKeyBinding('Add Chord', 'addChord')}
+                            {renderKeyBinding('Depth +', 'increaseDepth')}
+                            {renderKeyBinding('Depth -', 'decreaseDepth')}
                         </div>
                   </div>
                 </div>
@@ -487,13 +546,11 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         <label className="block text-sm font-semibold mb-2">Latched Zoom ({settings.latchedZoomScale.toFixed(1)}x)</label>
                         <input type="range" min="1.0" max="2.0" step="0.1" value={settings.latchedZoomScale} onChange={(e) => handleChange('latchedZoomScale', parseFloat(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
                     </div>
-                    {/* ... Voice Leading Controls ... */}
                     <div>
                         <label className="flex items-center space-x-2 mb-2 p-2 bg-slate-900/50 rounded border border-indigo-500/30">
                             <input type="checkbox" checked={settings.isVoiceLeadingEnabled} onChange={(e) => handleChange('isVoiceLeadingEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500" />
                             <span className="font-semibold text-indigo-300">Voice Leading Lines</span>
                         </label>
-                        {/* Simplified for brevity - assume existing controls here */}
                     </div>
                 </div>
                 

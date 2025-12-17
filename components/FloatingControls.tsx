@@ -1,13 +1,16 @@
 
-import React from 'react';
-import { ChordDefinition, XYPos, AppSettings } from '../types';
-import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
+import React, { useState, useEffect } from 'react';
+import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDirection, ArpDivision, ArpeggioStep } from '../types';
+import { MARGIN_3MM, SCROLLBAR_WIDTH, DEFAULT_COLORS } from '../constants';
 
 interface Props {
   volume: number;
   setVolume: (v: number) => void;
   spatialScale: number;
   setSpatialScale: (v: number) => void;
+  brightness: number;
+  setBrightness: (v: number) => void;
+  
   onPanic: () => void;
   onOff: () => void;
   onLatch: () => void;
@@ -29,29 +32,72 @@ interface Props {
   draggingId: string | null;
   setDraggingId: (id: string | null) => void;
   uiScale?: number;
+
+  // Arp Props
+  arpeggios?: ArpeggioDefinition[];
+  arpBpm?: number;
+  onArpToggle?: (id: string) => void;
+  onArpBpmChange?: (bpm: number) => void;
+  onArpRowConfigChange?: (arpId: string, config: Partial<ArpConfig>) => void;
+  onArpPatternUpdate?: (arpId: string, steps: ArpeggioStep[]) => void;
+  recordingArpId?: string | null; 
+  currentArpStep?: number;
+  recordingFlash?: number; // Timestamp trigger
+  
+  // New Control Handlers
+  onPlayAll?: () => void;
+  onStopAll?: () => void;
 }
 
+// Helper to determine color based on prime limit
+const getMaxPrime = (n: number): number => {
+  let temp = n;
+  while (temp % 2 === 0 && temp > 1) temp /= 2;
+  if (temp === 1) return 1;
+
+  let maxP = 1;
+  let d = 3;
+  while (d * d <= temp) {
+    while (temp % d === 0) {
+      maxP = d;
+      temp /= d;
+    }
+    d += 2;
+  }
+  if (temp > 1) maxP = temp;
+  return maxP;
+};
+
 const FloatingControls: React.FC<Props> = ({ 
-  volume, setVolume, spatialScale, setSpatialScale, 
+  volume, setVolume, spatialScale, setSpatialScale, brightness, setBrightness,
   onPanic, onOff, onLatch, latchMode, onBend, isBendEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
   draggingId, setDraggingId,
-  uiScale = 1.0 
+  uiScale = 1.0,
+  arpeggios = [], arpBpm = 120, onArpToggle, onArpBpmChange, onArpRowConfigChange, onArpPatternUpdate, recordingArpId, currentArpStep, recordingFlash = 0,
+  onPlayAll, onStopAll
 }) => {
   
-  // Generic Drag Handler
+  const [showSequencer, setShowSequencer] = useState(false);
+  const [isFlashingRed, setIsFlashingRed] = useState(false);
+  const [isArpBarHovered, setIsArpBarHovered] = useState(false);
+
+  useEffect(() => {
+      if (recordingFlash > 0) {
+          setIsFlashingRed(true);
+          const t = setTimeout(() => setIsFlashingRed(false), 200);
+          return () => clearTimeout(t);
+      }
+  }, [recordingFlash]);
+
   const handleDrag = (e: React.PointerEvent, key: keyof AppSettings['uiPositions']) => {
     if (!uiUnlocked) return;
-    
-    // Lock mechanism
     if (draggingId !== null && draggingId !== key) return;
 
     const el = e.currentTarget as HTMLElement;
     const startX = e.clientX;
     const startY = e.clientY;
-    
-    // Initial position relative to window
     const initialLeft = uiPositions[key as keyof typeof uiPositions].x;
     const initialTop = uiPositions[key as keyof typeof uiPositions].y;
 
@@ -61,21 +107,14 @@ const FloatingControls: React.FC<Props> = ({
     const onMove = (evt: PointerEvent) => {
         const deltaX = evt.clientX - startX;
         const deltaY = evt.clientY - startY;
-        
-        // Calculate new position
         let newX = initialLeft + deltaX;
         let newY = initialTop + deltaY;
-        
-        // Clamp to window bounds with Margin + Scrollbar safety
-        // offsetWidth handles the scaled size automatically
         const maxX = window.innerWidth - el.offsetWidth - MARGIN_3MM - SCROLLBAR_WIDTH;
         const maxY = window.innerHeight - el.offsetHeight - MARGIN_3MM - SCROLLBAR_WIDTH;
         const minX = MARGIN_3MM;
         const minY = MARGIN_3MM;
-        
         newX = Math.max(minX, Math.min(newX, maxX));
         newY = Math.max(minY, Math.min(newY, maxY));
-        
         updatePosition(key, { x: newX, y: newY });
     };
 
@@ -88,28 +127,24 @@ const FloatingControls: React.FC<Props> = ({
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp); // Robustness: Handle Alt-Tab/Window leave
+    window.addEventListener('pointercancel', onUp);
   };
 
-  // Base size reference for buttons
   const baseSize = 48 * uiScale; 
   const chordSize = baseSize * chordShortcutSizeScale;
   const largeBtnSize = 80 * uiScale;
   
-  // RESTORED ORIGINAL SIZE: 290 and 40
-  const sliderWidth = 290 * uiScale; 
-  const sliderHeight = 40 * uiScale;
-
-  // Common styles for draggable elements
+  // Expanded Width for Audio Stack
+  const stackWidth = 500 * uiScale; 
+  
   const draggableStyle = (key: string) => ({
       left: uiPositions[key as keyof typeof uiPositions].x,
       top: uiPositions[key as keyof typeof uiPositions].y,
-      touchAction: 'none' as React.CSSProperties['touchAction'], // Crucial for smooth drag
+      touchAction: 'none' as React.CSSProperties['touchAction'],
   });
   
-  // Helper to handle button press logic (Drag if unlocked, Action if locked)
   const handleButtonPress = (e: React.PointerEvent, key: keyof AppSettings['uiPositions'], action: () => void) => {
-      e.stopPropagation(); // Stop propagation to canvas
+      e.stopPropagation();
       if (uiUnlocked) {
           handleDrag(e, key);
       } else {
@@ -117,216 +152,391 @@ const FloatingControls: React.FC<Props> = ({
       }
   };
 
-  // Determine Latch Button Style based on Mode
   const getLatchStyle = () => {
       const base = "absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none shadow-lg";
       const unlocked = uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : '';
+      if (latchMode === 1) return `${base} ${unlocked} bg-green-500 text-white border-2 border-green-300 shadow-[0_0_20px_rgba(34,197,94,0.8)]`;
+      else if (latchMode === 2) return `${base} ${unlocked} bg-green-900/60 text-green-400 border-2 border-green-400 ring-4 ring-green-500/30 animate-pulse shadow-[0_0_15px_rgba(34,197,94,0.4)]`;
+      else return `${base} ${unlocked} bg-green-900/40 border-2 border-green-500/50 text-green-500 hover:bg-green-800/60 active:bg-green-600 active:text-white shadow-[0_0_15px_rgba(34,197,94,0.2)]`;
+  };
+
+  // Currently active Arp for highlight logic
+  const isAnyArpPlaying = arpeggios.some(a => a.isPlaying);
+  
+  // BPM Light Logic
+  const getBpmLightClass = () => {
+      if (isFlashingRed) return 'bg-red-500 shadow-[0_0_10px_red]';
+      if (isAnyArpPlaying) {
+          const tick = Math.floor(Date.now() / (30000 / (arpBpm || 120)));
+          return tick % 2 === 0 ? 'bg-green-500 shadow-[0_0_5px_lime]' : 'bg-slate-800';
+      }
+      return 'bg-slate-800';
+  };
+
+  const handleStepClick = (e: React.MouseEvent | React.TouchEvent, arpId: string, stepIndex: number) => {
+      const arp = arpeggios.find(a => a.id === arpId);
+      if (!arp || !onArpPatternUpdate) return;
       
-      if (latchMode === 1) { // LATCH_ALL (Illuminated)
-          return `${base} ${unlocked} bg-green-500 text-white border-2 border-green-300 shadow-[0_0_20px_rgba(34,197,94,0.8)]`;
-      } else if (latchMode === 2) { // SUSTAIN (Halo)
-          return `${base} ${unlocked} bg-green-900/60 text-green-400 border-2 border-green-400 ring-4 ring-green-500/30 animate-pulse shadow-[0_0_15px_rgba(34,197,94,0.4)]`;
-      } else { // OFF
-          return `${base} ${unlocked} bg-green-900/40 border-2 border-green-500/50 text-green-500 hover:bg-green-800/60 active:bg-green-600 active:text-white shadow-[0_0_15px_rgba(34,197,94,0.2)]`;
+      if (stepIndex < arp.steps.length) {
+          const step = arp.steps[stepIndex];
+          const newSteps = [...arp.steps];
+          
+          // Toggle Mute
+          newSteps[stepIndex] = { ...step, muted: !step.muted };
+          onArpPatternUpdate(arpId, newSteps);
+      }
+  };
+
+  const handleStepRightClick = (e: React.MouseEvent, arpId: string, stepIndex: number) => {
+      e.preventDefault();
+      const arp = arpeggios.find(a => a.id === arpId);
+      if (!arp || !onArpPatternUpdate) return;
+      
+      if (stepIndex < arp.steps.length) {
+          const newSteps = [...arp.steps];
+          newSteps.splice(stepIndex, 1);
+          onArpPatternUpdate(arpId, newSteps);
+      }
+  };
+
+  const handleClearPattern = (arpId: string) => {
+      if (onArpPatternUpdate) {
+          onArpPatternUpdate(arpId, []);
       }
   };
 
   return (
     <>
       <style>{`
-        /* Reduced Slider Thumb Size (approx 1/3 smaller than default ~16px) */
-        .prismatonal-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: currentColor;
-            cursor: pointer;
-            border: 2px solid white;
-            box-shadow: 0 0 5px rgba(0,0,0,0.5);
-        }
-        .prismatonal-slider::-moz-range-thumb {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: currentColor;
-            cursor: pointer;
-            border: 2px solid white;
-            box-shadow: 0 0 5px rgba(0,0,0,0.5);
-        }
+        .prismatonal-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
+        .prismatonal-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .no-spinner { -moz-appearance: textfield; }
+        
+        .seq-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+        .seq-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.3); border-radius: 3px; }
+        .seq-scroll::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.6); border-radius: 3px; border: 1px solid rgba(15, 23, 42, 0.3); }
+        .seq-scroll::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.8); }
       `}</style>
 
-      {/* Volume Slider - Green Accent */}
+      {/* Unified Audio Stack Control - Compact Thickness */}
       <div 
-        className={`absolute bg-slate-900/60 p-2 rounded-full flex items-center gap-2 backdrop-blur-md border border-white/10 transition-colors z-[150] ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('volume'), width: sliderWidth, height: sliderHeight }}
+        className={`absolute bg-slate-900/50 rounded-xl flex flex-col p-1.5 gap-0.5 backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('volume'), width: stackWidth }}
         onPointerDown={(e) => handleDrag(e, 'volume')}
       >
-        <span className="font-bold text-slate-300 select-none text-center" style={{ fontSize: 10 * uiScale, width: 60 * uiScale }}>VOLUME</span>
-        <input 
-          type="range" min="0" max="1" step="0.01" 
-          value={volume}
-          onChange={(e) => setVolume(parseFloat(e.target.value))}
-          disabled={uiUnlocked}
-          className={`prismatonal-slider w-full rounded-lg appearance-none text-green-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-          style={{ 
-              height: 4 * uiScale, 
-              background: `linear-gradient(to right, #22c55e 0%, #22c55e ${volume * 100}%, #334155 ${volume * 100}%, #334155 100%)` 
-          }}
-          onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-        />
+        {/* VOLUME ROW */}
+        <div className="flex items-center gap-2 w-full h-5">
+             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={{ fontSize: 10 * uiScale, width: 30 * uiScale }}>Vol</span>
+             <div className="flex-1 min-w-0 flex items-center">
+                <input 
+                    type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} disabled={uiUnlocked}
+                    className={`prismatonal-slider w-full rounded-lg appearance-none text-green-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
+                    style={{ height: 4 * uiScale, background: `linear-gradient(to right, #22c55e 0%, #22c55e ${volume * 100}%, #334155 ${volume * 100}%, #334155 100%)` }}
+                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
+                />
+             </div>
+        </div>
+        {/* REVERB ROW */}
+        <div className="flex items-center gap-2 w-full h-5">
+             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={{ fontSize: 10 * uiScale, width: 30 * uiScale }}>Rev</span>
+             <div className="flex-1 min-w-0 flex items-center">
+                <input 
+                    type="range" min="0" max="2" step="0.01" value={spatialScale} onChange={(e) => setSpatialScale(parseFloat(e.target.value))} disabled={uiUnlocked}
+                    className={`prismatonal-slider w-full rounded-lg appearance-none text-blue-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
+                    style={{ height: 4 * uiScale, background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(spatialScale/2) * 100}%, #334155 ${(spatialScale/2) * 100}%, #334155 100%)` }}
+                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
+                />
+             </div>
+        </div>
+        {/* TONE ROW */}
+        <div className="flex items-center gap-2 w-full h-5">
+             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={{ fontSize: 10 * uiScale, width: 30 * uiScale }}>Ton</span>
+             <div className="flex-1 min-w-0 flex items-center">
+                <input 
+                    type="range" min="0" max="1" step="0.01" value={brightness} onChange={(e) => setBrightness(parseFloat(e.target.value))} disabled={uiUnlocked}
+                    className={`prismatonal-slider w-full rounded-lg appearance-none text-yellow-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
+                    style={{ height: 4 * uiScale, background: `linear-gradient(to right, #eab308 0%, #eab308 ${brightness * 100}%, #334155 ${brightness * 100}%, #334155 100%)` }}
+                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
+                />
+             </div>
+        </div>
       </div>
 
-      {/* Reverb Slider - Blue Accent */}
+
+      {/* ARPEGGIATOR BAR */}
       <div 
-        className={`absolute bg-slate-900/60 p-2 rounded-full flex items-center gap-2 backdrop-blur-md border border-white/10 transition-colors z-[150] ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('space'), width: sliderWidth, height: sliderHeight }}
-        onPointerDown={(e) => handleDrag(e, 'space')}
+        className={`absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl overflow-visible ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('arpeggioBar'), minWidth: 350 * uiScale, padding: 8 * uiScale }}
+        onPointerDown={(e) => handleDrag(e, 'arpeggioBar')}
+        onPointerEnter={() => setIsArpBarHovered(true)}
+        onPointerLeave={() => setIsArpBarHovered(false)}
       >
-        <span className="font-bold text-slate-300 select-none text-center" style={{ fontSize: 10 * uiScale, width: 60 * uiScale }}>REVERB</span>
+        <div className="w-full flex flex-col gap-2">
+             {/* Header */}
+             <div className="grid grid-cols-3 items-center px-1">
+                 <div className="flex justify-start">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ARPEGGIATOR</span>
+                 </div>
+                 <div className="flex justify-center">
+                    <div className={`w-2 h-2 rounded-full transition-colors duration-100 ${getBpmLightClass()}`}></div>
+                 </div>
+                 <div className="flex justify-end items-center gap-1">
+                     <div className="flex items-center gap-px bg-slate-800/50 rounded border border-slate-700/50 overflow-hidden">
+                        <button 
+                            className="px-1.5 py-0.5 hover:bg-slate-700 active:bg-slate-600 text-slate-400 hover:text-white transition-colors border-r border-slate-700/30"
+                            onPointerDown={(e) => { e.stopPropagation(); onArpBpmChange && onArpBpmChange(Math.max(1, (arpBpm || 120) - 1)); }}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </button>
+                        <input 
+                            type="number" 
+                            value={arpBpm} 
+                            onChange={(e) => onArpBpmChange && onArpBpmChange(parseInt(e.target.value))}
+                            className="w-8 bg-transparent text-center text-[10px] font-mono font-bold text-slate-300 focus:outline-none focus:text-white no-spinner"
+                            onPointerDown={(e) => e.stopPropagation()}
+                        />
+                        <button 
+                            className="px-1.5 py-0.5 hover:bg-slate-700 active:bg-slate-600 text-slate-400 hover:text-white transition-colors border-l border-slate-700/30"
+                            onPointerDown={(e) => { e.stopPropagation(); onArpBpmChange && onArpBpmChange(Math.min(300, (arpBpm || 120) + 1)); }}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                        </button>
+                     </div>
+                     <span className="text-[8px] text-slate-500 font-bold ml-1">BPM</span>
+                 </div>
+             </div>
+
+             <div className="flex gap-1 justify-center flex-wrap">
+                 {arpeggios.map(arp => {
+                     const isRecording = recordingArpId === arp.id;
+                     const isPlaying = arp.isPlaying;
+                     const hasData = arp.steps.length > 0;
+                     
+                     let btnClass = "bg-slate-800/80 border-slate-600 text-slate-400";
+                     if (isRecording) btnClass = "bg-red-900/80 border-red-500 text-white animate-pulse shadow-[0_0_10px_red]";
+                     else if (isPlaying) btnClass = "bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_blue]";
+                     else if (hasData) btnClass = "bg-slate-700 border-blue-500/30 text-blue-200";
+
+                     // Animation Logic: If playing and NOT hovered, show a green dot instead of text
+                     const showGreenDot = isPlaying && !isArpBarHovered && !isRecording;
+
+                     return (
+                         <button 
+                            key={arp.id}
+                            className={`rounded-lg flex items-center justify-center font-bold border-2 transition-all hover:scale-105 active:scale-95 ${btnClass}`}
+                            style={{ width: 38 * uiScale, height: 38 * uiScale, fontSize: 14 * uiScale }}
+                            onPointerDown={(e) => { e.stopPropagation(); if(onArpToggle) onArpToggle(arp.id); }}
+                         >
+                             {showGreenDot ? (
+                                 <div className="w-2 h-2 bg-green-400 rounded-full shadow-[0_0_8px_#4ade80]"></div>
+                             ) : (
+                                 arp.id
+                             )}
+                         </button>
+                     );
+                 })}
+             </div>
+        </div>
         
-        <input 
-            type="range" min="0" max="2" step="0.01" 
-            value={spatialScale}
-            onChange={(e) => setSpatialScale(parseFloat(e.target.value))}
-            disabled={uiUnlocked}
-            className={`prismatonal-slider w-full rounded-lg appearance-none text-blue-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-            style={{ 
-                height: 4 * uiScale,
-                background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(spatialScale/2) * 100}%, #334155 ${(spatialScale/2) * 100}%, #334155 100%)`
-            }}
-            onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-        />
+        {/* Dropdown Toggle */}
+        <button 
+            className="w-full h-4 mt-2 bg-slate-800/50 hover:bg-slate-700/50 rounded flex items-center justify-center cursor-pointer transition-colors"
+            onPointerDown={(e) => { e.stopPropagation(); setShowSequencer(!showSequencer); }}
+        >
+             <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 text-slate-400 transition-transform ${showSequencer ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+             </svg>
+        </button>
+        
+        {/* Sequencer Window */}
+        {showSequencer && (
+            <div 
+                className="absolute left-0 top-full mt-2 bg-slate-950/90 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl p-4 z-[160] flex flex-col gap-3"
+                style={{ 
+                    width: '350px', 
+                    height: '320px', 
+                    minWidth: '350px',
+                    minHeight: '200px',
+                    maxWidth: 'calc(100vw - 40px)',
+                    maxHeight: '90vh',
+                    resize: 'both',
+                    overflow: 'hidden' 
+                }}
+                onPointerDown={(e) => e.stopPropagation()} 
+            >
+                <div className="flex justify-between items-center pb-1 border-b border-white/10 flex-shrink-0">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Pattern Matrix</span>
+                    <div className="flex gap-2">
+                        {onPlayAll && (
+                            <button 
+                                className="text-[10px] font-bold bg-green-900/50 hover:bg-green-700 text-green-400 hover:text-white px-2 py-0.5 rounded border border-green-700 transition-colors"
+                                onPointerDown={(e) => { e.stopPropagation(); onPlayAll(); }}
+                            >
+                                PLAY ALL
+                            </button>
+                        )}
+                        {onStopAll && (
+                            <button 
+                                className="text-[10px] font-bold bg-red-900/50 hover:bg-red-700 text-red-400 hover:text-white px-2 py-0.5 rounded border border-red-700 transition-colors"
+                                onPointerDown={(e) => { e.stopPropagation(); onStopAll(); }}
+                            >
+                                STOP ALL
+                            </button>
+                        )}
+                    </div>
+                </div>
+                
+                {/* 2-Axis Matrix View */}
+                <div className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-900/30 rounded-lg border border-slate-800 seq-scroll p-1 min-h-0">
+                    {arpeggios.map((arp) => {
+                        const isPlaying = arp.isPlaying;
+                        const config = arp.config || { direction: 'order', division: '1/8', octaves: 1, gate: 0.8, swing: 0, length: 8 };
+                        const patternLength = config.length;
+                        
+                        const steps = Array.from({ length: patternLength }, (_, i) => {
+                            if (arp.steps.length > i) return arp.steps[i]; 
+                            return null;
+                        });
+
+                        return (
+                            <div key={arp.id} className="flex flex-col mb-2 bg-slate-800/20 rounded border border-white/5 hover:border-white/10 transition-colors">
+                                {/* Top Control Bar */}
+                                <div className="flex items-center gap-2 p-1 border-b border-white/5 bg-slate-800/40 rounded-t">
+                                    <button 
+                                        className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold border ${isPlaying ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-400 hover:text-white'}`}
+                                        onPointerDown={(e) => { e.stopPropagation(); if(onArpToggle) onArpToggle(arp.id); }}
+                                    >
+                                        {arp.id}
+                                    </button>
+                                    
+                                    {/* Length Control */}
+                                    <div className="flex items-center gap-1 bg-slate-900/50 rounded px-1 border border-slate-700/50">
+                                        <span className="text-[8px] font-bold text-slate-500 uppercase">Len</span>
+                                        <button className="text-[10px] text-slate-400 hover:text-white" onPointerDown={(e) => {e.stopPropagation(); onArpRowConfigChange && onArpRowConfigChange(arp.id, {length: Math.max(1, config.length - 1)})}}>-</button>
+                                        <span className="text-[9px] font-mono w-3 text-center text-slate-300">{config.length}</span>
+                                        <button className="text-[10px] text-slate-400 hover:text-white" onPointerDown={(e) => {e.stopPropagation(); onArpRowConfigChange && onArpRowConfigChange(arp.id, {length: Math.min(32, config.length + 1)})}}>+</button>
+                                    </div>
+
+                                    {/* Div Control */}
+                                    <div className="flex items-center gap-1 bg-slate-900/50 rounded px-1 border border-slate-700/50">
+                                        <span className="text-[8px] font-bold text-slate-500 uppercase">Div</span>
+                                        <select 
+                                            value={config.division}
+                                            onChange={(e) => onArpRowConfigChange && onArpRowConfigChange(arp.id, { division: e.target.value as ArpDivision })}
+                                            className="h-4 text-[9px] bg-transparent text-slate-300 font-mono focus:outline-none cursor-pointer"
+                                        >
+                                            {(['1/1', '1/2', '1/4', '1/8', '1/16', '1/32', '1/4T', '1/8T', '1/16T'] as ArpDivision[]).map(div => (
+                                                <option key={div} value={div}>{div}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {/* Gate Control */}
+                                    <div className="flex items-center gap-1 bg-slate-900/50 rounded px-1 border border-slate-700/50">
+                                        <span className="text-[8px] font-bold text-slate-500 uppercase">Gate</span>
+                                        <button className="text-[10px] text-slate-400 hover:text-white" onPointerDown={(e) => {e.stopPropagation(); onArpRowConfigChange && onArpRowConfigChange(arp.id, {gate: Math.max(0.1, config.gate - 0.1)})}}>-</button>
+                                        <span className="text-[9px] font-mono w-5 text-center text-slate-300">{(config.gate*100).toFixed(0)}</span>
+                                        <button className="text-[10px] text-slate-400 hover:text-white" onPointerDown={(e) => {e.stopPropagation(); onArpRowConfigChange && onArpRowConfigChange(arp.id, {gate: Math.min(1.0, config.gate + 0.1)})}}>+</button>
+                                    </div>
+
+                                    <div className="flex-1"></div>
+                                    
+                                    <button
+                                        className="text-[10px] text-slate-600 hover:text-red-400 transition-colors"
+                                        title="Clear Pattern"
+                                        onPointerDown={(e) => { e.stopPropagation(); handleClearPattern && handleClearPattern(arp.id); }}
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                {/* Step Sequence */}
+                                <div className="flex gap-1 overflow-x-auto seq-scroll p-1 items-center h-10 w-full">
+                                    {steps.map((step, idx) => {
+                                        const isCurrent = isPlaying && idx === (currentArpStep || 0) % patternLength;
+                                        const hasData = step !== null;
+                                        const isMuted = step?.muted;
+                                        
+                                        const borderColor = hasData ? 'border-blue-500' : 'border-slate-700';
+                                        const bgColor = isCurrent ? 'bg-slate-600' : (hasData && isMuted ? 'bg-slate-900' : 'bg-slate-800/80');
+                                        const textColor = hasData ? (isMuted ? 'text-slate-600' : 'text-blue-200') : 'text-slate-600';
+                                        
+                                        // Colored Square Node Logic
+                                        const limitN = hasData ? getMaxPrime(step.n || 1) : 1;
+                                        const limitD = hasData ? getMaxPrime(step.d || 1) : 1;
+                                        
+                                        const colorN = DEFAULT_COLORS[limitN as keyof typeof DEFAULT_COLORS] || '#fff';
+                                        const colorD = DEFAULT_COLORS[limitD as keyof typeof DEFAULT_COLORS] || '#fff';
+
+                                        const squareStyle = hasData ? {
+                                            background: `linear-gradient(to bottom right, ${colorN} 50%, ${colorD} 50%)`
+                                        } : {};
+
+                                        return (
+                                            <div 
+                                                key={idx} 
+                                                className={`flex-shrink-0 w-8 h-8 rounded border flex items-center justify-center transition-all m-0.5 cursor-pointer relative overflow-hidden
+                                                    ${!hasData ? bgColor : ''} ${borderColor} ${isCurrent ? 'shadow-lg scale-110 z-10 border-white' : ''} 
+                                                    ${hasData ? 'hover:border-white' : ''}
+                                                `}
+                                                style={squareStyle}
+                                                title={hasData ? `Ratio: ${step?.n}/${step?.d} (Left: Toggle Mute, Right: Delete)` : `Step ${idx+1}`}
+                                                onPointerDown={(e) => e.stopPropagation()} 
+                                                onClick={(e) => hasData && handleStepClick(e, arp.id, idx)}
+                                                onContextMenu={(e) => hasData && handleStepRightClick(e, arp.id, idx)}
+                                            >
+                                                {hasData ? (
+                                                    <div className={`w-full h-full relative ${isMuted ? 'opacity-30 grayscale' : ''}`}>
+                                                        <span className="absolute top-0.5 left-1 text-[9px] font-bold text-white leading-none drop-shadow-md">
+                                                            {step?.n}
+                                                        </span>
+                                                        <span className="absolute bottom-0.5 right-1 text-[9px] font-bold text-white leading-none drop-shadow-md">
+                                                            {step?.d}
+                                                        </span>
+                                                    </div>
+                                                ) : (
+                                                    <span className={`text-[10px] font-mono ${textColor} select-none`}>{idx+1}</span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <div className="flex justify-between items-end relative mt-1 flex-shrink-0">
+                     {recordingArpId && (
+                         <span className="text-[10px] text-red-400 animate-pulse">Recording to {recordingArpId}...</span>
+                     )}
+                     <div className="absolute bottom-0 right-0 pointer-events-none text-slate-600 opacity-50">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M22 22H12l10-10v10z"/></svg>
+                     </div>
+                </div>
+            </div>
+        )}
       </div>
 
-      {/* Bend Button */}
-      <button
-        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${
-            isBendEnabled 
-            ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' 
-            : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'
-        } ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('bend'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }}
-        onPointerDown={(e) => handleButtonPress(e, 'bend', onBend)}
-      >
-        BEND
-      </button>
+      <button className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isBendEnabled ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('bend'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'bend', onBend)}>BEND</button>
+      <button className={getLatchStyle()} style={{ ...draggableStyle('latch'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'latch', onLatch)}>LATCH</button>
+      <button className={`absolute rounded-full bg-yellow-900/40 border-2 border-yellow-500/50 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-yellow-800/60 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('off'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'off', onOff)}>OFF</button>
+      <button className={`absolute rounded-full bg-red-900/40 border-2 border-red-500/50 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-800/60 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('panic'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)}>PANIC</button>
 
-      {/* Latch Button */}
-      <button
-        className={getLatchStyle()}
-        style={{ ...draggableStyle('latch'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }}
-        onPointerDown={(e) => handleButtonPress(e, 'latch', onLatch)}
-      >
-        LATCH
-      </button>
+      <button className={`absolute rounded bg-yellow-600/20 border-2 border-yellow-500 flex items-center justify-center text-yellow-500 font-bold backdrop-blur hover:bg-yellow-600/40 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('center'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'center', onCenter)} title="Center Display"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg></button>
 
-      {/* Off Button */}
-      <button
-        className={`absolute rounded-full bg-yellow-900/40 border-2 border-yellow-500/50 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-yellow-800/60 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('off'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }}
-        onPointerDown={(e) => handleButtonPress(e, 'off', onOff)}
-      >
-        OFF
-      </button>
+      {showIncreaseDepthButton && (<button className={`absolute rounded bg-blue-600/20 border-2 border-blue-500 flex items-center justify-center text-blue-500 font-bold backdrop-blur hover:bg-blue-600/40 active:bg-blue-600 active:text-white transition-all shadow-[0_0_15px_rgba(59,130,246,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('depth'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'depth', onIncreaseDepth)} title="Increase Depth from Selection"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" fill="none" /></svg></button>)}
 
-      {/* Panic Button */}
-      <button
-        className={`absolute rounded-full bg-red-900/40 border-2 border-red-500/50 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-800/60 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('panic'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }}
-        onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)}
-      >
-        PANIC
-      </button>
+      {showIncreaseDepthButton && (<button className={`absolute rounded bg-green-600/20 border-2 border-green-500 flex items-center justify-center text-green-500 font-bold backdrop-blur hover:bg-green-600/40 active:bg-green-600 active:text-white transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('decreaseDepth'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'decreaseDepth', onDecreaseDepth)} title="Undo Last Depth Increase"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4 L10 10 M10 10 L10 6 M10 10 L6 10" /><path strokeLinecap="round" strokeLinejoin="round" d="M20 4 L14 10 M14 10 L14 6 M14 10 L18 10" /><path strokeLinecap="round" strokeLinejoin="round" d="M4 20 L10 14 M10 14 L10 18 M10 14 L6 14" /><path strokeLinecap="round" strokeLinejoin="round" d="M20 20 L14 14 M14 14 L14 18 M14 14 L18 14" /></svg></button>)}
 
-      {/* Center View Button */}
-      <button
-        className={`absolute rounded bg-yellow-600/20 border-2 border-yellow-500 flex items-center justify-center text-yellow-500 font-bold backdrop-blur hover:bg-yellow-600/40 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('center'), width: baseSize, height: baseSize }}
-        onPointerDown={(e) => handleButtonPress(e, 'center', onCenter)}
-        title="Center Display"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-        </svg>
-      </button>
-
-      {/* Increase Depth Button */}
-      {showIncreaseDepthButton && (
-        <button
-          className={`absolute rounded bg-blue-600/20 border-2 border-blue-500 flex items-center justify-center text-blue-500 font-bold backdrop-blur hover:bg-blue-600/40 active:bg-blue-600 active:text-white transition-all shadow-[0_0_15px_rgba(59,130,246,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-          style={{ ...draggableStyle('depth'), width: baseSize, height: baseSize }}
-          onPointerDown={(e) => handleButtonPress(e, 'depth', onIncreaseDepth)}
-          title="Increase Depth from Selection"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
-            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" fill="none" />
-          </svg>
-        </button>
-      )}
-
-      {/* Decrease Depth Button */}
-      {showIncreaseDepthButton && (
-        <button
-          className={`absolute rounded bg-green-600/20 border-2 border-green-500 flex items-center justify-center text-green-500 font-bold backdrop-blur hover:bg-green-600/40 active:bg-green-600 active:text-white transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-          style={{ ...draggableStyle('decreaseDepth'), width: baseSize, height: baseSize }}
-          onPointerDown={(e) => handleButtonPress(e, 'decreaseDepth', onDecreaseDepth)}
-          title="Undo Last Depth Increase"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4 L10 10 M10 10 L10 6 M10 10 L6 10" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M20 4 L14 10 M14 10 L14 6 M14 10 L18 10" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 20 L10 14 M10 14 L10 18 M10 14 L6 14" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M20 20 L14 14 M14 14 L14 18 M14 14 L18 14" />
-          </svg>
-        </button>
-      )}
-
-      {/* Chords Group - Wrapped in draggable container */}
-      <div
-         className={`absolute flex gap-2 flex-wrap items-start z-[150] ${uiUnlocked ? 'cursor-move bg-white/5 rounded p-2 border border-yellow-500/30' : ''}`}
-         style={{ ...draggableStyle('chords'), maxWidth: '80vw' }}
-         onPointerDown={(e) => handleDrag(e, 'chords')}
-      >
-          {/* Add Chord Button */}
-          <button
-            className={`rounded border-2 border-slate-500 border-dashed flex items-center justify-center text-slate-500 font-bold backdrop-blur hover:bg-slate-700/40 hover:text-white hover:border-white transition-all select-none ${uiUnlocked ? 'pointer-events-none' : ''}`}
-            style={{ width: chordSize, height: chordSize }}
-            onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-            onClick={!uiUnlocked ? onAddChord : undefined}
-            title="Store currently latched notes as a Chord"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-1/2 h-1/2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-          </button>
-
-          {/* Saved Chords */}
+      <div className={`absolute flex gap-2 flex-wrap items-start z-[150] ${uiUnlocked ? 'cursor-move bg-white/5 rounded p-2 border border-yellow-500/30' : ''}`} style={{ ...draggableStyle('chords'), maxWidth: '80vw' }} onPointerDown={(e) => handleDrag(e, 'chords')}>
+          <button className={`rounded border-2 border-slate-500 border-dashed flex items-center justify-center text-slate-500 font-bold backdrop-blur hover:bg-slate-700/40 hover:text-white hover:border-white transition-all select-none ${uiUnlocked ? 'pointer-events-none' : ''}`} style={{ width: chordSize, height: chordSize }} onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} onClick={!uiUnlocked ? onAddChord : undefined} title="Store currently latched notes as a Chord"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-1/2 h-1/2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
           {savedChords.filter(c => c.visible).map((chord) => {
               const isActive = activeChordIds.includes(chord.id);
-              return (
-                <button
-                    key={chord.id}
-                    className={`rounded flex items-center justify-center font-bold backdrop-blur transition-all shadow-lg select-none ${uiUnlocked ? 'pointer-events-none' : ''}`}
-                    style={{
-                        width: chordSize,
-                        height: chordSize,
-                        fontSize: 12 * uiScale,
-                        backgroundColor: isActive ? chord.color : `${chord.color}33`, 
-                        borderColor: chord.color,
-                        borderWidth: 2,
-                        color: isActive ? '#fff' : chord.color,
-                        boxShadow: isActive ? `0 0 10px ${chord.color}` : 'none'
-                    }}
-                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()}
-                    onClick={() => !uiUnlocked && toggleChord(chord.id)}
-                    title={`Chord ${chord.id}: ${chord.label}`}
-                >
-                    {chord.id}
-                </button>
-              );
+              return (<button key={chord.id} className={`rounded flex items-center justify-center font-bold backdrop-blur transition-all shadow-lg select-none ${uiUnlocked ? 'pointer-events-none' : ''}`} style={{ width: chordSize, height: chordSize, fontSize: 12 * uiScale, backgroundColor: isActive ? chord.color : `${chord.color}33`, borderColor: chord.color, borderWidth: 2, color: isActive ? '#fff' : chord.color, boxShadow: isActive ? `0 0 10px ${chord.color}` : 'none' }} onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} onClick={() => !uiUnlocked && toggleChord(chord.id)} title={`Chord ${chord.id}: ${chord.label}`}>{chord.id}</button>);
           })}
       </div>
     </>

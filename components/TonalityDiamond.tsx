@@ -22,42 +22,38 @@ interface Props {
   activeChordIds: string[];
   uiUnlocked: boolean;
   latchMode: 0 | 1 | 2; // 0=Off, 1=LatchAll, 2=Sustain
-  globalScale?: number; // Adaptive scaling factor
+  globalScale?: number; 
+  onNodeTrigger?: (nodeId: string, ratio: number, n?: number, d?: number, limit?: number) => void; // Added limit
 }
 
 interface ActiveCursor {
   pointerId: number;
   currentX: number;
   currentY: number;
-  originNodeId: string | null; // ID if started on a node (Held), Null if started on background (Strum)
-  hoverNodeId: string | null;  // Current node under pointer
+  originNodeId: string | null; 
+  hoverNodeId: string | null;
 }
 
-// Spatial Grid Constants (Unscaled base size)
 const GRID_CELL_SIZE = 100; 
 
 const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) => {
-  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, globalScale = 1.0 } = props;
+  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, globalScale = 1.0, onNodeTrigger } = props;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
-  // Triple Canvas Strategy for correct layering
   const bgLineCanvasRef = useRef<HTMLCanvasElement>(null);
   const staticCanvasRef = useRef<HTMLCanvasElement>(null); 
   const dynamicCanvasRef = useRef<HTMLCanvasElement>(null); 
   
   const animationFrameRef = useRef<number>(0);
   
-  // Data State
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   
-  // Auto-calculated Dimensions
   const [dynamicSize, setDynamicSize] = useState(2000);
   const prevDynamicSizeRef = useRef(2000);
 
-  // Optimization: Memoized Lookups & Spatial Grid
   const nodeMap = useMemo(() => {
       return new Map(data.nodes.map(n => [n.id, n]));
   }, [data.nodes]);
@@ -65,35 +61,25 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const spatialGrid = useMemo(() => {
       const grid = new Map<string, LatticeNode[]>();
       const centerOffset = dynamicSize / 2;
-      
-      // EFFECTIVE SPACING determines grid placement
       const spacing = settings.buttonSpacingScale * globalScale;
 
       data.nodes.forEach(node => {
           const x = node.x * spacing + centerOffset;
           const y = node.y * spacing + centerOffset;
-          
           const col = Math.floor(x / GRID_CELL_SIZE);
           const row = Math.floor(y / GRID_CELL_SIZE);
           const key = `${col},${row}`;
-          
           if (!grid.has(key)) grid.set(key, []);
           grid.get(key)!.push(node);
       });
       return grid;
   }, [data.nodes, settings.buttonSpacingScale, dynamicSize, globalScale]);
 
-  // Interaction State
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [persistentLatches, setPersistentLatches] = useState<Map<string, string>>(new Map());
 
-  // --- 1. Audio Latched Nodes (Persistent Only) ---
-  // These drive the 'latch' voices via useEffect. 
-  // Strictly excludes cursors to prevent double-triggering.
   const audioLatchedNodes = useMemo(() => {
       const effective = new Map<string, string>(persistentLatches);
-      
-      // Add Chords
       activeChordIds.forEach(chordId => {
         const chordDef = settings.savedChords.find(c => c.id === chordId);
         if (chordDef) {
@@ -102,36 +88,25 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             });
         }
       });
-
       return effective;
   }, [persistentLatches, activeChordIds, settings.savedChords]);
 
-  // --- 2. Visual Latched Nodes (All Active) ---
-  // These drive the visual rendering (highlighting).
-  // Includes Audio Latches + Active Cursors (Held/Strummed).
   const visualLatchedNodes = useMemo(() => {
       const visual = new Map(audioLatchedNodes);
-      
       activeCursors.forEach(cursor => {
           if (cursor.hoverNodeId) {
               visual.set(cursor.hoverNodeId, cursor.hoverNodeId);
           }
       });
-
       return visual;
   }, [audioLatchedNodes, activeCursors]);
 
-  // --- ACTIVE LINES LOGIC (Visuals) ---
   const activeLines = useMemo(() => {
-    // Use visual set for rendering lines
     const latched = visualLatchedNodes;
     const lines = data.lines;
     const active: LatticeLine[] = [];
     const reach = settings.voiceLeadingSteps || 1;
     
-    // Stability check using visual set is sufficient
-    const isStable = (id: string) => latched.has(id);
-
     if (latched.size < 2) return [];
 
     if (reach === 1) {
@@ -145,12 +120,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     } 
     else if (reach === 2) {
         const activeNodes = Array.from(latched.keys()).map(id => nodeMap.get(id)).filter(n => n) as LatticeNode[];
-        
         for (let i=0; i<activeNodes.length; i++) {
             for (let j=i+1; j<activeNodes.length; j++) {
                 const A = activeNodes[i];
                 const B = activeNodes[j];
-                
                 let dist = 0;
                 for (let k=0; k < A.coords.length; k++) {
                     dist += Math.abs(A.coords[k] - B.coords[k]);
@@ -170,14 +143,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             }
         }
     }
-
     return active;
   }, [data.lines, visualLatchedNodes, settings.voiceLeadingSteps, nodeMap]);
   
-  // --- LINE BRIGHTENING LOGIC ---
   const brightenedLines = useMemo(() => {
       if (!settings.lineBrighteningEnabled || visualLatchedNodes.size === 0) return [];
-
       const activeIds = new Set(visualLatchedNodes.keys());
       const resultLines = new Set<LatticeLine>();
       const step1Neighbors = new Set<string>();
@@ -185,7 +155,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       data.lines.forEach(line => {
           const sActive = activeIds.has(line.sourceId);
           const tActive = activeIds.has(line.targetId);
-          
           if (sActive || tActive) {
               resultLines.add(line);
               if (sActive) step1Neighbors.add(line.targetId);
@@ -203,11 +172,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               }
           });
       }
-
       return Array.from(resultLines);
   }, [visualLatchedNodes, data.lines, settings.lineBrighteningEnabled, settings.lineBrighteningSteps]);
 
-  // Refs for Render Loop
   const settingsRef = useRef(settings);
   const dataRef = useRef(data);
   const activeCursorsRef = useRef<Map<number, ActiveCursor>>(activeCursors);
@@ -221,7 +188,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
 
-  // Sync Refs
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { activeCursorsRef.current = activeCursors; }, [activeCursors]);
@@ -233,12 +199,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
   useEffect(() => { globalScaleRef.current = globalScale; }, [globalScale]);
   
-  // Interaction State
   const lastTouchedLimitRef = useRef<number | null>(null);
   const depthHistoryRef = useRef<number[]>([]);
   const prevActiveChordIds = useRef<string[]>([]);
 
-  // Window Blur Safety
   useEffect(() => {
       const handleBlur = () => {
           if (activeCursorsRef.current.size > 0) {
@@ -252,7 +216,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       return () => window.removeEventListener('blur', handleBlur);
   }, []);
 
-  // --- External API ---
   useImperativeHandle(ref, () => ({
     clearLatches: () => setPersistentLatches(new Map()),
     centerView: () => { centerScroll(); },
@@ -314,7 +277,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     prevDynamicSizeRef.current = dynamicSize;
   }, [dynamicSize, isInitialLoad]);
 
-  // --- Data Generation ---
   const generationDeps = useMemo(() => {
       return JSON.stringify({
           depths: settings.limitDepths,
@@ -355,7 +317,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const calculatedSize = (maxExtent * spacing * 2) + padding;
         const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
 
-        // Cap size to prevent OOM on mobile - STRICT CAP 2500 for safety
         const MAX_CANVAS_SIZE = 2500;
         const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
 
@@ -389,7 +350,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   }, [settings.buttonSpacingScale, globalScale]);
 
 
-  // --- STATIC CANVAS RENDERER ---
   const visualDeps = useMemo(() => JSON.stringify({
       size: settings.buttonSizeScale,
       spacing: settings.buttonSpacingScale,
@@ -434,7 +394,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
 
       ctx.lineCap = 'round';
-      // STATIC LINES (Passive)
       for (const limitStr in linesByLimit) {
           const limit = parseInt(limitStr);
           const coords = linesByLimit[limit];
@@ -456,7 +415,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
       ctx.setLineDash([]); 
 
-      // STATIC NODES (Passive, Base Layer)
       for (const node of data.nodes) {
           const x = node.x * spacing + centerOffset;
           const y = node.y * spacing + centerOffset;
@@ -509,13 +467,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
   }, [data, visualDeps]); 
 
-
-  // --- Logic: Latches & Audio Sync ---
-  
-  // NOTE: Logic updated to separate 'audioLatchedNodes' (Persistent/Effect-Driven) from cursor interactions.
-  // The useEffect below handles ONLY the persistent/chord 'latch' voices.
-  // Normal and Strum voices are triggered directly in handlers.
-
   useEffect(() => {
     if (settings.chordsAlwaysRelatch) {
          const newChords = activeChordIds.filter(id => !prevActiveChordIds.current.includes(id));
@@ -548,7 +499,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           if (!prev.has(nodeId)) {
                const node = nodes.get(nodeId); 
                if (node) {
-                   // Only trigger if tracked by audioLatchedNodes (Effect driven)
                    audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency, 'latch');
                    if (settings.midiEnabled) midiService.noteOn(`node-${nodeId}`, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                }
@@ -568,7 +518,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     audioEngine.setPolyphony(settings.polyphony);
   }, [settings.polyphony]);
 
-  // Helper for Hit Testing
   const getHitNode = (clientX: number, clientY: number): LatticeNode | null => {
       if (!dynamicCanvasRef.current) return null;
       const rect = dynamicCanvasRef.current.getBoundingClientRect();
@@ -611,7 +560,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       return null;
   };
 
-  // --- Interaction Handlers ---
   const handlePointerDown = (e: React.PointerEvent) => {
       if (audioEngine) audioEngine.resume();
 
@@ -641,11 +589,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
         lastTouchedLimitRef.current = hitNode.maxPrime;
 
+        // Callback for Arp Recording - Updated to pass n and d and limit
+        if (onNodeTrigger) {
+            onNodeTrigger(hitNode.id, hitNode.ratio, hitNode.n, hitNode.d, hitNode.maxPrime);
+        }
+
         const isPersistentlyLatched = persistentLatches.has(hitNode.id);
         const isAudioLatched = audioLatchedNodes.has(hitNode.id);
 
         if (latchMode === 1) {
-             // LATCH MODE 1: Toggle on hit
              setPersistentLatches(prev => {
                  const next = new Map(prev);
                  if (isPersistentlyLatched) next.delete(hitNode.id);
@@ -653,19 +605,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                  return next;
              });
         }
-        // OTHERWISE (Mode 0/2)
         else {
             if (isPersistentlyLatched) {
-                // ALLOW DE-LATCH: Pressing a persistently latched node turns it off
                 setPersistentLatches(prev => {
                     const next = new Map(prev);
                     next.delete(hitNode.id);
                     return next;
                 });
             } else if (!isAudioLatched) {
-                // Not latched (Persistent or Chord) -> Normal voice (Direct touch)
-                audioEngine.startVoice(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency, 'normal');
-                if (settings.midiEnabled) midiService.noteOn(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
+                // FIXED: Pop prevention using unique ID per interaction
+                const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
+                audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, 'normal');
+                if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
             }
         }
       }
@@ -681,8 +632,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     const hitNode = getHitNode(e.clientX, e.clientY);
     const hitId = hitNode ? hitNode.id : null;
 
-    // --- 1. PITCH BEND LOGIC ---
-    // Explicitly disabled in Full Latch (Mode 1)
     if (cursor.originNodeId && settings.isPitchBendEnabled && latchMode !== 1 && scrollContainerRef.current) {
          const centerOffset = dynamicSizeRef.current / 2;
          const rect = scrollContainerRef.current.getBoundingClientRect();
@@ -694,21 +643,24 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              const bentRatio = getPitchRatioFromScreenDelta(deltaY, settings.buttonSpacingScale * globalScaleRef.current);
              const finalRatio = originNode.ratio * bentRatio;
              
-             audioEngine.glideVoice(`cursor-${e.pointerId}`, finalRatio, settings.baseFrequency);
-             if (settings.midiEnabled) midiService.pitchBend(`cursor-${e.pointerId}`, finalRatio, settings.baseFrequency, settings.midiPitchBendRange);
+             const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
+             audioEngine.glideVoice(voiceId, finalRatio, settings.baseFrequency);
+             if (settings.midiEnabled) midiService.pitchBend(voiceId, finalRatio, settings.baseFrequency, settings.midiPitchBendRange);
          }
     }
 
-    // --- 2. STRUM / LATCH LOGIC ---
-    // Triggers when entering a NEW node
     if (cursor.hoverNodeId !== hitId) {
+        if (latchMode === 0 && cursor.hoverNodeId) {
+             const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+             audioEngine.stopVoice(oldVoiceId);
+             if (settings.midiEnabled) midiService.noteOff(oldVoiceId);
+        }
+
         if (hitNode) {
              const topLayer = settingsRef.current.layerOrder[settingsRef.current.layerOrder.length - 1];
              if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
              
-             // LATCH PAINT (Mode 1)
              if (latchMode === 1) {
-                // TOGGLE ON ENTER
                 const isAlreadyLatched = persistentLatches.has(hitNode.id);
                 setPersistentLatches(prev => {
                     const next = new Map(prev);
@@ -717,14 +669,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     return next;
                 });
              } 
-             // STRUM TRIGGER (Mode 0/2)
              else {
                  const isAlreadyLatched = audioLatchedNodes.has(hitNode.id);
                  const isBending = settingsRef.current.isPitchBendEnabled && cursor.originNodeId;
                  
                  if (!isAlreadyLatched && !isBending) {
-                     audioEngine.startVoice(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency, 'strum');
-                     if (settings.midiEnabled) midiService.noteOn(`cursor-${e.pointerId}`, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
+                     const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
+                     audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, 'strum');
+                     if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                  }
              }
         }
@@ -745,15 +697,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     if (activeCursorsRef.current.has(e.pointerId)) {
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
         
-        // Stop cursor voice if it was active
         if (cursor.originNodeId) {
-            // Logic for stopping voices:
-            // If Latch Mode 1, voices are handled by persistent map, so cursor release does nothing to audio.
-            // If Latch Mode 0/2, we stop the direct touch voice.
             if (latchMode !== 1) {
-                audioEngine.stopVoice(`cursor-${e.pointerId}`);
-                if (settings.midiEnabled) midiService.noteOff(`cursor-${e.pointerId}`);
+                const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
+                audioEngine.stopVoice(voiceId);
+                if (settings.midiEnabled) midiService.noteOff(voiceId);
             }
+        } 
+        else if (cursor.hoverNodeId && cursor.hoverNodeId !== cursor.originNodeId && latchMode === 0) {
+             const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+             audioEngine.stopVoice(voiceId);
+             if (settings.midiEnabled) midiService.noteOff(voiceId);
         }
         
         cursorPositionsRef.current.delete(e.pointerId);
@@ -765,84 +719,77 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     }
   };
 
-  // ... rest of the file (Animation Loop, Background, Render) ...
-  // [No changes below this point, keep existing render loop and return]
-  
-  // --- Animation Loop ---
-  useEffect(() => {
-    const bgCanvas = bgLineCanvasRef.current;
-    const activeCanvas = dynamicCanvasRef.current;
-    
-    if (!bgCanvas || !activeCanvas) return;
-    
-    const bgCtx = bgCanvas.getContext('2d', { alpha: true });
-    const activeCtx = activeCanvas.getContext('2d', { alpha: true });
-    
-    if (!bgCtx || !activeCtx) return;
+  const render = (time: number) => {
+      const bgCanvas = bgLineCanvasRef.current;
+      const activeCanvas = dynamicCanvasRef.current;
+      if (!bgCanvas || !activeCanvas) {
+           animationFrameRef.current = requestAnimationFrame(render);
+           return;
+      }
+      
+      const bgCtx = bgCanvas.getContext('2d', { alpha: true });
+      const activeCtx = activeCanvas.getContext('2d', { alpha: true });
+      if (!bgCtx || !activeCtx) return; 
+      
+      const currentSettings = settingsRef.current;
+      const currentVisualLatched = visualLatchedRef.current; 
+      const currentActiveLines = activeLinesRef.current;
+      const currentBrightenedLines = brightenedLinesRef.current;
+      const size = dynamicSizeRef.current;
+      const cursors = activeCursorsRef.current;
+      const currentGlobalScale = globalScaleRef.current;
+      
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
 
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
-
-    const render = (time: number) => {
-        const currentSettings = settingsRef.current;
-        const currentVisualLatched = visualLatchedRef.current; // Use VISUAL set for rendering
-        const currentActiveLines = activeLinesRef.current;
-        const currentBrightenedLines = brightenedLinesRef.current;
-        const size = dynamicSizeRef.current;
-        const cursors = activeCursorsRef.current;
-        const currentGlobalScale = globalScaleRef.current;
-        
-        if (bgCanvas.width !== size * dpr || bgCanvas.height !== size * dpr) {
+      if (bgCanvas.width !== size * dpr || bgCanvas.height !== size * dpr) {
             bgCanvas.width = size * dpr;
             bgCanvas.height = size * dpr;
             activeCanvas.width = size * dpr;
             activeCanvas.height = size * dpr;
             bgCtx.scale(dpr, dpr);
             activeCtx.scale(dpr, dpr);
-        }
+      }
 
-        let viewX = 0, viewY = 0, viewW = size, viewH = size;
-        if (scrollContainerRef.current) {
-            viewX = scrollContainerRef.current.scrollLeft;
-            viewY = scrollContainerRef.current.scrollTop;
-            viewW = scrollContainerRef.current.clientWidth;
-            viewH = scrollContainerRef.current.clientHeight;
-        }
-        
-        bgCtx.clearRect(viewX, viewY, viewW, viewH);
-        activeCtx.clearRect(viewX, viewY, viewW, viewH);
+      let viewX = 0, viewY = 0, viewW = size, viewH = size;
+      if (scrollContainerRef.current) {
+          viewX = scrollContainerRef.current.scrollLeft;
+          viewY = scrollContainerRef.current.scrollTop;
+          viewW = scrollContainerRef.current.clientWidth;
+          viewH = scrollContainerRef.current.clientHeight;
+      }
+      
+      bgCtx.clearRect(viewX, viewY, viewW, viewH);
+      activeCtx.clearRect(viewX, viewY, viewW, viewH);
 
-        const centerOffset = size / 2;
-        const spacing = currentSettings.buttonSpacingScale * currentGlobalScale;
-        const baseRadius = (60 * currentSettings.buttonSizeScale * currentGlobalScale) / 2;
-        const isDiamond = currentSettings.buttonShape === ButtonShape.DIAMOND;
-        const colorCache = currentSettings.colors;
+      const centerOffset = size / 2;
+      const spacing = currentSettings.buttonSpacingScale * currentGlobalScale;
+      const baseRadius = (60 * currentSettings.buttonSizeScale * currentGlobalScale) / 2;
+      const isDiamond = currentSettings.buttonShape === ButtonShape.DIAMOND;
+      const colorCache = currentSettings.colors;
 
-        const animationSpeed = (currentSettings.voiceLeadingAnimationSpeed || 2.0) * 0.33;
-        const rawPhase = (time * 0.001 * animationSpeed);
-        const flowPhase = currentSettings.voiceLeadingReverseDir ? (1.0 - (rawPhase % 1.0)) : (rawPhase % 1.0);
-        
-        bgCtx.lineCap = 'round';
-        activeCtx.lineCap = 'round';
+      const animationSpeed = (currentSettings.voiceLeadingAnimationSpeed || 2.0) * 0.33;
+      const rawPhase = (time * 0.001 * animationSpeed);
+      const flowPhase = currentSettings.voiceLeadingReverseDir ? (1.0 - (rawPhase % 1.0)) : (rawPhase % 1.0);
+      
+      bgCtx.lineCap = 'round';
+      activeCtx.lineCap = 'round';
 
-        const viewPad = 100;
-        const leftBound = viewX - viewPad;
-        const rightBound = viewX + viewW + viewPad;
-        const topBound = viewY - viewPad;
-        const bottomBound = viewY + viewH + viewPad;
-        
-        if (currentBrightenedLines.length > 0) {
+      const viewPad = 100;
+      const leftBound = viewX - viewPad;
+      const rightBound = viewX + viewW + viewPad;
+      const topBound = viewY - viewPad;
+      const bottomBound = viewY + viewH + viewPad;
+      
+      if (currentBrightenedLines.length > 0) {
             bgCtx.setLineDash([]);
             for (const line of currentBrightenedLines) {
                 const x1 = line.x1 * spacing + centerOffset;
                 const y1 = line.y1 * spacing + centerOffset;
                 const x2 = line.x2 * spacing + centerOffset;
                 const y2 = line.y2 * spacing + centerOffset;
-                
                 if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
-
                 const limitColor = colorCache[line.limit] || '#666';
-
                 bgCtx.beginPath();
                 bgCtx.moveTo(x1, y1);
                 bgCtx.lineTo(x2, y2);
@@ -851,19 +798,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 bgCtx.globalAlpha = 0.8; 
                 bgCtx.stroke();
             }
-        }
+      }
 
-        bgCtx.setLineDash([]); 
-        for (const line of currentActiveLines) {
+      bgCtx.setLineDash([]); 
+      for (const line of currentActiveLines) {
             const x1 = line.x1 * spacing + centerOffset;
             const y1 = line.y1 * spacing + centerOffset;
             const x2 = line.x2 * spacing + centerOffset;
             const y2 = line.y2 * spacing + centerOffset;
-            
             if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
-
             const limitColor = colorCache[line.limit] || '#666';
-
             bgCtx.beginPath();
             bgCtx.moveTo(x1, y1);
             bgCtx.lineTo(x2, y2);
@@ -871,11 +815,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             bgCtx.strokeStyle = limitColor;
             bgCtx.globalAlpha = 1.0;
             bgCtx.stroke();
-
             if (currentSettings.isVoiceLeadingAnimationEnabled) {
                 const grad = bgCtx.createLinearGradient(x1, y1, x2, y2);
                 const p = flowPhase;
-                
                 grad.addColorStop(0, 'rgba(255,255,255,0)');
                 const pulseWidth = 0.2;
                 const start = Math.max(0, p - pulseWidth);
@@ -884,36 +826,28 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 grad.addColorStop(p, 'rgba(255,255,255,0.7)'); 
                 if (end < 1) grad.addColorStop(end, 'rgba(255,255,255,0)');
                 grad.addColorStop(1, 'rgba(255,255,255,0)');
-
                 bgCtx.strokeStyle = grad;
                 bgCtx.lineWidth = 10 * (0.5 + currentSettings.voiceLeadingGlowAmount) * currentGlobalScale;
                 bgCtx.globalAlpha = 0.3; 
                 bgCtx.stroke();
-                
                 bgCtx.lineWidth = 4 * currentGlobalScale;
                 bgCtx.globalAlpha = 1.0;
                 bgCtx.stroke();
             }
-        }
+      }
 
-        // Render Latched Nodes (using VISUAL set)
-        for (const id of currentVisualLatched.keys()) {
+      for (const id of currentVisualLatched.keys()) {
              const node = nodeMapRef.current.get(id);
              if (!node) continue;
-
              const x = node.x * spacing + centerOffset;
              const y = node.y * spacing + centerOffset;
-             
              if (x < leftBound || x > rightBound || y < topBound || y > bottomBound) continue;
-
              const cTop = colorCache[node.limitTop] || '#666';
              const cBottom = colorCache[node.limitBottom] || '#666';
-             
              const vis = currentSettings.limitVisuals?.[node.limitTop] || { size: 1 };
              const limitScale = vis.size;
              const zoomScale = currentSettings.latchedZoomScale;
              const radius = baseRadius * limitScale * zoomScale;
-
              activeCtx.globalAlpha = 1.0; 
              activeCtx.beginPath();
              if (isDiamond) {
@@ -925,13 +859,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 activeCtx.arc(x, y, radius, 0, Math.PI * 2);
              }
              activeCtx.closePath();
-
              const grad = activeCtx.createLinearGradient(x, y - radius, x, y + radius);
              grad.addColorStop(0.45, cTop);
              grad.addColorStop(0.55, cBottom);
              activeCtx.fillStyle = grad;
              activeCtx.fill();
-
              if (currentSettings.isColoredIlluminationEnabled) {
                  const rp = getRainbowPeriod(currentSettings.buttonSpacingScale * currentGlobalScale);
                  const phase = (y % rp) / rp;
@@ -944,7 +876,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                  activeCtx.lineWidth = 3 * currentGlobalScale;
              }
              activeCtx.stroke();
-
              const combinedScale = currentSettings.buttonSizeScale * limitScale * zoomScale;
              if (combinedScale > 0.4) {
                 activeCtx.fillStyle = 'white';
@@ -964,9 +895,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 }
                 activeCtx.fillText(node.d.toString(), x, y + (radius * spacingY));
              }
-        }
-        
-        if (currentSettings.isPitchBendEnabled) {
+      }
+      
+      if (currentSettings.isPitchBendEnabled) {
             cursors.forEach(c => {
                 if (c.originNodeId) { 
                     const node = nodeMapRef.current.get(c.originNodeId);
@@ -975,14 +906,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                          const ny = node.y * spacing + centerOffset;
                          const pos = cursorPositionsRef.current.get(c.pointerId);
                          if (!pos) return;
-                         
                          let cx = 0, cy = 0;
                          if (scrollContainerRef.current) {
                              const r = scrollContainerRef.current.getBoundingClientRect();
                              cx = (pos.x - r.left) + scrollContainerRef.current.scrollLeft;
                              cy = (pos.y - r.top) + scrollContainerRef.current.scrollTop;
                          }
-                         
                          activeCtx.beginPath();
                          activeCtx.moveTo(nx, ny);
                          activeCtx.lineTo(cx, cy);
@@ -993,29 +922,25 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     }
                 }
             });
-        }
+      }
 
-        animationFrameRef.current = requestAnimationFrame(render);
-    };
+      animationFrameRef.current = requestAnimationFrame(render);
+  };
 
+  useEffect(() => {
     animationFrameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animationFrameRef.current);
   }, []); 
 
-  // Background Style Calculator
+  // Background Rendering same as before
   const getBackgroundStyle = () => {
       const mode = settings.backgroundMode;
       const offset = settings.backgroundYOffset || 0;
-      
       const baseStyle: React.CSSProperties = {
-          minWidth: '100%',
-          minHeight: '100%',
-          width: dynamicSize, 
-          height: dynamicSize,
+          minWidth: '100%', minHeight: '100%', width: dynamicSize, height: dynamicSize,
           pointerEvents: uiUnlocked ? 'none' : 'auto',
           backgroundPosition: `center calc(50% + ${offset}px)`,
-          backgroundRepeat: 'no-repeat',
-          backgroundSize: 'cover'
+          backgroundRepeat: 'no-repeat', backgroundSize: 'cover'
       };
 
       switch(mode) {
@@ -1027,85 +952,28 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                   const hue = (settings.rainbowOffset + i*60);
                   stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${pct}%`);
               }
-              return {
-                  ...baseStyle,
-                  backgroundImage: `linear-gradient(to bottom, ${stops.join(', ')})`,
-                  backgroundSize: `100% ${period}px`,
-                  backgroundRepeat: 'repeat',
-                  backgroundPosition: `0px calc(50% + ${offset}px)`
-              };
-          
-          case 'charcoal':
-              return { ...baseStyle, backgroundColor: '#18181b' }; 
-          case 'midnight_blue':
-              return { ...baseStyle, backgroundColor: '#0a0a23' }; 
-          case 'deep_maroon':
-              return { ...baseStyle, backgroundColor: '#3e0000' };
-          case 'forest_green':
-              return { ...baseStyle, backgroundColor: '#002200' };
-          case 'slate_grey':
-              return { ...baseStyle, backgroundColor: '#334155' };
-
+              return { ...baseStyle, backgroundImage: `linear-gradient(to bottom, ${stops.join(', ')})`, backgroundSize: `100% ${period}px`, backgroundRepeat: 'repeat', backgroundPosition: `0px calc(50% + ${offset}px)` };
+          case 'charcoal': return { ...baseStyle, backgroundColor: '#18181b' }; 
+          case 'midnight_blue': return { ...baseStyle, backgroundColor: '#0a0a23' }; 
+          case 'deep_maroon': return { ...baseStyle, backgroundColor: '#3e0000' };
+          case 'forest_green': return { ...baseStyle, backgroundColor: '#002200' };
+          case 'slate_grey': return { ...baseStyle, backgroundColor: '#334155' };
           case 'image':
               if (settings.backgroundImageData) {
-                  return {
-                      ...baseStyle,
-                      backgroundImage: `url(${settings.backgroundImageData})`,
-                      backgroundRepeat: settings.backgroundTiling ? 'repeat' : 'no-repeat',
-                      backgroundSize: settings.backgroundTiling ? 'auto' : 'contain',
-                      backgroundPosition: settings.backgroundTiling 
-                          ? `center calc(50% + ${offset}px)` 
-                          : `center calc(50% + ${offset}px)`
-                  };
+                  return { ...baseStyle, backgroundImage: `url(${settings.backgroundImageData})`, backgroundRepeat: settings.backgroundTiling ? 'repeat' : 'no-repeat', backgroundSize: settings.backgroundTiling ? 'auto' : 'contain', backgroundPosition: `center calc(50% + ${offset}px)` };
               }
               return { ...baseStyle, backgroundColor: 'black' };
-
-          case 'none':
-          default:
-              return { ...baseStyle, backgroundColor: 'black' };
+          default: return { ...baseStyle, backgroundColor: 'black' };
       }
   };
 
   return (
-    <div 
-        ref={scrollContainerRef}
-        className="w-full h-full overflow-auto bg-slate-950 relative"
-        style={{ touchAction: 'none' }}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-    >
-        <div 
-            className="relative"
-            style={getBackgroundStyle()}
-        >
-           <canvas 
-             ref={bgLineCanvasRef}
-             className="absolute top-0 left-0 z-[5] pointer-events-none"
-             style={{ width: '100%', height: '100%' }}
-           />
-           <canvas 
-             ref={staticCanvasRef}
-             className="absolute top-0 left-0 z-[10] pointer-events-none"
-             style={{ width: '100%', height: '100%' }}
-           />
-           <canvas 
-             ref={dynamicCanvasRef}
-             className="absolute top-0 left-0 z-[20] pointer-events-none"
-             style={{ width: '100%', height: '100%' }}
-           />
-
-           {isGenerating && (
-             <div className="absolute top-4 right-4 z-50 flex items-center gap-2 bg-slate-900/80 p-2 rounded-full backdrop-blur-sm border border-white/10 shadow-xl">
-                 <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                 </svg>
-                 <span className="text-xs font-bold text-slate-300 pr-2">Calculating...</span>
-             </div>
-           )}
+    <div ref={scrollContainerRef} className="w-full h-full overflow-auto bg-slate-950 relative" style={{ touchAction: 'none' }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} onPointerCancel={handlePointerUp}>
+        <div className="relative" style={getBackgroundStyle()}>
+           <canvas ref={bgLineCanvasRef} className="absolute top-0 left-0 z-[5] pointer-events-none" style={{ width: '100%', height: '100%' }} />
+           <canvas ref={staticCanvasRef} className="absolute top-0 left-0 z-[10] pointer-events-none" style={{ width: '100%', height: '100%' }} />
+           <canvas ref={dynamicCanvasRef} className="absolute top-0 left-0 z-[20] pointer-events-none" style={{ width: '100%', height: '100%' }} />
+           {isGenerating && (<div className="absolute top-4 right-4 z-50 flex items-center gap-2 bg-slate-900/80 p-2 rounded-full backdrop-blur-sm border border-white/10 shadow-xl"><svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span className="text-xs font-bold text-slate-300 pr-2">Calculating...</span></div>)}
         </div>
     </div>
   );

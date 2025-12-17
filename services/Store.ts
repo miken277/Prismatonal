@@ -1,7 +1,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState } from '../types';
-import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS } from '../constants';
+import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_ARP_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS } from '../constants';
 import { XmlService } from './XmlService';
 
 const SETTINGS_KEY = 'prismatonal_settings_v5'; 
@@ -23,14 +23,13 @@ class PrismaStore {
             loadedSettings = {
                 ...DEFAULT_SETTINGS,
                 ...parsed,
-                // Explicitly deep merge nested objects to ensure new fields are present
                 limitDepths: { ...DEFAULT_SETTINGS.limitDepths, ...(parsed.limitDepths || {}) },
                 limitComplexities: { ...DEFAULT_SETTINGS.limitComplexities, ...(parsed.limitComplexities || {}) },
                 colors: { ...DEFAULT_COLORS, ...(parsed.colors || {}) }, 
                 limitVisuals: { ...DEFAULT_SETTINGS.limitVisuals, ...(parsed.limitVisuals || {}) },
                 uiPositions: { ...DEFAULT_SETTINGS.uiPositions, ...(parsed.uiPositions || {}) },
-                // Ensure scaleMode is present if defined in type, or fallback
-                // (Assuming scaleMode might be added in future, currently safely handles existing props)
+                arpeggios: parsed.arpeggios || DEFAULT_SETTINGS.arpeggios,
+                arpBpm: parsed.arpBpm || DEFAULT_SETTINGS.arpBpm
             };
         } catch (e) {
             console.error("Failed to parse settings, reverting to defaults", e);
@@ -44,19 +43,27 @@ class PrismaStore {
     
     if (savedPresets) {
         try {
-            loadedPresets = JSON.parse(savedPresets);
+            const parsed = JSON.parse(savedPresets);
+            loadedPresets = {
+                normal: parsed.normal || JSON.parse(JSON.stringify(DEFAULT_NORMAL_PRESET)),
+                latch: parsed.latch || JSON.parse(JSON.stringify(DEFAULT_LATCH_PRESET)),
+                strum: parsed.strum || JSON.parse(JSON.stringify(DEFAULT_STRUM_PRESET)),
+                arpeggio: parsed.arpeggio || JSON.parse(JSON.stringify(DEFAULT_ARP_PRESET))
+            };
         } catch (e) {
             loadedPresets = {
                 normal: JSON.parse(JSON.stringify(DEFAULT_NORMAL_PRESET)),
                 latch: JSON.parse(JSON.stringify(DEFAULT_LATCH_PRESET)),
-                strum: JSON.parse(JSON.stringify(DEFAULT_STRUM_PRESET))
+                strum: JSON.parse(JSON.stringify(DEFAULT_STRUM_PRESET)),
+                arpeggio: JSON.parse(JSON.stringify(DEFAULT_ARP_PRESET))
             };
         }
     } else {
         loadedPresets = {
             normal: JSON.parse(JSON.stringify(DEFAULT_NORMAL_PRESET)),
             latch: JSON.parse(JSON.stringify(DEFAULT_LATCH_PRESET)),
-            strum: JSON.parse(JSON.stringify(DEFAULT_STRUM_PRESET))
+            strum: JSON.parse(JSON.stringify(DEFAULT_STRUM_PRESET)),
+            arpeggio: JSON.parse(JSON.stringify(DEFAULT_ARP_PRESET))
         };
     }
 
@@ -90,7 +97,6 @@ class PrismaStore {
       next = { ...current, ...partial };
     }
 
-    // Optimization: Shallow equality check to prevent unnecessary writes/notifies
     if (next === current) return;
 
     this.state = { ...this.state, settings: next };
@@ -129,12 +135,9 @@ class PrismaStore {
           const partial = await XmlService.parseImport(file);
           if (partial) {
               const nextState = { ...this.state, ...partial };
-              
-              // Persist imported state
               localStorage.setItem(SETTINGS_KEY, JSON.stringify(nextState.settings));
               localStorage.setItem(PRESET_KEY, JSON.stringify(nextState.presets));
               localStorage.setItem(USER_BANK_KEY, JSON.stringify(nextState.userBank));
-              
               this.state = nextState;
               this.notify();
               return true;
@@ -163,7 +166,6 @@ class PrismaStore {
 
 export const store = new PrismaStore();
 
-// --- REACT HOOK ---
 export function useStore() {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
 

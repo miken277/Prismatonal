@@ -11,6 +11,7 @@ class AudioEngine {
   
   // FX Chain
   private limiter: DynamicsCompressorNode | null = null;
+  private masterFilter: BiquadFilterNode | null = null; // New Tone Control
   private dryGain: GainNode | null = null;
   private reverbNode: ConvolverNode | null = null;
   private reverbGain: GainNode | null = null;
@@ -20,6 +21,7 @@ class AudioEngine {
 
   private currentMasterVol: number = 0.8;
   private globalSpatialScale: number = 1.0;
+  private globalBrightness: number = 1.0; // 0.0 to 1.0
   
   // Cache active presets for FX updates
   private activePresets: PresetState;
@@ -30,7 +32,8 @@ class AudioEngine {
     this.activePresets = {
         normal: this.ensurePresetSafety(rawPresets.normal),
         latch: this.ensurePresetSafety(rawPresets.latch),
-        strum: this.ensurePresetSafety(rawPresets.strum)
+        strum: this.ensurePresetSafety(rawPresets.strum),
+        arpeggio: this.ensurePresetSafety(rawPresets.arpeggio)
     };
 
     store.subscribe(() => {
@@ -46,11 +49,9 @@ class AudioEngine {
   private ensurePresetSafety(p: any): SynthPreset {
      if (!p) return DEFAULT_PRESET;
      
-     // 1. Strict Validation of Reverb Type to satisfy TypeScript indexer
      const validReverbTypes: ReverbType[] = ['room', 'hall', 'cathedral', 'plate', 'shimmer'];
      let rType: ReverbType = 'hall';
      
-     // Check if p.reverbType exists and is a valid ReverbType string
      if (p.reverbType && validReverbTypes.includes(p.reverbType)) {
          rType = p.reverbType as ReverbType;
      }
@@ -58,7 +59,6 @@ class AudioEngine {
      const safe: SynthPreset = {
          ...DEFAULT_PRESET,
          ...p,
-         // Ensure nested objects are merged, not overwritten by partials
          osc1: { ...DEFAULT_PRESET.osc1, ...(p.osc1 || {}) },
          osc2: { ...DEFAULT_PRESET.osc2, ...(p.osc2 || {}) },
          osc3: { ...DEFAULT_PRESET.osc3, ...(p.osc3 || {}) },
@@ -66,7 +66,6 @@ class AudioEngine {
          reverbType: rType
      };
 
-     // 2. Apply Defaults using the validated rType
      const defaults = REVERB_DEFAULTS[rType];
      if (safe.reverbSize === undefined) safe.reverbSize = defaults.size;
      if (safe.reverbDamping === undefined) safe.reverbDamping = defaults.damping;
@@ -76,11 +75,9 @@ class AudioEngine {
   }
 
   private updatePresets(newPresets: PresetState) {
-      const modes: PlayMode[] = ['normal', 'latch', 'strum'];
+      const modes: PlayMode[] = ['normal', 'latch', 'strum', 'arpeggio'];
       let recomputeReverb = false;
 
-      // We use 'normal' preset as the master for Global FX settings like Reverb Type/Size
-      // to avoid conflict.
       const oldMaster = this.activePresets.normal;
       const newMaster = newPresets.normal;
 
@@ -96,7 +93,8 @@ class AudioEngine {
       this.activePresets = {
           normal: this.ensurePresetSafety(newPresets.normal),
           latch: this.ensurePresetSafety(newPresets.latch),
-          strum: this.ensurePresetSafety(newPresets.strum)
+          strum: this.ensurePresetSafety(newPresets.strum),
+          arpeggio: this.ensurePresetSafety(newPresets.arpeggio)
       };
 
       if (recomputeReverb && this.ctx) {
@@ -115,14 +113,10 @@ class AudioEngine {
       }
   }
 
-  // Synchronous check and resume - Vital for iOS Chrome
   public async resume() {
-      // CRITICAL: On iOS Chrome, if context doesn't exist yet, we must create it synchronously here
       if (!this.ctx) {
-          // Trigger init immediately
           await this.init(); 
       }
-      
       if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
           await this.ctx.resume();
       }
@@ -134,21 +128,15 @@ class AudioEngine {
     this.initPromise = (async () => {
         if (!this.ctx) {
             const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            
-            // Get user preference from store
             const settings = store.getSnapshot().settings;
-            // Force 'playback' if user hasn't touched it (which default is 'playback')
-            // This is critical for iPad 7/Mobile static fix.
             const latencyHint = settings.audioLatencyHint || 'playback';
             
             this.ctx = new AudioContextClass({
                 latencyHint: latencyHint,
             });
 
-            // Robustness: Auto-resume on state change (Desktop disconnect/reconnect or iOS interruptions)
             this.ctx.onstatechange = () => {
                 if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
-                    // Attempt to resume immediately if user is active
                     this.ctx.resume().catch(e => console.warn("Audio auto-resume failed:", e));
                 }
             };
@@ -157,7 +145,6 @@ class AudioEngine {
                 const blob = new Blob([AUDIO_PROCESSOR_CODE], { type: 'application/javascript' });
                 const workletUrl = URL.createObjectURL(blob);
                 
-                // Polyfill check or standard addModule
                 if (this.ctx.audioWorklet && this.ctx.audioWorklet.addModule) {
                     await this.ctx.audioWorklet.addModule(workletUrl);
                 } else {
@@ -173,8 +160,7 @@ class AudioEngine {
                     outputChannelCount: [2]
                 });
                 
-                // Initial send
-                (['normal', 'latch', 'strum'] as PlayMode[]).forEach(mode => {
+                (['normal', 'latch', 'strum', 'arpeggio'] as PlayMode[]).forEach(mode => {
                     this.workletNode!.port.postMessage({ 
                         type: 'update_preset', 
                         mode: mode, 
@@ -221,31 +207,40 @@ class AudioEngine {
         this.delayFeedbackGain?.disconnect();
         this.delayOutputGain?.disconnect();
         this.limiter?.disconnect();
+        this.masterFilter?.disconnect();
     } catch(e) { /* ignore */ }
 
+    // Master Filter (Tone Control)
+    this.masterFilter = this.ctx.createBiquadFilter();
+    this.masterFilter.type = 'lowpass';
+    this.masterFilter.frequency.value = 20000;
+    this.masterFilter.Q.value = 0.5;
+
     this.limiter = this.ctx.createDynamicsCompressor();
-    // Soften the limiter for mobile to avoid hard pumping which can sound like crackle
     this.limiter.threshold.value = -8.0; 
     this.limiter.ratio.value = 10.0;
     this.limiter.attack.value = 0.005;
     this.limiter.connect(this.ctx.destination);
 
+    // Filter -> Limiter -> Out
+    this.masterFilter.connect(this.limiter);
+
     this.dryGain = this.ctx.createGain();
-    this.dryGain.connect(this.limiter);
+    this.dryGain.connect(this.masterFilter);
 
     this.reverbNode = this.ctx.createConvolver();
     this.updateReverbBuffer();
     
     this.reverbGain = this.ctx.createGain();
     this.reverbGain.connect(this.reverbNode);
-    this.reverbNode.connect(this.limiter);
+    this.reverbNode.connect(this.masterFilter);
 
     this.delayNode = this.ctx.createDelay(5.0);
     this.delayFeedbackGain = this.ctx.createGain();
     this.delayOutputGain = this.ctx.createGain();
     
     this.delayOutputGain.connect(this.delayNode);
-    this.delayNode.connect(this.limiter); 
+    this.delayNode.connect(this.masterFilter); 
     this.delayNode.connect(this.delayFeedbackGain);
     this.delayFeedbackGain.connect(this.delayNode);
     
@@ -263,7 +258,6 @@ class AudioEngine {
   private updateReverbBuffer() {
       if (!this.reverbNode || !this.ctx) return;
       
-      // Use NORMAL preset as the master for reverb tail generation
       const master = this.activePresets.normal;
       const type = master.reverbType || 'hall';
       
@@ -278,23 +272,12 @@ class AudioEngine {
       let density = 0.5;
 
       switch(type) {
-          case 'room': 
-              decay = 3.0; density = 0.8; 
-              break;
-          case 'hall': 
-              decay = 2.0; density = 0.6; preDelay = 0.02;
-              break;
-          case 'cathedral': 
-              decay = 1.5; density = 0.4; preDelay = 0.04;
-              break;
-          case 'plate': 
-              decay = 4.0; density = 1.0; 
-              break;
-          case 'shimmer': 
-              decay = 0.8; density = 0.2; 
-              break;
-          default: 
-              decay = 2.0; density = 0.5;
+          case 'room': decay = 3.0; density = 0.8; break;
+          case 'hall': decay = 2.0; density = 0.6; preDelay = 0.02; break;
+          case 'cathedral': decay = 1.5; density = 0.4; preDelay = 0.04; break;
+          case 'plate': decay = 4.0; density = 1.0; break;
+          case 'shimmer': decay = 0.8; density = 0.2; break;
+          default: decay = 2.0; density = 0.5;
       }
       
       this.reverbNode.buffer = this.createImpulseResponse(duration, decay, brightness, density, preDelay, diffusion);
@@ -305,7 +288,6 @@ class AudioEngine {
       const now = this.ctx.currentTime;
       const ramp = 0.1;
       
-      // Use NORMAL preset for global FX levels
       const master = this.activePresets.normal;
 
       const scaledReverbMix = Math.min(1.0, master.reverbMix * this.globalSpatialScale);
@@ -327,6 +309,14 @@ class AudioEngine {
           this.limiter.threshold.setTargetAtTime(thresh, now, ramp);
           this.limiter.ratio.setTargetAtTime(ratio, now, ramp);
           this.limiter.release.setTargetAtTime(release, now, ramp);
+      }
+      
+      if (this.masterFilter) {
+          // Logarithmic mapping for brightness: 0..1 -> 100Hz .. 20000Hz
+          const minFreq = 100;
+          const maxFreq = 20000;
+          const freq = minFreq * Math.pow(maxFreq/minFreq, this.globalBrightness);
+          this.masterFilter.frequency.setTargetAtTime(freq, now, ramp);
       }
 
       if (this.dryGain) {
@@ -416,12 +406,15 @@ class AudioEngine {
       this.updateFX();
   }
 
+  public setGlobalBrightness(val: number) {
+      this.globalBrightness = val;
+      this.updateFX();
+  }
+
   public async startVoice(id: string, ratio: number, baseFrequency: number, type: PlayMode = 'normal') {
-    // Ensure active
     if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
         this.ctx.resume();
     }
-    
     await this.init();
     if (!this.workletNode) return;
 
