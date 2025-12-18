@@ -19,6 +19,14 @@ export enum ButtonShape {
   DIAMOND = '0%',
 }
 
+export type TuningSystem = 'ji' | 'et' | 'indian' | 'pythagorean';
+
+export type LayoutApproach = 
+  | 'lattice' | 'diamond' | 'row' | 'honeycomb' // JI specific
+  | 'et_wheel' | 'et_grid' | 'et_row'           // ET specific
+  | 'indian_circle' | 'indian_thaat'           // Indian specific
+  | 'pyth_spiral' | 'pyth_row';                // Pythagorean specific
+
 export type BackgroundMode = 'rainbow' | 'charcoal' | 'midnight_blue' | 'deep_maroon' | 'forest_green' | 'slate_grey' | 'image' | 'none';
 
 export interface LimitColorMap {
@@ -102,6 +110,11 @@ export interface KeyMappings {
 }
 
 export interface AppSettings {
+  // Global Tuning
+  tuningSystem: TuningSystem;
+  layoutApproach: LayoutApproach;
+  activeSkin: string; // Dynamic skin ID for visual presentation
+
   // Individual depths (Steps from center)
   limitDepths: {
     3: number;

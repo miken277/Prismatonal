@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { AppSettings, LatticeNode, LatticeLine, ButtonShape } from '../types';
-import { getHarmonicDistance, generateLattice } from '../services/LatticeService';
+import { generateLattice } from '../services/LatticeService';
 import { getPitchRatioFromScreenDelta, getRainbowPeriod } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
@@ -23,7 +23,7 @@ interface Props {
   uiUnlocked: boolean;
   latchMode: 0 | 1 | 2; // 0=Off, 1=LatchAll, 2=Sustain
   globalScale?: number; 
-  onNodeTrigger?: (nodeId: string, ratio: number, n?: number, d?: number, limit?: number) => void; // Added limit
+  onNodeTrigger?: (nodeId: string, ratio: number, n?: number, d?: number, limit?: number) => void;
 }
 
 interface ActiveCursor {
@@ -32,6 +32,7 @@ interface ActiveCursor {
   currentY: number;
   originNodeId: string | null; 
   hoverNodeId: string | null;
+  hasMoved: boolean; // Track if movement occurred for Bend persistence
 }
 
 const GRID_CELL_SIZE = 100; 
@@ -40,7 +41,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, globalScale = 1.0, onNodeTrigger } = props;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  
   const bgLineCanvasRef = useRef<HTMLCanvasElement>(null);
   const staticCanvasRef = useRef<HTMLCanvasElement>(null); 
   const dynamicCanvasRef = useRef<HTMLCanvasElement>(null); 
@@ -185,6 +185,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const spatialGridRef = useRef(spatialGrid);
   const dynamicSizeRef = useRef(dynamicSize);
   const globalScaleRef = useRef(globalScale);
+  const persistentLatchesRef = useRef(persistentLatches);
   
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
 
@@ -198,6 +199,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
   useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
   useEffect(() => { globalScaleRef.current = globalScale; }, [globalScale]);
+  useEffect(() => { persistentLatchesRef.current = persistentLatches; }, [persistentLatches]);
   
   const lastTouchedLimitRef = useRef<number | null>(null);
   const depthHistoryRef = useRef<number[]>([]);
@@ -279,12 +281,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const generationDeps = useMemo(() => {
       return JSON.stringify({
+          tuning: settings.tuningSystem,
+          layout: settings.layoutApproach,
           depths: settings.limitDepths,
           complexities: settings.limitComplexities,
           hidden: settings.hiddenLimits,
-          ratio: settings.latticeAspectRatio
+          ratio: settings.latticeAspectRatio,
+          skin: settings.activeSkin
       });
-  }, [settings.limitDepths, settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio]);
+  }, [settings.tuningSystem, settings.layoutApproach, settings.limitDepths, settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio, settings.activeSkin]);
 
   useEffect(() => {
     setIsGenerating(true);
@@ -317,7 +322,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const calculatedSize = (maxExtent * spacing * 2) + padding;
         const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
 
-        const MAX_CANVAS_SIZE = 2500;
+        const MAX_CANVAS_SIZE = 5000; // Increased for linear layout
         const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
 
         if (Math.abs(clampedSize - dynamicSizeRef.current) > 50) {
@@ -343,7 +348,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const calculatedSize = (maxExtent * spacing * 2) + padding;
       const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
       
-      const MAX_CANVAS_SIZE = 2500;
+      const MAX_CANVAS_SIZE = 5000;
       const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
 
       if (Math.abs(clampedSize - dynamicSize) > 50) setDynamicSize(clampedSize);
@@ -351,6 +356,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
 
   const visualDeps = useMemo(() => JSON.stringify({
+      tuning: settings.tuningSystem,
+      layout: settings.layoutApproach,
+      skin: settings.activeSkin,
       size: settings.buttonSizeScale,
       spacing: settings.buttonSpacingScale,
       colors: settings.colors,
@@ -360,7 +368,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       fractionBar: settings.showFractionBar,
       canvasSize: dynamicSize,
       globalScale: globalScale 
-  }), [settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.limitVisuals, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale]);
+  }), [settings.tuningSystem, settings.layoutApproach, settings.activeSkin, settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.limitVisuals, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale]);
 
   useEffect(() => {
       const canvas = staticCanvasRef.current;
@@ -385,6 +393,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const spacing = settings.buttonSpacingScale * globalScale;
       const baseRadius = (60 * settings.buttonSizeScale * globalScale) / 2;
       const isDiamond = settings.buttonShape === ButtonShape.DIAMOND;
+
+      const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice';
       
       const linesByLimit: Record<number, number[]> = {};
       for (const line of data.lines) {
@@ -394,10 +404,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
 
       ctx.lineCap = 'round';
+      
       for (const limitStr in linesByLimit) {
           const limit = parseInt(limitStr);
           const coords = linesByLimit[limit];
-          const color = settings.colors[limit] || '#666';
+          const color = isJIOverride ? '#fff' : (settings.colors[limit] || '#666');
           const visualSettings = settings.limitVisuals?.[limit] || { size: 1, opacity: 1 };
           
           ctx.beginPath();
@@ -405,9 +416,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               ctx.moveTo(coords[i], coords[i+1]);
               ctx.lineTo(coords[i+2], coords[i+3]);
           }
-          ctx.lineWidth = (limit === 1 ? 4 : 2) * visualSettings.size * globalScale; 
+          ctx.lineWidth = (limit === 1 ? 3 : 1) * visualSettings.size * globalScale; 
           ctx.strokeStyle = color;
-          ctx.globalAlpha = 0.3 * visualSettings.opacity; 
+          ctx.globalAlpha = (isJIOverride ? 0.15 : 0.3) * visualSettings.opacity; 
           
           if (limit === 1) ctx.setLineDash([5 * globalScale, 5 * globalScale]);
           else ctx.setLineDash([]);
@@ -418,8 +429,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       for (const node of data.nodes) {
           const x = node.x * spacing + centerOffset;
           const y = node.y * spacing + centerOffset;
-          const cTop = settings.colors[node.limitTop] || '#666';
-          const cBottom = settings.colors[node.limitBottom] || '#666';
+          const cTop = isJIOverride ? '#fff' : (settings.colors[node.limitTop] || '#666');
+          const cBottom = isJIOverride ? '#eee' : (settings.colors[node.limitBottom] || '#666');
           const topVis = settings.limitVisuals?.[node.limitTop] || { size: 1, opacity: 1 };
           const limitScale = topVis.size;
           const limitOpacity = topVis.opacity;
@@ -438,15 +449,23 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           }
           ctx.closePath();
 
-          const grad = ctx.createLinearGradient(x, y - radius, x, y + radius);
-          grad.addColorStop(0.45, cTop);
-          grad.addColorStop(0.55, cBottom);
-          ctx.fillStyle = grad;
-          ctx.fill();
+          if (isJIOverride) {
+              ctx.fillStyle = '#111'; // Dark center for alternate layouts
+              ctx.fill();
+              ctx.lineWidth = 2 * globalScale;
+              ctx.strokeStyle = '#fff';
+              ctx.stroke();
+          } else {
+              const grad = ctx.createLinearGradient(x, y - radius, x, y + radius);
+              grad.addColorStop(0.45, cTop);
+              grad.addColorStop(0.55, cBottom);
+              ctx.fillStyle = grad;
+              ctx.fill();
+          }
 
           const combinedScale = settings.buttonSizeScale * limitScale;
           if (combinedScale > 0.4) {
-              ctx.fillStyle = 'white';
+              ctx.fillStyle = isJIOverride ? '#fff' : 'white';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               let fontSize = Math.max(10, Math.min(18, 14 * combinedScale)) * settings.nodeTextSizeScale * globalScale;
@@ -459,7 +478,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                   ctx.moveTo(x - (radius * 0.4), y);
                   ctx.lineTo(x + (radius * 0.4), y);
                   ctx.lineWidth = 1 * globalScale;
-                  ctx.strokeStyle = `rgba(255,255,255,${0.8 * limitOpacity})`;
+                  ctx.strokeStyle = isJIOverride ? 'rgba(255,255,255,0.4)' : `rgba(255,255,255,${0.8 * limitOpacity})`;
                   ctx.stroke();
               }
               ctx.fillText(node.d.toString(), x, y + (radius * spacingY));
@@ -579,7 +598,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               currentX: e.clientX,
               currentY: e.clientY,
               originNodeId: nodeId, 
-              hoverNodeId: nodeId
+              hoverNodeId: nodeId,
+              hasMoved: false
           });
           return next;
       });
@@ -589,7 +609,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
         lastTouchedLimitRef.current = hitNode.maxPrime;
 
-        // Callback for Arp Recording - Updated to pass n and d and limit
         if (onNodeTrigger) {
             onNodeTrigger(hitNode.id, hitNode.ratio, hitNode.n, hitNode.d, hitNode.maxPrime);
         }
@@ -613,9 +632,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     return next;
                 });
             } else if (!isAudioLatched) {
-                // FIXED: Pop prevention using unique ID per interaction
                 const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
-                audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, 'normal');
+                const voiceType = (latchMode === 2) ? 'latch' : 'normal';
+                audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, voiceType);
                 if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
             }
         }
@@ -631,6 +650,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     const cursor = activeCursorsRef.current.get(e.pointerId)!;
     const hitNode = getHitNode(e.clientX, e.clientY);
     const hitId = hitNode ? hitNode.id : null;
+
+    const deltaMoveX = Math.abs(e.clientX - cursor.currentX);
+    const deltaMoveY = Math.abs(e.clientY - cursor.currentY);
+    if (deltaMoveX > 3 || deltaMoveY > 3) {
+        cursor.hasMoved = true;
+    }
 
     if (cursor.originNodeId && settings.isPitchBendEnabled && latchMode !== 1 && scrollContainerRef.current) {
          const centerOffset = dynamicSizeRef.current / 2;
@@ -661,13 +686,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
              
              if (latchMode === 1) {
-                const isAlreadyLatched = persistentLatches.has(hitNode.id);
-                setPersistentLatches(prev => {
-                    const next = new Map(prev);
-                    if (isAlreadyLatched) next.delete(hitNode.id);
-                    else next.set(hitNode.id, hitNode.id);
-                    return next;
-                });
+                const isAlreadyLatched = persistentLatchesRef.current.has(hitNode.id);
+                if (!isAlreadyLatched) {
+                    setPersistentLatches(prev => {
+                        if (prev.has(hitNode.id)) return prev;
+                        const next = new Map(prev);
+                        next.set(hitNode.id, hitNode.id);
+                        return next;
+                    });
+                }
              } 
              else {
                  const isAlreadyLatched = audioLatchedNodes.has(hitNode.id);
@@ -685,7 +712,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             const next = new Map(prev);
             const c = next.get(e.pointerId);
             if(c) { 
-                const updatedCursor = { ...c, hoverNodeId: hitId };
+                const updatedCursor = { ...c, hoverNodeId: hitId, hasMoved: true };
                 next.set(e.pointerId, updatedCursor); 
             }
             return next;
@@ -699,9 +726,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         
         if (cursor.originNodeId) {
             if (latchMode !== 1) {
-                const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
-                audioEngine.stopVoice(voiceId);
-                if (settings.midiEnabled) midiService.noteOff(voiceId);
+                if (settings.isPitchBendEnabled && cursor.hasMoved) {
+                    setPersistentLatches(prev => {
+                        const next = new Map(prev);
+                        next.set(cursor.originNodeId!, cursor.originNodeId!);
+                        return next;
+                    });
+                } else {
+                    const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
+                    audioEngine.stopVoice(voiceId);
+                    if (settings.midiEnabled) midiService.noteOff(voiceId);
+                }
             }
         } 
         else if (cursor.hoverNodeId && cursor.hoverNodeId !== cursor.originNodeId && latchMode === 0) {
@@ -738,6 +773,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const size = dynamicSizeRef.current;
       const cursors = activeCursorsRef.current;
       const currentGlobalScale = globalScaleRef.current;
+
+      const isJIOverride = currentSettings.tuningSystem === 'ji' && currentSettings.layoutApproach !== 'lattice';
       
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
@@ -789,13 +826,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 const x2 = line.x2 * spacing + centerOffset;
                 const y2 = line.y2 * spacing + centerOffset;
                 if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
-                const limitColor = colorCache[line.limit] || '#666';
+                const limitColor = isJIOverride ? '#fff' : (colorCache[line.limit] || '#666');
                 bgCtx.beginPath();
                 bgCtx.moveTo(x1, y1);
                 bgCtx.lineTo(x2, y2);
-                bgCtx.lineWidth = 2 * currentGlobalScale;
+                bgCtx.lineWidth = 1 * currentGlobalScale;
                 bgCtx.strokeStyle = limitColor;
-                bgCtx.globalAlpha = 0.8; 
+                bgCtx.globalAlpha = isJIOverride ? 0.4 : 0.8; 
                 bgCtx.stroke();
             }
       }
@@ -807,11 +844,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             const x2 = line.x2 * spacing + centerOffset;
             const y2 = line.y2 * spacing + centerOffset;
             if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
-            const limitColor = colorCache[line.limit] || '#666';
+            const limitColor = isJIOverride ? '#fff' : (colorCache[line.limit] || '#666');
             bgCtx.beginPath();
             bgCtx.moveTo(x1, y1);
             bgCtx.lineTo(x2, y2);
-            bgCtx.lineWidth = 4 * currentGlobalScale;
+            bgCtx.lineWidth = (isJIOverride ? 2 : 4) * currentGlobalScale;
             bgCtx.strokeStyle = limitColor;
             bgCtx.globalAlpha = 1.0;
             bgCtx.stroke();
@@ -823,7 +860,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 const start = Math.max(0, p - pulseWidth);
                 const end = Math.min(1, p + pulseWidth);
                 if (start > 0) grad.addColorStop(start, 'rgba(255,255,255,0)');
-                grad.addColorStop(p, 'rgba(255,255,255,0.7)'); 
+                grad.addColorStop(p, isJIOverride ? 'rgba(255,255,255,1.0)' : 'rgba(255,255,255,0.7)'); 
                 if (end < 1) grad.addColorStop(end, 'rgba(255,255,255,0)');
                 grad.addColorStop(1, 'rgba(255,255,255,0)');
                 bgCtx.strokeStyle = grad;
@@ -842,8 +879,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              const x = node.x * spacing + centerOffset;
              const y = node.y * spacing + centerOffset;
              if (x < leftBound || x > rightBound || y < topBound || y > bottomBound) continue;
-             const cTop = colorCache[node.limitTop] || '#666';
-             const cBottom = colorCache[node.limitBottom] || '#666';
+             const cTop = isJIOverride ? '#fff' : (colorCache[node.limitTop] || '#666');
              const vis = currentSettings.limitVisuals?.[node.limitTop] || { size: 1 };
              const limitScale = vis.size;
              const zoomScale = currentSettings.latchedZoomScale;
@@ -859,12 +895,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 activeCtx.arc(x, y, radius, 0, Math.PI * 2);
              }
              activeCtx.closePath();
-             const grad = activeCtx.createLinearGradient(x, y - radius, x, y + radius);
-             grad.addColorStop(0.45, cTop);
-             grad.addColorStop(0.55, cBottom);
-             activeCtx.fillStyle = grad;
+             
+             if (isJIOverride) {
+                 activeCtx.fillStyle = '#fff'; // Latched nodes glow pure white in alternate layouts
+             } else {
+                 const grad = activeCtx.createLinearGradient(x, y - radius, x, y + radius);
+                 grad.addColorStop(0.45, cTop);
+                 grad.addColorStop(0.55, colorCache[node.limitBottom] || '#666');
+                 activeCtx.fillStyle = grad;
+             }
              activeCtx.fill();
-             if (currentSettings.isColoredIlluminationEnabled) {
+
+             if (currentSettings.isColoredIlluminationEnabled && !isJIOverride) {
                  const rp = getRainbowPeriod(currentSettings.buttonSpacingScale * currentGlobalScale);
                  const phase = (y % rp) / rp;
                  const hue = (currentSettings.rainbowOffset + phase * 360) % 360;
@@ -872,13 +914,19 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                  activeCtx.strokeStyle = `hsl(${hue}, ${sat}%, 60%)`;
                  activeCtx.lineWidth = 4 * currentGlobalScale;
              } else {
-                 activeCtx.strokeStyle = 'white';
-                 activeCtx.lineWidth = 3 * currentGlobalScale;
+                 activeCtx.strokeStyle = isJIOverride ? '#fff' : 'white';
+                 activeCtx.lineWidth = isJIOverride ? 4 * currentGlobalScale : 3 * currentGlobalScale;
+                 if (isJIOverride) {
+                    activeCtx.shadowBlur = 10 * currentGlobalScale;
+                    activeCtx.shadowColor = '#fff';
+                 }
              }
              activeCtx.stroke();
+             activeCtx.shadowBlur = 0; // Reset
+
              const combinedScale = currentSettings.buttonSizeScale * limitScale * zoomScale;
              if (combinedScale > 0.4) {
-                activeCtx.fillStyle = 'white';
+                activeCtx.fillStyle = isJIOverride ? '#000' : 'white';
                 activeCtx.textAlign = 'center';
                 activeCtx.textBaseline = 'middle';
                 let fontSize = Math.max(12, Math.min(22, 16 * combinedScale)) * currentSettings.nodeTextSizeScale * currentGlobalScale;
@@ -890,7 +938,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     activeCtx.moveTo(x - (radius * 0.4), y);
                     activeCtx.lineTo(x + (radius * 0.4), y);
                     activeCtx.lineWidth = 1 * currentGlobalScale;
-                    activeCtx.strokeStyle = 'white';
+                    activeCtx.strokeStyle = isJIOverride ? 'rgba(0,0,0,0.5)' : 'white';
                     activeCtx.stroke();
                 }
                 activeCtx.fillText(node.d.toString(), x, y + (radius * spacingY));
@@ -915,10 +963,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                          activeCtx.beginPath();
                          activeCtx.moveTo(nx, ny);
                          activeCtx.lineTo(cx, cy);
-                         activeCtx.strokeStyle = 'white';
+                         activeCtx.strokeStyle = isJIOverride ? '#fff' : 'white';
                          activeCtx.lineWidth = 2 * currentGlobalScale;
                          activeCtx.globalAlpha = 0.5;
                          activeCtx.stroke();
+                         activeCtx.globalAlpha = 1.0;
                     }
                 }
             });
@@ -932,16 +981,21 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     return () => cancelAnimationFrame(animationFrameRef.current);
   }, []); 
 
-  // Background Rendering same as before
   const getBackgroundStyle = () => {
       const mode = settings.backgroundMode;
       const offset = settings.backgroundYOffset || 0;
+      const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice';
+
       const baseStyle: React.CSSProperties = {
           minWidth: '100%', minHeight: '100%', width: dynamicSize, height: dynamicSize,
           pointerEvents: uiUnlocked ? 'none' : 'auto',
           backgroundPosition: `center calc(50% + ${offset}px)`,
           backgroundRepeat: 'no-repeat', backgroundSize: 'cover'
       };
+
+      if (isJIOverride) {
+          return { ...baseStyle, backgroundColor: 'black', backgroundImage: 'none' };
+      }
 
       switch(mode) {
           case 'rainbow':

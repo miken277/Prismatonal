@@ -23,6 +23,7 @@ class PrismaStore {
             loadedSettings = {
                 ...DEFAULT_SETTINGS,
                 ...parsed,
+                layoutApproach: parsed.layoutApproach || DEFAULT_SETTINGS.layoutApproach,
                 limitDepths: { ...DEFAULT_SETTINGS.limitDepths, ...(parsed.limitDepths || {}) },
                 limitComplexities: { ...DEFAULT_SETTINGS.limitComplexities, ...(parsed.limitComplexities || {}) },
                 colors: { ...DEFAULT_COLORS, ...(parsed.colors || {}) }, 

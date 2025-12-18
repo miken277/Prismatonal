@@ -130,12 +130,14 @@ const FloatingControls: React.FC<Props> = ({
     window.addEventListener('pointercancel', onUp);
   };
 
-  const baseSize = 48 * uiScale; 
-  const chordSize = baseSize * chordShortcutSizeScale;
   const largeBtnSize = 80 * uiScale;
+  const perfBtnSize = 92 * uiScale;
+  const baseSize = largeBtnSize; 
+  const chordSize = baseSize * chordShortcutSizeScale;
   
-  // Expanded Width for Audio Stack
-  const stackWidth = 500 * uiScale; 
+  // Standardized dimensions: Volume is now wider and thinner. Arp increased by 1/4.
+  const volumeBarWidth = 600 * uiScale; 
+  const arpBarWidth = 675 * uiScale;
   
   const draggableStyle = (key: string) => ({
       left: uiPositions[key as keyof typeof uiPositions].x,
@@ -160,10 +162,8 @@ const FloatingControls: React.FC<Props> = ({
       else return `${base} ${unlocked} bg-green-900/40 border-2 border-green-500/50 text-green-500 hover:bg-green-800/60 active:bg-green-600 active:text-white shadow-[0_0_15px_rgba(34,197,94,0.2)]`;
   };
 
-  // Currently active Arp for highlight logic
   const isAnyArpPlaying = arpeggios.some(a => a.isPlaying);
   
-  // BPM Light Logic
   const getBpmLightClass = () => {
       if (isFlashingRed) return 'bg-red-500 shadow-[0_0_10px_red]';
       if (isAnyArpPlaying) {
@@ -181,7 +181,6 @@ const FloatingControls: React.FC<Props> = ({
           const step = arp.steps[stepIndex];
           const newSteps = [...arp.steps];
           
-          // Toggle Mute
           newSteps[stepIndex] = { ...step, muted: !step.muted };
           onArpPatternUpdate(arpId, newSteps);
       }
@@ -205,11 +204,21 @@ const FloatingControls: React.FC<Props> = ({
       }
   };
 
+  const isBendLocked = latchMode === 1;
+
+  // Label style refined: Larger font and balanced width
+  const labelStyle = { 
+      fontSize: 20 * uiScale, 
+      width: 120 * uiScale,
+  };
+
+  const sliderTrackHeight = 3 * uiScale;
+
   return (
     <>
       <style>{`
-        .prismatonal-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
-        .prismatonal-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
+        .prismatonal-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 10px; height: 10px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
+        .prismatonal-slider::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
         input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         .no-spinner { -moz-appearance: textfield; }
         
@@ -219,61 +228,56 @@ const FloatingControls: React.FC<Props> = ({
         .seq-scroll::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.8); }
       `}</style>
 
-      {/* Unified Audio Stack Control - Compact Thickness */}
+      {/* Unified Audio Stack Control - WIDER AND THINNER */}
       <div 
-        className={`absolute bg-slate-900/50 rounded-xl flex flex-col p-1.5 gap-0.5 backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('volume'), width: stackWidth }}
+        className={`absolute bg-slate-900/50 rounded-xl flex flex-col px-4 py-1 gap-1 backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-lg ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('volume'), width: volumeBarWidth }}
         onPointerDown={(e) => handleDrag(e, 'volume')}
       >
-        {/* VOLUME ROW */}
-        <div className="flex items-center gap-2 w-full h-5">
-             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={{ fontSize: 10 * uiScale, width: 30 * uiScale }}>Vol</span>
+        <div className="flex items-center gap-4 w-full h-6">
+             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Volume</span>
              <div className="flex-1 min-w-0 flex items-center">
                 <input 
                     type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-green-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-                    style={{ height: 4 * uiScale, background: `linear-gradient(to right, #22c55e 0%, #22c55e ${volume * 100}%, #334155 ${volume * 100}%, #334155 100%)` }}
+                    style={{ height: sliderTrackHeight, background: `linear-gradient(to right, #22c55e 0%, #22c55e ${volume * 100}%, #1e293b ${volume * 100}%, #1e293b 100%)` }}
                     onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
                 />
              </div>
         </div>
-        {/* REVERB ROW */}
-        <div className="flex items-center gap-2 w-full h-5">
-             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={{ fontSize: 10 * uiScale, width: 30 * uiScale }}>Rev</span>
+        <div className="flex items-center gap-4 w-full h-6">
+             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Reverb</span>
              <div className="flex-1 min-w-0 flex items-center">
                 <input 
                     type="range" min="0" max="2" step="0.01" value={spatialScale} onChange={(e) => setSpatialScale(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-blue-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-                    style={{ height: 4 * uiScale, background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(spatialScale/2) * 100}%, #334155 ${(spatialScale/2) * 100}%, #334155 100%)` }}
+                    style={{ height: sliderTrackHeight, background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(spatialScale/2) * 100}%, #1e293b ${(spatialScale/2) * 100}%, #1e293b 100%)` }}
                     onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
                 />
              </div>
         </div>
-        {/* TONE ROW */}
-        <div className="flex items-center gap-2 w-full h-5">
-             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={{ fontSize: 10 * uiScale, width: 30 * uiScale }}>Ton</span>
+        <div className="flex items-center gap-4 w-full h-6">
+             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Tone</span>
              <div className="flex-1 min-w-0 flex items-center">
                 <input 
                     type="range" min="0" max="1" step="0.01" value={brightness} onChange={(e) => setBrightness(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-yellow-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-                    style={{ height: 4 * uiScale, background: `linear-gradient(to right, #eab308 0%, #eab308 ${brightness * 100}%, #334155 ${brightness * 100}%, #334155 100%)` }}
+                    style={{ height: sliderTrackHeight, background: `linear-gradient(to right, #eab308 0%, #eab308 ${brightness * 100}%, #1e293b ${brightness * 100}%, #1e293b 100%)` }}
                     onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
                 />
              </div>
         </div>
       </div>
 
-
-      {/* ARPEGGIATOR BAR */}
+      {/* ARPEGGIATOR BAR - Wider for header balance */}
       <div 
         className={`absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl overflow-visible ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('arpeggioBar'), minWidth: 350 * uiScale, padding: 8 * uiScale }}
+        style={{ ...draggableStyle('arpeggioBar'), width: arpBarWidth, padding: 8 * uiScale }}
         onPointerDown={(e) => handleDrag(e, 'arpeggioBar')}
         onPointerEnter={() => setIsArpBarHovered(true)}
         onPointerLeave={() => setIsArpBarHovered(false)}
       >
         <div className="w-full flex flex-col gap-2">
-             {/* Header */}
              <div className="grid grid-cols-3 items-center px-1">
                  <div className="flex justify-start">
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ARPEGGIATOR</span>
@@ -318,7 +322,6 @@ const FloatingControls: React.FC<Props> = ({
                      else if (isPlaying) btnClass = "bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_blue]";
                      else if (hasData) btnClass = "bg-slate-700 border-blue-500/30 text-blue-200";
 
-                     // Animation Logic: If playing and NOT hovered, show a green dot instead of text
                      const showGreenDot = isPlaying && !isArpBarHovered && !isRecording;
 
                      return (
@@ -339,7 +342,6 @@ const FloatingControls: React.FC<Props> = ({
              </div>
         </div>
         
-        {/* Dropdown Toggle */}
         <button 
             className="w-full h-4 mt-2 bg-slate-800/50 hover:bg-slate-700/50 rounded flex items-center justify-center cursor-pointer transition-colors"
             onPointerDown={(e) => { e.stopPropagation(); setShowSequencer(!showSequencer); }}
@@ -349,7 +351,6 @@ const FloatingControls: React.FC<Props> = ({
              </svg>
         </button>
         
-        {/* Sequencer Window */}
         {showSequencer && (
             <div 
                 className="absolute left-0 top-full mt-2 bg-slate-950/90 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl p-4 z-[160] flex flex-col gap-3"
@@ -387,7 +388,6 @@ const FloatingControls: React.FC<Props> = ({
                     </div>
                 </div>
                 
-                {/* 2-Axis Matrix View */}
                 <div className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-900/30 rounded-lg border border-slate-800 seq-scroll p-1 min-h-0">
                     {arpeggios.map((arp) => {
                         const isPlaying = arp.isPlaying;
@@ -401,7 +401,6 @@ const FloatingControls: React.FC<Props> = ({
 
                         return (
                             <div key={arp.id} className="flex flex-col mb-2 bg-slate-800/20 rounded border border-white/5 hover:border-white/10 transition-colors">
-                                {/* Top Control Bar */}
                                 <div className="flex items-center gap-2 p-1 border-b border-white/5 bg-slate-800/40 rounded-t">
                                     <button 
                                         className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold border ${isPlaying ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-700 border-slate-600 text-slate-400 hover:text-white'}`}
@@ -410,7 +409,6 @@ const FloatingControls: React.FC<Props> = ({
                                         {arp.id}
                                     </button>
                                     
-                                    {/* Length Control */}
                                     <div className="flex items-center gap-1 bg-slate-900/50 rounded px-1 border border-slate-700/50">
                                         <span className="text-[8px] font-bold text-slate-500 uppercase">Len</span>
                                         <button className="text-[10px] text-slate-400 hover:text-white" onPointerDown={(e) => {e.stopPropagation(); onArpRowConfigChange && onArpRowConfigChange(arp.id, {length: Math.max(1, config.length - 1)})}}>-</button>
@@ -418,7 +416,6 @@ const FloatingControls: React.FC<Props> = ({
                                         <button className="text-[10px] text-slate-400 hover:text-white" onPointerDown={(e) => {e.stopPropagation(); onArpRowConfigChange && onArpRowConfigChange(arp.id, {length: Math.min(32, config.length + 1)})}}>+</button>
                                     </div>
 
-                                    {/* Div Control */}
                                     <div className="flex items-center gap-1 bg-slate-900/50 rounded px-1 border border-slate-700/50">
                                         <span className="text-[8px] font-bold text-slate-500 uppercase">Div</span>
                                         <select 
@@ -432,7 +429,6 @@ const FloatingControls: React.FC<Props> = ({
                                         </select>
                                     </div>
 
-                                    {/* Gate Control */}
                                     <div className="flex items-center gap-1 bg-slate-900/50 rounded px-1 border border-slate-700/50">
                                         <span className="text-[8px] font-bold text-slate-500 uppercase">Gate</span>
                                         <button className="text-[10px] text-slate-400 hover:text-white" onPointerDown={(e) => {e.stopPropagation(); onArpRowConfigChange && onArpRowConfigChange(arp.id, {gate: Math.max(0.1, config.gate - 0.1)})}}>-</button>
@@ -453,7 +449,6 @@ const FloatingControls: React.FC<Props> = ({
                                     </button>
                                 </div>
 
-                                {/* Step Sequence */}
                                 <div className="flex gap-1 overflow-x-auto seq-scroll p-1 items-center h-10 w-full">
                                     {steps.map((step, idx) => {
                                         const isCurrent = isPlaying && idx === (currentArpStep || 0) % patternLength;
@@ -464,7 +459,6 @@ const FloatingControls: React.FC<Props> = ({
                                         const bgColor = isCurrent ? 'bg-slate-600' : (hasData && isMuted ? 'bg-slate-900' : 'bg-slate-800/80');
                                         const textColor = hasData ? (isMuted ? 'text-slate-600' : 'text-blue-200') : 'text-slate-600';
                                         
-                                        // Colored Square Node Logic
                                         const limitN = hasData ? getMaxPrime(step.n || 1) : 1;
                                         const limitD = hasData ? getMaxPrime(step.d || 1) : 1;
                                         
@@ -472,7 +466,7 @@ const FloatingControls: React.FC<Props> = ({
                                         const colorD = DEFAULT_COLORS[limitD as keyof typeof DEFAULT_COLORS] || '#fff';
 
                                         const squareStyle = hasData ? {
-                                            background: `linear-gradient(to bottom right, ${colorN} 50%, ${colorD} 50%)`
+                                            background: `linear-gradient(135deg, ${colorN} 50%, ${colorD} 50%)`
                                         } : {};
 
                                         return (
@@ -490,10 +484,10 @@ const FloatingControls: React.FC<Props> = ({
                                             >
                                                 {hasData ? (
                                                     <div className={`w-full h-full relative ${isMuted ? 'opacity-30 grayscale' : ''}`}>
-                                                        <span className="absolute top-0.5 left-1 text-[9px] font-bold text-white leading-none drop-shadow-md">
+                                                        <span className="absolute top-0.5 left-1 text-[9px] font-bold text-white leading-none drop-shadow-md shadow-black">
                                                             {step?.n}
                                                         </span>
-                                                        <span className="absolute bottom-0.5 right-1 text-[9px] font-bold text-white leading-none drop-shadow-md">
+                                                        <span className="absolute bottom-0.5 right-1 text-[9px] font-bold text-white leading-none drop-shadow-md shadow-black">
                                                             {step?.d}
                                                         </span>
                                                     </div>
@@ -521,10 +515,16 @@ const FloatingControls: React.FC<Props> = ({
         )}
       </div>
 
-      <button className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isBendEnabled ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('bend'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'bend', onBend)}>BEND</button>
-      <button className={getLatchStyle()} style={{ ...draggableStyle('latch'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'latch', onLatch)}>LATCH</button>
-      <button className={`absolute rounded-full bg-yellow-900/40 border-2 border-yellow-500/50 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-yellow-800/60 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('off'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'off', onOff)}>OFF</button>
-      <button className={`absolute rounded-full bg-red-900/40 border-2 border-red-500/50 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-800/60 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('panic'), width: largeBtnSize, height: largeBtnSize, fontSize: 14 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)}>PANIC</button>
+      <button 
+        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isBendEnabled ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''} ${isBendLocked ? 'opacity-40 cursor-not-allowed grayscale' : ''}`} 
+        style={{ ...draggableStyle('bend'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} 
+        onPointerDown={(e) => !isBendLocked && handleButtonPress(e, 'bend', onBend)}
+      >
+        BEND
+      </button>
+      <button className={getLatchStyle()} style={{ ...draggableStyle('latch'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'latch', onLatch)}>LATCH</button>
+      <button className={`absolute rounded-full bg-yellow-900/40 border-2 border-yellow-500/50 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-yellow-800/60 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('off'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'off', onOff)}>OFF</button>
+      <button className={`absolute rounded-full bg-red-900/40 border-2 border-red-500/50 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-800/60 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('panic'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)}>PANIC</button>
 
       <button className={`absolute rounded bg-yellow-600/20 border-2 border-yellow-500 flex items-center justify-center text-yellow-500 font-bold backdrop-blur hover:bg-yellow-600/40 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('center'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'center', onCenter)} title="Center Display"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg></button>
 
@@ -533,7 +533,7 @@ const FloatingControls: React.FC<Props> = ({
       {showIncreaseDepthButton && (<button className={`absolute rounded bg-green-600/20 border-2 border-green-500 flex items-center justify-center text-green-500 font-bold backdrop-blur hover:bg-green-600/40 active:bg-green-600 active:text-white transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('decreaseDepth'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'decreaseDepth', onDecreaseDepth)} title="Undo Last Depth Increase"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4 L10 10 M10 10 L10 6 M10 10 L6 10" /><path strokeLinecap="round" strokeLinejoin="round" d="M20 4 L14 10 M14 10 L14 6 M14 10 L18 10" /><path strokeLinecap="round" strokeLinejoin="round" d="M4 20 L10 14 M10 14 L10 18 M10 14 L6 14" /><path strokeLinecap="round" strokeLinejoin="round" d="M20 20 L14 14 M14 14 L14 18 M14 14 L18 14" /></svg></button>)}
 
       <div className={`absolute flex gap-2 flex-wrap items-start z-[150] ${uiUnlocked ? 'cursor-move bg-white/5 rounded p-2 border border-yellow-500/30' : ''}`} style={{ ...draggableStyle('chords'), maxWidth: '80vw' }} onPointerDown={(e) => handleDrag(e, 'chords')}>
-          <button className={`rounded border-2 border-slate-500 border-dashed flex items-center justify-center text-slate-500 font-bold backdrop-blur hover:bg-slate-700/40 hover:text-white hover:border-white transition-all select-none ${uiUnlocked ? 'pointer-events-none' : ''}`} style={{ width: chordSize, height: chordSize }} onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} onClick={!uiUnlocked ? onAddChord : undefined} title="Store currently latched notes as a Chord"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-1/2 h-1/2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
+          <button className={`rounded border-2 border-slate-500 border-dashed flex items-center justify-center text-slate-500 font-bold backdrop-blur hover:bg-slate-700/40 hover:text-white hover:border-white transition-all select-none ${uiUnlocked ? 'pointer-events-none' : ''}`} style={{ width: baseSize, height: baseSize }} onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} onClick={!uiUnlocked ? onAddChord : undefined} title="Store currently latched notes as a Chord"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-1/2 h-1/2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
           {savedChords.filter(c => c.visible).map((chord) => {
               const isActive = activeChordIds.includes(chord.id);
               return (<button key={chord.id} className={`rounded flex items-center justify-center font-bold backdrop-blur transition-all shadow-lg select-none ${uiUnlocked ? 'pointer-events-none' : ''}`} style={{ width: chordSize, height: chordSize, fontSize: 12 * uiScale, backgroundColor: isActive ? chord.color : `${chord.color}33`, borderColor: chord.color, borderWidth: 2, color: isActive ? '#fff' : chord.color, boxShadow: isActive ? `0 0 10px ${chord.color}` : 'none' }} onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} onClick={() => !uiUnlocked && toggleChord(chord.id)} title={`Chord ${chord.id}: ${chord.label}`}>{chord.id}</button>);

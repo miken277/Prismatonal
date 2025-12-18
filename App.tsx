@@ -9,7 +9,7 @@ import { audioEngine } from './services/AudioEngine';
 import { midiService } from './services/MidiService';
 import { useStore } from './services/Store';
 import { AppSettings, ChordDefinition, XYPos, ArpeggioStep, ArpConfig, ArpeggioDefinition } from './types';
-import { PIXELS_PER_MM } from './constants';
+import { PIXELS_PER_MM, SCROLLBAR_WIDTH } from './constants';
 import { arpeggiatorService } from './services/ArpeggiatorService';
 
 const REFERENCE_SHORT_EDGE = 1080; 
@@ -92,91 +92,91 @@ const App: React.FC = () => {
       const safeArea = getSafeAreas();
       const marginPx = (settings.uiEdgeMargin || 4) * PIXELS_PER_MM;
       
-      const marginTop = marginPx + safeArea.top;
-      // Add extra 4px offset to right margin as requested
-      const marginRight = marginPx + safeArea.right + (safeArea.right === 0 ? 4 : 0) + 4;
-      const marginBottom = marginPx + safeArea.bottom;
       const marginLeft = marginPx + safeArea.left;
-      const baseGap = marginPx; 
-
-      // Expanded Audio Stack Width for Larger Text
-      const audioStackWidth = 500 * scale; 
-      const arpBarWidth = 250 * scale;
+      const marginTop = marginPx + safeArea.top;
+      const marginRight = marginPx + safeArea.right + SCROLLBAR_WIDTH;
+      const marginBottom = marginPx + safeArea.bottom + SCROLLBAR_WIDTH;
       
-      // Estimated width of the top-right button group (Settings + Synth + gaps)
+      // QUADRUPLED SPACING LOGIC
+      // internalBlockGap is the primary spacer for Center Display and Latch clusters
+      const internalBlockGap = 24 * scale; 
+      // baseGap is the distance between clusters; scaled to match the increased "breath"
+      const baseGap = Math.max(marginPx, 32 * scale); 
+
+      // Dimensions
+      const volumeBarWidth = 600 * scale; 
+      const arpBarWidth = 675 * scale; 
       const settingsGroupWidth = 170; 
       const settingsGroupHeight = 40; 
+      const largeBtn = 80 * scale; 
+      const perfBtn = 92 * scale; 
+      
+      const colWidth = 136 * scale; 
+
+      // VERTICAL GAPS
+      const verticalStackGap = 12 * PIXELS_PER_MM * scale; 
       
       const newPos = { ...settings.uiPositions };
 
       // Hiding Logic
-      const requiredWidth = arpBarWidth + audioStackWidth + settingsGroupWidth + (baseGap * 4);
+      const requiredWidth = volumeBarWidth + arpBarWidth + settingsGroupWidth + (baseGap * 4);
       const shouldHideExtras = w < requiredWidth;
 
-      // Calculate Top Positions
+      // Vertical calculation for layers
+      const extraLimitMargin = 12 * scale;
+      const limitBarX = w - marginRight - colWidth - extraLimitMargin;
+      const layersY = marginTop + settingsGroupHeight + verticalStackGap;
+
       if (shouldHideExtras) {
           newPos.arpeggioBar = { x: -9999, y: -9999 };
           newPos.layers = { x: -9999, y: -9999 };
-          // Center volume if cramped
-          newPos.volume = { x: (w / 2) - (audioStackWidth / 2), y: marginTop };
+          newPos.volume = { x: (w / 2) - (volumeBarWidth / 2), y: marginTop };
       } else {
           // Arp Top Left
           newPos.arpeggioBar = { x: marginLeft, y: marginTop };
           
-          // Audio Stack: Positioned closer to the Settings/Synth buttons
-          const volX = w - marginRight - settingsGroupWidth - (baseGap / 4) - audioStackWidth;
+          // Audio Stack - Aligned relative to Settings group
+          const volX = w - marginRight - settingsGroupWidth - baseGap - volumeBarWidth;
           newPos.volume = { x: volX, y: marginTop };
+
+          // Right Side: Limit Layers
+          newPos.layers = { x: limitBarX, y: layersY };
       }
 
       newPos.space = { x: -9999, y: -9999 };
 
-      const largeBtn = 80 * scale; 
-      const limitBarWidth = 24 + (72 * scale); 
-      const largeBtnWidth = largeBtn;
-      const btnGap = 10 * scale;
-      
-      // SHIFT BUTTONS: Move left by ~3mm (approx 12px at standard scale) and up by ~3mm
-      const shiftAmount = 12 * scale;
-      
-      const buttonsX = w - marginRight - largeBtnWidth - shiftAmount;
-
-      if (shouldHideExtras) {
-          newPos.layers = { x: -9999, y: -9999 };
-      } else {
-          // Move Layers Upwards, towards Synth Buttons
-          const limitBarX = w - marginRight - limitBarWidth;
-          const layersY = marginTop + settingsGroupHeight + (20 * scale); 
-          newPos.layers = { x: limitBarX, y: layersY };
-      }
-
-      // Position side buttons starting from bottom-right (anchored)
-      // Panic is at bottom right (above margin)
-      // Others stack upwards
-      const panicY = h - marginBottom - largeBtn - shiftAmount;
-      const offY = panicY - largeBtn - btnGap;
-      const latchY = offY - largeBtn - btnGap;
-      const bendY = latchY - largeBtn - btnGap;
-
-      newPos.panic = { x: buttonsX, y: panicY };
-      newPos.off = { x: buttonsX, y: offY };
-      newPos.latch = { x: buttonsX, y: latchY };
-      newPos.bend = { x: buttonsX, y: bendY };
-
-      const baseBtn = 48 * scale;
-      const bottomLiftOffset = 15 * scale;
-      const bottomY = h - marginBottom - baseBtn - bottomLiftOffset; 
+      // BOTTOM CONTROLS - NAV CLUSTER (LEFT)
+      const bottomY = h - marginBottom - largeBtn; 
       let currentX = marginLeft;
       
       newPos.center = { x: currentX, y: bottomY };
-      currentX += (baseBtn + baseGap); 
+      currentX += (largeBtn + internalBlockGap); 
+      
       if (settings.showIncreaseDepthButton) {
           newPos.depth = { x: currentX, y: bottomY };
-          currentX += (baseBtn + baseGap);
+          currentX += (largeBtn + internalBlockGap);
           newPos.decreaseDepth = { x: currentX, y: bottomY };
-          currentX += (baseBtn + baseGap);
+          currentX += (largeBtn + internalBlockGap);
       }
-      currentX += 20 * scale; 
+      
+      // Gap between navigation and chords
+      currentX += baseGap; 
       newPos.chords = { x: currentX, y: bottomY };
+
+      // PERFORMANCE CLUSTER (BOTTOM RIGHT) - Horizontal Order: Bend, Latch, Off, Panic
+      const perfY = h - marginBottom - perfBtn;
+      
+      let rightX = w - marginRight - perfBtn; // Panic (far right)
+      newPos.panic = { x: rightX, y: perfY };
+      
+      rightX -= (perfBtn + internalBlockGap); // Off
+      newPos.off = { x: rightX, y: perfY };
+      
+      rightX -= (perfBtn + internalBlockGap); // Latch
+      newPos.latch = { x: rightX, y: perfY };
+      
+      rightX -= (perfBtn + internalBlockGap); // Bend
+      newPos.bend = { x: rightX, y: perfY };
 
       return newPos;
   };
@@ -256,7 +256,12 @@ const App: React.FC = () => {
       });
   };
 
-  const handleBendToggle = () => updateSettings(prev => ({ ...prev, isPitchBendEnabled: !prev.isPitchBendEnabled }));
+  const handleBendToggle = () => {
+      // Disabled if in Full Latch mode
+      if (latchMode === 1) return;
+      updateSettings(prev => ({ ...prev, isPitchBendEnabled: !prev.isPitchBendEnabled }));
+  };
+
   const handleCenter = () => diamondRef.current?.centerView();
   const handleIncreaseDepth = () => diamondRef.current?.increaseDepth();
   const handleDecreaseDepth = () => diamondRef.current?.decreaseDepth();
@@ -323,7 +328,6 @@ const App: React.FC = () => {
       updateSettings(prev => ({ ...prev, arpeggios: newArps }));
 
       if (newIsPlaying) {
-          // Pass the specific configuration of this arp to the service
           arpeggiatorService.start(arp.steps, arp.config, settings.arpBpm, (step) => setCurrentArpStep(step));
       } else {
           arpeggiatorService.stop();
@@ -333,7 +337,7 @@ const App: React.FC = () => {
   const handleArpRecordNote = (nodeId: string, ratio: number, n?: number, d?: number, limit?: number) => {
       if (!recordingArpId) return;
 
-      setRecordingFlash(Date.now()); // Trigger red flash
+      setRecordingFlash(Date.now()); 
 
       const arpIndex = settings.arpeggios.findIndex(a => a.id === recordingArpId);
       if (arpIndex === -1) return;
@@ -363,7 +367,6 @@ const App: React.FC = () => {
           ...newArps[arpIndex],
           steps: steps
       };
-      // If we cleared the active playing arp, stop engine
       if (newArps[arpIndex].isPlaying && steps.length === 0) {
           newArps[arpIndex].isPlaying = false;
           arpeggiatorService.stop();
@@ -376,7 +379,6 @@ const App: React.FC = () => {
       arpeggiatorService.updateBpm(bpm);
   };
 
-  // Updates the specific configuration for a given arp slot
   const handleArpRowConfigChange = (arpId: string, partial: Partial<ArpConfig>) => {
       const arpIndex = settings.arpeggios.findIndex(a => a.id === arpId);
       if (arpIndex === -1) return;
@@ -389,7 +391,6 @@ const App: React.FC = () => {
       
       updateSettings(prev => ({ ...prev, arpeggios: newArps }));
 
-      // If this arp is currently playing, update the service live
       if (newArps[arpIndex].isPlaying) {
           arpeggiatorService.start(newArps[arpIndex].steps, newArps[arpIndex].config, settings.arpBpm, (step) => setCurrentArpStep(step));
       }
@@ -402,8 +403,6 @@ const App: React.FC = () => {
       }));
       updateSettings(prev => ({ ...prev, arpeggios: newArps }));
       
-      // Start the first valid one found to drive the clock/visuals
-      // (Simplified mono-arp behavior for now as requested)
       const firstValid = newArps.find(a => a.steps.length > 0);
       if (firstValid) {
           arpeggiatorService.start(firstValid.steps, firstValid.config, settings.arpBpm, (step) => setCurrentArpStep(step));
@@ -447,19 +446,19 @@ const App: React.FC = () => {
       };
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSettingsOpen, isSynthOpen, settings.enableKeyboardShortcuts, settings.keyMappings]);
+  }, [isSettingsOpen, isSynthOpen, settings.enableKeyboardShortcuts, settings.keyMappings, latchMode]);
 
   const marginPx = (settings.uiEdgeMargin || 4) * PIXELS_PER_MM;
-  // Extra offset for the buttons to respect the "come left by a mm" request
-  const rightOffset = `calc(${marginPx}px + 4px + env(safe-area-inset-right))`;
-  const headerTop = `calc(${marginPx}px + env(safe-area-inset-top))`;
-  const headerLeft = `calc(${marginPx}px + env(safe-area-inset-left))`;
+  const safeArea = getSafeAreas();
+  const leftOffset = `calc(${marginPx}px + ${safeArea.left}px)`;
+  const rightOffset = `calc(${marginPx}px + ${safeArea.right}px + ${SCROLLBAR_WIDTH}px)`;
+  const headerTop = `calc(${marginPx}px + ${safeArea.top}px)`;
 
   const headerBtnClass = "bg-slate-900/50 hover:bg-slate-800 px-3 py-1 rounded-xl backdrop-blur-sm transition border border-slate-700/50 h-8 flex items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-white shadow-lg";
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
-      <div className="absolute z-50 pointer-events-none" style={{ top: headerTop, left: headerLeft }}>
+      <div className="absolute z-50 pointer-events-none" style={{ top: headerTop, left: leftOffset }}>
         <h1 className="text-sm font-bold tracking-widest text-slate-500 opacity-20 leading-none">PRISMATONAL</h1>
       </div>
 

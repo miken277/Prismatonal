@@ -217,8 +217,8 @@ export const generateLattice = (
                    const limitBottom = getMaxPrime(shiftedRatio.d);
                    const maxPrime = Math.max(limitTop, limitBottom);
 
-                   // Use Unified Projection Service
-                   const { x, y } = projectCoordinates(data.coords, absoluteRatio, settings.latticeAspectRatio);
+                   // Use Unified Projection Service with current approach
+                   const { x, y } = projectCoordinates(data.coords, absoluteRatio, settings.latticeAspectRatio, settings.layoutApproach);
 
                    nodesMap.set(id, {
                       id,

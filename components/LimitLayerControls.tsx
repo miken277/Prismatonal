@@ -16,9 +16,9 @@ const LIMITS = [1, 3, 5, 7, 11, 13];
 const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggingId, setDraggingId, uiScale = 1.0 }) => {
   const { uiUnlocked, uiPositions } = settings;
   
-  // Base sizing scaled by effective uiScale
-  const buttonSize = 48 * uiScale; 
-  const iconSize = 24 * uiScale; 
+  // Size increased by 1/3: 56 * 1.33 = 75, 28 * 1.33 = 37
+  const buttonSize = 75 * uiScale; 
+  const iconSize = 37 * uiScale; 
 
   const isVisible = (limit: number) => {
     // 1-Limit is always visible
@@ -30,7 +30,6 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
     // Prevent hiding 1-Limit
     if (limit === 1) return;
 
-    // Toggle 'hiddenLimits' which affects strict filtering
     const isHidden = settings.hiddenLimits.includes(limit);
     let newHidden = [...settings.hiddenLimits];
     if (isHidden) {
@@ -104,7 +103,7 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
 
   return (
     <div 
-        className={`absolute flex flex-col gap-3 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        className={`absolute flex flex-col gap-1 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={{ left: uiPositions.layers.x, top: uiPositions.layers.y, touchAction: 'none' }}
         onPointerDown={handleDrag}
     >
@@ -144,7 +143,7 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
               style={{ 
                 width: buttonSize, 
                 height: buttonSize,
-                fontSize: 14 * uiScale,
+                fontSize: 16 * uiScale,
                 backgroundColor: color, 
                 borderColor: isTop ? 'white' : 'transparent',
                 boxShadow: isTop ? '0 0 10px rgba(255,255,255,0.5)' : 'none',

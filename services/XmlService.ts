@@ -10,15 +10,13 @@ export class XmlService {
         const settingsJson = JSON.stringify(settings);
         const presetsJson = JSON.stringify(presets);
         const userBankJson = JSON.stringify(userBank);
-        const chordsJson = JSON.stringify(settings.savedChords);
 
         const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <PrismaTonalData version="1.0">
-    <Description>PrismaTonal Configuration File</Description>
+    <Description>PrismaTonal Configuration Snapshot</Description>
     <Settings><![CDATA[${settingsJson}]]></Settings>
     <ActivePresets><![CDATA[${presetsJson}]]></ActivePresets>
     <UserBank><![CDATA[${userBankJson}]]></UserBank>
-    <Chords><![CDATA[${chordsJson}]]></Chords>
 </PrismaTonalData>`;
 
         return xml;
@@ -45,9 +43,7 @@ export class XmlService {
                     const partialState: Partial<StoreState> = {};
 
                     if (settingsNode && settingsNode.textContent) {
-                        const importedSettings = JSON.parse(settingsNode.textContent);
-                        // Ensure migration safety if needed
-                        partialState.settings = importedSettings;
+                        partialState.settings = JSON.parse(settingsNode.textContent);
                     }
 
                     if (presetsNode && presetsNode.textContent) {
@@ -69,7 +65,7 @@ export class XmlService {
         });
     }
 
-    static downloadFile(xmlContent: string, filename: string = "prismatonal-settings.xml") {
+    static downloadFile(xmlContent: string, filename: string = "prismatonal-backup.xml") {
         const blob = new Blob([xmlContent], { type: 'text/xml' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
