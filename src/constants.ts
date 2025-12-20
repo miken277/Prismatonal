@@ -109,7 +109,8 @@ const getDefaults = () => {
         decreaseDepth: { x: margin + 120, y: h - 48 - margin },
         chords: { x: margin + 180, y: h - 48 - margin },
         layers: { x: w - 90 - margin, y: margin + 60 },
-        arpeggioBar: { x: margin, y: margin }
+        arpeggioBar: { x: margin, y: margin },
+        zoom: { x: margin, y: h / 2 - 100 }
     };
 };
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
@@ -18,7 +19,8 @@ const App: React.FC = () => {
 
   const [masterVolume, setMasterVolume] = useState(0.8);
   const [spatialScale, setSpatialScale] = useState(1.0); 
-  const [brightness, setBrightness] = useState(1.0); // Tone control
+  const [brightness, setBrightness] = useState(1.0); 
+  const [viewZoom, setViewZoom] = useState(1.0); 
 
   const [activeChordIds, setActiveChordIds] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -28,10 +30,9 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSynthOpen, setIsSynthOpen] = useState(false);
 
-  // Arpeggio State
   const [recordingArpId, setRecordingArpId] = useState<string | null>(null);
   const [currentArpStep, setCurrentArpStep] = useState(0);
-  const [recordingFlash, setRecordingFlash] = useState<number>(0); // Timestamp trigger for red flash
+  const [recordingFlash, setRecordingFlash] = useState<number>(0); 
 
   const diamondRef = useRef<TonalityDiamondHandle>(null);
 
@@ -96,86 +97,129 @@ const App: React.FC = () => {
       const marginRight = marginPx + safeArea.right + SCROLLBAR_WIDTH;
       const marginBottom = marginPx + safeArea.bottom + SCROLLBAR_WIDTH;
       
-      // QUADRUPLED SPACING LOGIC
-      // internalBlockGap is the primary spacer for Center Display and Latch clusters
       const internalBlockGap = 24 * scale; 
-      // baseGap reduced to keep things tight with larger Arp bar
       const baseGap = Math.max(marginPx, 16 * scale); 
 
-      // Dimensions - Updated to match FloatingControls
+      // Element Dimensions
       const volumeBarWidth = 400 * scale; 
       const arpBarWidth = 840 * scale; 
-      const settingsGroupWidth = 170; 
+      const settingsGroupWidth = 170; // Settings + Synth buttons
       const settingsGroupHeight = 40; 
       const largeBtn = 80 * scale; 
       const perfBtn = 92 * scale; 
-      
-      const colWidth = 136 * scale; 
+      const colWidth = 75 * scale; // Width of Limit Layers column
 
-      // VERTICAL GAPS
-      const verticalStackGap = 12 * PIXELS_PER_MM * scale; 
+      const verticalStackGap = 16 * scale;
       
       const newPos = { ...settings.uiPositions };
 
-      // Hiding Logic
-      const requiredWidth = volumeBarWidth + arpBarWidth + settingsGroupWidth + (baseGap * 4);
-      const shouldHideExtras = w < requiredWidth;
+      // --- 1. Top Bar Logic ---
+      
+      // Determine if Arp Bar fits
+      const fullTopRowWidth = arpBarWidth + baseGap + volumeBarWidth + baseGap + settingsGroupWidth;
+      const hasRoomForArp = w > fullTopRowWidth + marginLeft + marginRight;
+      
+      // Determine if Volume fits on top row (next to settings)
+      const topRowWithoutArp = volumeBarWidth + baseGap + settingsGroupWidth;
+      const hasRoomForVolumeTop = w > topRowWithoutArp + marginLeft + marginRight;
 
-      // Vertical calculation for layers
-      const extraLimitMargin = 12 * scale;
-      const limitBarX = w - marginRight - colWidth - extraLimitMargin;
-      const layersY = marginTop + settingsGroupHeight + verticalStackGap;
+      let currentTopY = marginTop;
 
-      if (shouldHideExtras) {
-          newPos.arpeggioBar = { x: -9999, y: -9999 };
-          newPos.layers = { x: -9999, y: -9999 };
-          newPos.volume = { x: (w / 2) - (volumeBarWidth / 2), y: marginTop };
+      // Arp Bar
+      if (hasRoomForArp) {
+          newPos.arpeggioBar = { x: marginLeft, y: currentTopY };
       } else {
-          // Arp Top Left
-          newPos.arpeggioBar = { x: marginLeft, y: marginTop };
-          
-          // Audio Stack - Aligned relative to Settings group
-          const volX = w - marginRight - settingsGroupWidth - baseGap - volumeBarWidth;
-          newPos.volume = { x: volX, y: marginTop };
-
-          // Right Side: Limit Layers
-          newPos.layers = { x: limitBarX, y: layersY };
+          // Hide Arp on smaller screens
+          newPos.arpeggioBar = { x: -9999, y: -9999 };
       }
 
-      newPos.space = { x: -9999, y: -9999 };
+      // Volume Bar
+      if (hasRoomForVolumeTop) {
+          // Right-aligned, to the left of Settings buttons
+          const volX = w - marginRight - settingsGroupWidth - baseGap - volumeBarWidth;
+          newPos.volume = { x: volX, y: currentTopY };
+      } else {
+          // Move Volume to second row
+          const secondRowY = currentTopY + settingsGroupHeight + verticalStackGap;
+          // Center volume on mobile, or left align
+          const volX = Math.max(marginLeft, (w / 2) - (volumeBarWidth / 2));
+          newPos.volume = { x: volX, y: secondRowY };
+          currentTopY = secondRowY + 40 * scale; // Push subsequent vertical items down
+      }
 
-      // BOTTOM CONTROLS - NAV CLUSTER (LEFT)
-      const bottomY = h - marginBottom - largeBtn; 
-      let currentX = marginLeft;
+      // --- 2. Right Side: Limit Layers ---
+      // Position below the top cluster (Settings/Volume)
+      const layersY = currentTopY + verticalStackGap + 20; 
+      // Anchor to right edge
+      const layersX = w - marginRight - colWidth;
+      newPos.layers = { x: layersX, y: layersY };
+
+      // --- 3. Left Side: Zoom ---
+      // Center vertically, anchor left
+      const zoomH = 200 * scale;
+      const zoomY = (h / 2) - (zoomH / 2);
+      newPos.zoom = { x: marginLeft, y: zoomY };
+
+      // --- 4. Bottom Controls ---
       
-      newPos.center = { x: currentX, y: bottomY };
-      currentX += (largeBtn + internalBlockGap); 
+      // Bottom Left: Center, Depth, Chords
+      const bottomY = h - marginBottom - largeBtn; 
+      let currentLeftX = marginLeft;
+      
+      newPos.center = { x: currentLeftX, y: bottomY };
+      currentLeftX += (largeBtn + internalBlockGap);
       
       if (settings.showIncreaseDepthButton) {
-          newPos.depth = { x: currentX, y: bottomY };
-          currentX += (largeBtn + internalBlockGap);
-          newPos.decreaseDepth = { x: currentX, y: bottomY };
-          currentX += (largeBtn + internalBlockGap);
+          newPos.depth = { x: currentLeftX, y: bottomY };
+          currentLeftX += (largeBtn + internalBlockGap);
+          newPos.decreaseDepth = { x: currentLeftX, y: bottomY };
+          currentLeftX += (largeBtn + internalBlockGap);
       }
       
-      // Gap between navigation and chords
-      currentX += baseGap; 
-      newPos.chords = { x: currentX, y: bottomY };
+      currentLeftX += baseGap; 
+      newPos.chords = { x: currentLeftX, y: bottomY };
+      const approxChordsWidth = (settings.savedChords.length > 0 ? 300 : 80) * scale;
+      const leftClusterRightEdge = newPos.chords.x + approxChordsWidth;
 
-      // PERFORMANCE CLUSTER (BOTTOM RIGHT) - Horizontal Order: Bend, Latch, Off, Panic
+      // Bottom Right: Performance (Bend, Latch, Off, Panic)
+      // Standard: Horizontal row from right
       const perfY = h - marginBottom - perfBtn;
+      let rightX = w - marginRight - perfBtn; // Panic
       
-      let rightX = w - marginRight - perfBtn; // Panic (far right)
-      newPos.panic = { x: rightX, y: perfY };
-      
-      rightX -= (perfBtn + internalBlockGap); // Off
-      newPos.off = { x: rightX, y: perfY };
-      
-      rightX -= (perfBtn + internalBlockGap); // Latch
-      newPos.latch = { x: rightX, y: perfY };
-      
-      rightX -= (perfBtn + internalBlockGap); // Bend
-      newPos.bend = { x: rightX, y: perfY };
+      // Calculate where the right cluster WOULD start if horizontal
+      const clusterWidth = (perfBtn * 4) + (internalBlockGap * 3);
+      const rightClusterLeftEdge = w - marginRight - clusterWidth;
+
+      // Check collision
+      const hasCollision = leftClusterRightEdge + baseGap > rightClusterLeftEdge;
+
+      if (hasCollision) {
+          // Stack vertical if horizontal space is tight (Mobile Portrait)
+          let stackY = h - marginBottom - perfBtn;
+          
+          newPos.panic = { x: w - marginRight - perfBtn, y: stackY };
+          stackY -= (perfBtn + verticalStackGap);
+          
+          newPos.off = { x: w - marginRight - perfBtn, y: stackY };
+          stackY -= (perfBtn + verticalStackGap);
+          
+          newPos.latch = { x: w - marginRight - perfBtn, y: stackY };
+          stackY -= (perfBtn + verticalStackGap);
+          
+          newPos.bend = { x: w - marginRight - perfBtn, y: stackY };
+      } else {
+          // Standard Horizontal Layout
+          newPos.panic = { x: rightX, y: perfY };
+          rightX -= (perfBtn + internalBlockGap);
+          newPos.off = { x: rightX, y: perfY };
+          rightX -= (perfBtn + internalBlockGap);
+          newPos.latch = { x: rightX, y: perfY };
+          rightX -= (perfBtn + internalBlockGap);
+          newPos.bend = { x: rightX, y: perfY };
+      }
+
+      // Cleanup unused
+      newPos.space = { x: -9999, y: -9999 };
 
       return newPos;
   };
@@ -190,13 +234,19 @@ const App: React.FC = () => {
         const newAutoScale = shortEdge / REFERENCE_SHORT_EDGE;
         setAutoScaleFactor(newAutoScale);
         const newEffectiveScale = newAutoScale * (settings.uiScale || 1.0);
+        
+        // Force update UI positions immediately on resize
         updateSettings(prev => ({
             ...prev,
             uiPositions: applyLayout(w, h, newEffectiveScale)
         }));
+        
         windowSizeRef.current = { w, h };
     };
+    
+    // Initial calculation
     handleResize();
+    
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [settings.uiScale, settings.uiEdgeMargin, settings.showIncreaseDepthButton]); 
@@ -256,7 +306,6 @@ const App: React.FC = () => {
   };
 
   const handleBendToggle = () => {
-      // Disabled if in Full Latch mode
       if (latchMode === 1) return;
       updateSettings(prev => ({ ...prev, isPitchBendEnabled: !prev.isPitchBendEnabled }));
   };
@@ -475,7 +524,7 @@ const App: React.FC = () => {
         activeChordIds={activeChordIds}
         uiUnlocked={settings.uiUnlocked}
         latchMode={latchMode}
-        globalScale={effectiveScale}
+        globalScale={effectiveScale * viewZoom}
         onNodeTrigger={handleArpRecordNote} 
       />
 
@@ -509,6 +558,9 @@ const App: React.FC = () => {
         recordingFlash={recordingFlash}
         onPlayAll={handlePlayAll}
         onStopAll={handleStopAll}
+
+        viewZoom={viewZoom}
+        setViewZoom={setViewZoom}
       />
 
       <LimitLayerControls settings={settings} updateSettings={updateSettings} draggingId={draggingId} setDraggingId={setDraggingId} uiScale={effectiveScale} />

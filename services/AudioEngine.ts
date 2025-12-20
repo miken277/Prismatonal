@@ -26,6 +26,9 @@ class AudioEngine {
   // Cache active presets for FX updates
   private activePresets: PresetState;
 
+  // Sample Registry (ID -> Name)
+  private loadedSamples: Map<string, string> = new Map();
+
   constructor() {
     // Initialize Presets safely
     const rawPresets = store.getSnapshot().presets;
@@ -195,6 +198,38 @@ class AudioEngine {
 
     return this.initPromise;
   }
+
+  // --- SAMPLE MANAGEMENT ---
+
+  public async loadUserSample(file: File): Promise<string> {
+      await this.init();
+      if (!this.ctx) throw new Error("Audio Context not ready");
+
+      const arrayBuffer = await file.arrayBuffer();
+      const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
+      
+      // Convert to mono Float32Array for the engine
+      const channelData = audioBuffer.getChannelData(0); 
+      
+      const id = `sample-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      
+      if (this.workletNode) {
+          this.workletNode.port.postMessage({
+              type: 'load_sample',
+              id: id,
+              data: channelData
+          });
+      }
+      
+      this.loadedSamples.set(id, file.name.substring(0, 20)); // Store name for UI
+      return id;
+  }
+
+  public getAvailableSamples(): { id: string, name: string }[] {
+      return Array.from(this.loadedSamples.entries()).map(([id, name]) => ({ id, name }));
+  }
+
+  // --- EXISTING METHODS ---
 
   private setupFX() {
     if (!this.ctx) return;

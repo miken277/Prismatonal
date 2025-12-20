@@ -1,4 +1,3 @@
-
 import React, { useRef, useState, useEffect } from 'react';
 import { AppSettings, ButtonShape, ChordDefinition, BackgroundMode, LimitColorMap, KeyMappings, TuningSystem, LayoutApproach } from '../types';
 import { DEFAULT_COLORS } from '../constants';
@@ -20,7 +19,7 @@ const PRESET_PALETTES: Record<string, LimitColorMap> = {
     'slate_grey': { 1: '#F1F5F9', 3: '#94A3B8', 5: '#64748B', 7: '#F43F5E', 11: '#818CF8', 13: '#34D399' }
 };
 
-const NumberInput = ({ value, min, max, onChange, suffix = "", className = "", disabled = false }: { value: number; min: number; max: number; onChange: (val: number) => void; suffix?: string; className?: string; disabled?: boolean; }) => {
+const NumberInput = ({ value, min, max, onChange, suffix = "", className = "", disabled = false, ariaLabel }: { value: number; min: number; max: number; onChange: (val: number) => void; suffix?: string; className?: string; disabled?: boolean; ariaLabel?: string; }) => {
     const safeValue = (typeof value === 'number' && !isNaN(value)) ? value : min;
     const [text, setText] = useState(safeValue.toString());
     const [prevValue, setPrevValue] = useState(safeValue);
@@ -46,7 +45,16 @@ const NumberInput = ({ value, min, max, onChange, suffix = "", className = "", d
     return (
         <div className={`flex flex-col flex-grow ${disabled ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
             <div className="relative">
-                <input type="text" inputMode="decimal" value={text} onChange={handleChange} onBlur={handleBlur} disabled={disabled} className={`w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600 focus:outline-none focus:border-blue-500 transition-colors ${className} ${error ? 'border-red-500 focus:border-red-500' : ''}`} />
+                <input 
+                    type="text" 
+                    inputMode="decimal" 
+                    value={text} 
+                    onChange={handleChange} 
+                    onBlur={handleBlur} 
+                    disabled={disabled} 
+                    className={`w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600 focus:outline-none focus:border-blue-500 transition-colors ${className} ${error ? 'border-red-500 focus:border-red-500' : ''}`} 
+                    aria-label={ariaLabel}
+                />
                 {suffix && <span className="absolute right-3 top-2 text-sm text-slate-400 pointer-events-none">{suffix}</span>}
             </div>
             {error && <span className="text-[10px] text-red-400 mt-1 font-bold animate-pulse">{error}</span>}
@@ -164,7 +172,7 @@ const SkinPreviewCanvas = ({ skin, colors }: { skin: string, colors: LimitColorM
 
     }, [skin, colors]);
 
-    return <canvas ref={canvasRef} width={120} height={50} className="rounded border border-slate-600 bg-slate-900/50 shadow-inner" />;
+    return <canvas ref={canvasRef} width={120} height={50} className="rounded border border-slate-600 bg-slate-900/50 shadow-inner" aria-hidden="true" />;
 };
 
 const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings }) => {
@@ -222,7 +230,11 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
       return (
           <div className="flex justify-between items-center bg-slate-800 p-2 rounded border border-slate-700 hover:border-slate-600 transition-colors">
               <span className="text-sm font-bold text-slate-300">{label}</span>
-              <button onClick={() => setListeningFor(actionKey)} className={`px-3 py-1 text-xs font-mono font-bold rounded min-w-[80px] border transition-all ${isListening ? 'bg-red-900 border-red-500 text-white animate-pulse' : 'bg-slate-700 border-slate-600 text-blue-300 hover:bg-slate-600'}`}>
+              <button 
+                onClick={() => setListeningFor(actionKey)} 
+                className={`px-3 py-1 text-xs font-mono font-bold rounded min-w-[80px] border transition-all ${isListening ? 'bg-red-900 border-red-500 text-white animate-pulse' : 'bg-slate-700 border-slate-600 text-blue-300 hover:bg-slate-600'}`}
+                aria-label={`Bind key for ${label}. Current key: ${currentKey}`}
+              >
                   {isListening ? 'Press Key...' : currentKey}
               </button>
           </div>
@@ -245,10 +257,10 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   const renderBaseFrequency = () => (
       <div className="bg-slate-900/60 p-4 rounded-lg border border-blue-500/20 mb-6">
           <div className="flex justify-between items-center mb-2">
-            <h3 className="font-bold text-blue-400 text-xs uppercase tracking-widest">Global Tuning Center</h3>
+            <h3 className="font-bold text-blue-400 text-xs uppercase tracking-widest" id="base-freq-label">Global Tuning Center</h3>
             <span className="text-[9px] text-slate-500 font-mono">1/1 REFERENCE</span>
           </div>
-          <NumberInput value={settings.baseFrequency} min={20} max={15000} suffix="Hz" onChange={(val) => handleChange('baseFrequency', val)} />
+          <NumberInput value={settings.baseFrequency} min={20} max={15000} suffix="Hz" onChange={(val) => handleChange('baseFrequency', val)} ariaLabel="Base Frequency (Hz)" />
           <p className="text-[10px] text-slate-500 mt-2 italic">Sets the fundamental frequency for the origin node across all tuning modes.</p>
       </div>
   );
@@ -293,9 +305,10 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
     return (
       <div className="bg-slate-900/60 p-4 rounded-lg border border-indigo-500/20 mb-6">
-          <label className="block text-[10px] text-indigo-400 font-bold uppercase mb-2 tracking-widest">Layout & Orientation</label>
+          <label className="block text-[10px] text-indigo-400 font-bold uppercase mb-2 tracking-widest" htmlFor="layout-select">Layout & Orientation</label>
           <div className="flex gap-2">
               <select 
+                  id="layout-select"
                   value={settings.layoutApproach} 
                   onChange={(e) => handleChange('layoutApproach', e.target.value as LayoutApproach)}
                   className="flex-1 bg-slate-800 border border-slate-600 rounded p-1.5 text-[10px] text-white focus:outline-none focus:border-indigo-500"
@@ -320,9 +333,10 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
               <div className="space-y-6">
                   {/* Skin Selector */}
                   <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Skin Appearance</h4>
+                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2" id="skin-label">Skin Appearance</h4>
                       <div className="flex gap-4 items-start">
                           <select 
+                              aria-labelledby="skin-label"
                               value={settings.activeSkin} 
                               onChange={(e) => handleChange('activeSkin', e.target.value)}
                               className="flex-1 bg-slate-800 border border-slate-600 rounded p-2 text-xs text-white focus:outline-none focus:border-blue-500 min-h-[40px]"
@@ -341,28 +355,28 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                   {/* Node Graphics Controls */}
                   <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
                       <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Node Graphics</h4>
-                      <div>
+                      <div role="group" aria-label="Button Shape Selection">
                         <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Button Shape</label>
                         <div className="flex gap-2">
-                          <button onClick={() => handleChange('buttonShape', ButtonShape.CIRCLE)} className={`flex-1 py-1.5 text-[10px] font-bold rounded border ${settings.buttonShape === ButtonShape.CIRCLE ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>CIRCLE</button>
-                          <button onClick={() => handleChange('buttonShape', ButtonShape.DIAMOND)} className={`flex-1 py-1.5 text-[10px] font-bold rounded border ${settings.buttonShape === ButtonShape.DIAMOND ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>DIAMOND</button>
+                          <button onClick={() => handleChange('buttonShape', ButtonShape.CIRCLE)} aria-pressed={settings.buttonShape === ButtonShape.CIRCLE} className={`flex-1 py-1.5 text-[10px] font-bold rounded border ${settings.buttonShape === ButtonShape.CIRCLE ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>CIRCLE</button>
+                          <button onClick={() => handleChange('buttonShape', ButtonShape.DIAMOND)} aria-pressed={settings.buttonShape === ButtonShape.DIAMOND} className={`flex-1 py-1.5 text-[10px] font-bold rounded border ${settings.buttonShape === ButtonShape.DIAMOND ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>DIAMOND</button>
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase">Button Size</label>
-                        <input type="range" min="0.5" max="2.0" step="0.1" value={settings.buttonSizeScale} onChange={(e) => handleChange('buttonSizeScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase" htmlFor="btn-size">Button Size</label>
+                        <input id="btn-size" type="range" min="0.5" max="2.0" step="0.1" value={settings.buttonSizeScale} onChange={(e) => handleChange('buttonSizeScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                       </div>
                       <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase">Spacing</label>
-                        <input type="range" min="0.5" max="5.0" step="0.1" value={settings.buttonSpacingScale} onChange={(e) => handleChange('buttonSpacingScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase" htmlFor="btn-spacing">Spacing</label>
+                        <input id="btn-spacing" type="range" min="0.5" max="5.0" step="0.1" value={settings.buttonSpacingScale} onChange={(e) => handleChange('buttonSpacingScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                       </div>
                       <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase">Latched Zoom</label>
-                        <input type="range" min="1.0" max="2.0" step="0.05" value={settings.latchedZoomScale} onChange={(e) => handleChange('latchedZoomScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase" htmlFor="zoom-scale">Latched Zoom</label>
+                        <input id="zoom-scale" type="range" min="1.0" max="2.0" step="0.05" value={settings.latchedZoomScale} onChange={(e) => handleChange('latchedZoomScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                       </div>
                       <label className="flex items-center justify-between cursor-pointer pt-1">
                         <span className="text-[10px] font-bold text-slate-400 uppercase">Show Fraction Bar</span>
-                        <input type="checkbox" checked={settings.showFractionBar} onChange={(e) => handleChange('showFractionBar', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
+                        <input type="checkbox" checked={settings.showFractionBar} onChange={(e) => handleChange('showFractionBar', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" aria-label="Toggle fraction bar display" />
                       </label>
                   </div>
               </div>
@@ -371,8 +385,8 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
               <div className="space-y-6">
                   {/* Background Controls */}
                   <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Background</h4>
-                      <select value={settings.backgroundMode} onChange={(e) => handleChange('backgroundMode', e.target.value as BackgroundMode)} className="w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600">
+                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2" id="bg-label">Background</h4>
+                      <select aria-labelledby="bg-label" value={settings.backgroundMode} onChange={(e) => handleChange('backgroundMode', e.target.value as BackgroundMode)} className="w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600">
                         <option value="charcoal">Charcoal</option>
                         <option value="midnight_blue">Midnight Blue</option>
                         <option value="deep_maroon">Deep Maroon</option>
@@ -386,20 +400,20 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       {settings.backgroundMode === 'rainbow' && (
                         <div className="space-y-3 bg-slate-800/50 p-3 rounded">
                           <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Saturation</span> <span>{settings.rainbowSaturation}%</span></label>
-                            <input type="range" min="0" max="100" value={settings.rainbowSaturation} onChange={(e) => handleChange('rainbowSaturation', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold" htmlFor="rainbow-sat"><span>Saturation</span> <span>{settings.rainbowSaturation}%</span></label>
+                            <input id="rainbow-sat" type="range" min="0" max="100" value={settings.rainbowSaturation} onChange={(e) => handleChange('rainbowSaturation', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                           </div>
                           <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Brightness</span> <span>{settings.rainbowBrightness}%</span></label>
-                            <input type="range" min="0" max="100" value={settings.rainbowBrightness} onChange={(e) => handleChange('rainbowBrightness', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold" htmlFor="rainbow-bright"><span>Brightness</span> <span>{settings.rainbowBrightness}%</span></label>
+                            <input id="rainbow-bright" type="range" min="0" max="100" value={settings.rainbowBrightness} onChange={(e) => handleChange('rainbowBrightness', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                           </div>
                           <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Offset</span> <span>{settings.rainbowOffset}°</span></label>
-                            <input type="range" min="0" max="360" value={settings.rainbowOffset} onChange={(e) => handleChange('rainbowOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold" htmlFor="rainbow-offset"><span>Offset</span> <span>{settings.rainbowOffset}°</span></label>
+                            <input id="rainbow-offset" type="range" min="0" max="360" value={settings.rainbowOffset} onChange={(e) => handleChange('rainbowOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                           </div>
                           <label className="flex items-center justify-between cursor-pointer">
                             <span className="text-[10px] font-bold text-slate-400 uppercase">Colored Node Illumination</span>
-                            <input type="checkbox" checked={settings.isColoredIlluminationEnabled} onChange={(e) => handleChange('isColoredIlluminationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
+                            <input type="checkbox" checked={settings.isColoredIlluminationEnabled} onChange={(e) => handleChange('isColoredIlluminationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" aria-label="Toggle colored illumination" />
                           </label>
                         </div>
                       )}
@@ -410,11 +424,11 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                           <button onClick={() => bgImageInputRef.current?.click()} className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-xs font-bold rounded border border-slate-600 transition">Upload Image</button>
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-bold text-slate-400 uppercase">Tiling</span>
-                            <input type="checkbox" checked={settings.backgroundTiling} onChange={(e) => handleChange('backgroundTiling', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
+                            <input type="checkbox" checked={settings.backgroundTiling} onChange={(e) => handleChange('backgroundTiling', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" aria-label="Toggle background tiling" />
                           </div>
                           <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Y Offset</span> <span>{settings.backgroundYOffset}px</span></label>
-                            <input type="range" min="-1000" max="1000" step="10" value={settings.backgroundYOffset} onChange={(e) => handleChange('backgroundYOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold" htmlFor="bg-offset"><span>Y Offset</span> <span>{settings.backgroundYOffset}px</span></label>
+                            <input id="bg-offset" type="range" min="-1000" max="1000" step="10" value={settings.backgroundYOffset} onChange={(e) => handleChange('backgroundYOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
                           </div>
                         </div>
                       )}
@@ -428,7 +442,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                             {[1, 3, 5, 7, 11, 13].map(limit => (
                               <div key={limit} className="flex flex-col items-center p-2 bg-slate-800 rounded border border-slate-700/50">
                                 <span className="text-[9px] font-bold text-slate-500 mb-1">{limit}-L</span>
-                                <input type="color" value={settings.colors[limit]} onChange={(e) => handleColorChange(limit, e.target.value)} className="w-full h-6 bg-transparent border-none cursor-pointer rounded" />
+                                <input type="color" value={settings.colors[limit]} onChange={(e) => handleColorChange(limit, e.target.value)} className="w-full h-6 bg-transparent border-none cursor-pointer rounded" aria-label={`Color for ${limit}-limit`} />
                               </div>
                             ))}
                           </div>
@@ -440,28 +454,28 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   );
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center backdrop-blur-sm">
+    <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="bg-slate-800 rounded-xl w-[95%] max-w-4xl max-h-[90vh] overflow-hidden text-slate-200 shadow-2xl border border-slate-700 flex flex-col">
         <div className="flex justify-between items-center p-6 border-b border-slate-700 bg-slate-800 flex-shrink-0 relative z-10">
-          <h2 className="text-2xl font-bold text-white">System Settings</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition group">
+          <h2 id="settings-title" className="text-2xl font-bold text-white">System Settings</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition group" aria-label="Close Settings">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
         
-        <div className="flex border-b border-slate-700 bg-slate-900/50 overflow-x-auto flex-shrink-0 relative z-10">
-           <button onClick={() => setActiveTab('tonality')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'tonality' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Tonality</button>
-           <button onClick={() => setActiveTab('behavior')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'behavior' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Behavior</button>
-           <button onClick={() => setActiveTab('graphics')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'graphics' ? 'text-pink-400 border-b-2 border-pink-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Graphics</button>
-           <button onClick={() => setActiveTab('midi')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'midi' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>MIDI</button>
-           <button onClick={() => setActiveTab('data')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'data' ? 'text-orange-400 border-b-2 border-orange-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Data</button>
+        <div className="flex border-b border-slate-700 bg-slate-900/50 overflow-x-auto flex-shrink-0 relative z-10" role="tablist">
+           <button role="tab" aria-selected={activeTab === 'tonality'} aria-controls="panel-tonality" onClick={() => setActiveTab('tonality')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'tonality' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Tonality</button>
+           <button role="tab" aria-selected={activeTab === 'behavior'} aria-controls="panel-behavior" onClick={() => setActiveTab('behavior')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'behavior' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Behavior</button>
+           <button role="tab" aria-selected={activeTab === 'graphics'} aria-controls="panel-graphics" onClick={() => setActiveTab('graphics')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'graphics' ? 'text-pink-400 border-b-2 border-pink-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Graphics</button>
+           <button role="tab" aria-selected={activeTab === 'midi'} aria-controls="panel-midi" onClick={() => setActiveTab('midi')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'midi' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>MIDI</button>
+           <button role="tab" aria-selected={activeTab === 'data'} aria-controls="panel-data" onClick={() => setActiveTab('data')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'data' ? 'text-orange-400 border-b-2 border-orange-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Data</button>
         </div>
 
         <div className="p-6 overflow-y-auto flex-1 min-h-0 bg-slate-800">
             {activeTab === 'tonality' && (
-              <div className="space-y-6 animate-in fade-in duration-300">
+              <div role="tabpanel" id="panel-tonality" className="space-y-6 animate-in fade-in duration-300">
                   <div className="flex flex-col md:flex-row gap-4 items-center bg-slate-900/40 p-2 rounded-lg border border-slate-700/50 mb-2">
                      {(['ji', 'et', 'indian', 'pythagorean'] as TuningSystem[]).map(sys => (
                          <button 
@@ -489,7 +503,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                       {[3, 5, 7, 11, 13].map(limit => (
                                           <div key={limit} className="flex items-center gap-3">
                                               <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
-                                              <input type="range" min="0" max="6" step="1" value={settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0} onChange={(e) => handleLimitDepthChange(limit as any, parseInt(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                                              <input aria-label={`Depth for ${limit}-limit`} type="range" min="0" max="6" step="1" value={settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0} onChange={(e) => handleLimitDepthChange(limit as any, parseInt(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
                                               <span className="text-xs font-mono w-4 text-right text-blue-400">{settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0}</span>
                                           </div>
                                       ))}
@@ -506,6 +520,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                                 value={settings.limitComplexities?.[limit as 3|5|7|11|13] ?? 1000} 
                                                 min={1} max={10000} 
                                                 onChange={(val) => handleLimitComplexityChange(limit as any, val)} 
+                                                ariaLabel={`${limit}-Limit Max Ratio`}
                                               />
                                           </div>
                                       ))}
@@ -528,11 +543,11 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                   <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
                                       <div>
                                           <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Equal Divisions (EDO)</label>
-                                          <NumberInput value={12} min={1} max={1200} onChange={() => {}} suffix="Notes" />
+                                          <NumberInput value={12} min={1} max={1200} onChange={() => {}} suffix="Notes" ariaLabel="EDO Count" />
                                       </div>
                                       <div>
                                           <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Root MIDI Note</label>
-                                          <NumberInput value={60} min={0} max={127} onChange={() => {}} suffix="Note #" />
+                                          <NumberInput value={60} min={0} max={127} onChange={() => {}} suffix="Note #" ariaLabel="Root MIDI Note" />
                                       </div>
                                   </div>
                               </div>
@@ -541,7 +556,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                   <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
                                       <div>
                                           <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Reference A4</label>
-                                          <NumberInput value={440} min={400} max={500} onChange={() => {}} suffix="Hz" />
+                                          <NumberInput value={440} min={400} max={500} onChange={() => {}} suffix="Hz" ariaLabel="Reference A4 Hz" />
                                       </div>
                                       <div className="opacity-50">
                                           <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Octave Stretch</span> <span>0.00</span></label>
@@ -605,7 +620,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                   <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
                                       <div>
                                           <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Stack Depth</label>
-                                          <NumberInput value={12} min={1} max={53} onChange={() => {}} suffix="Steps" />
+                                          <NumberInput value={12} min={1} max={53} onChange={() => {}} suffix="Steps" ariaLabel="Stack Depth" />
                                       </div>
                                       <div className="space-y-2">
                                           <label className="block text-[10px] text-slate-400 font-bold uppercase">Stack Direction</label>
@@ -639,7 +654,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
             )}
 
             {activeTab === 'behavior' && (
-              <div className="space-y-8 animate-in fade-in duration-300">
+              <div role="tabpanel" id="panel-behavior" className="space-y-8 animate-in fade-in duration-300">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-6">
                     <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1">Audio Performance</h3>
@@ -659,16 +674,16 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                     <div className="space-y-4">
                       <label className="flex items-center justify-between cursor-pointer">
                         <span className="text-sm font-semibold">Enable Keyboard Shortcuts</span>
-                        <input type="checkbox" checked={settings.enableKeyboardShortcuts} onChange={(e) => handleChange('enableKeyboardShortcuts', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
+                        <input type="checkbox" checked={settings.enableKeyboardShortcuts} onChange={(e) => handleChange('enableKeyboardShortcuts', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" aria-label="Enable Keyboard Shortcuts" />
                       </label>
                       <label className="flex items-center justify-between cursor-pointer">
                         <span className="text-sm font-semibold">Chords Always Relatch</span>
-                        <input type="checkbox" checked={settings.chordsAlwaysRelatch} onChange={(e) => handleChange('chordsAlwaysRelatch', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
+                        <input type="checkbox" checked={settings.chordsAlwaysRelatch} onChange={(e) => handleChange('chordsAlwaysRelatch', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" aria-label="Always Relatch Chords" />
                       </label>
                       <div className="space-y-2">
-                        <label className="block text-sm font-semibold">Strum Duration</label>
+                        <label className="block text-sm font-semibold" htmlFor="strum-duration">Strum Duration</label>
                         <div className="flex items-center gap-3">
-                          <input type="range" min="0.1" max="2.0" step="0.1" value={settings.strumDuration} onChange={(e) => handleChange('strumDuration', parseFloat(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                          <input id="strum-duration" type="range" min="0.1" max="2.0" step="0.1" value={settings.strumDuration} onChange={(e) => handleChange('strumDuration', parseFloat(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
                           <span className="text-xs font-mono w-10">{settings.strumDuration.toFixed(1)}s</span>
                         </div>
                       </div>
@@ -695,13 +710,13 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
             )}
 
             {activeTab === 'graphics' && (
-              <div className="space-y-8 animate-in fade-in duration-300">
+              <div role="tabpanel" id="panel-graphics" className="space-y-8 animate-in fade-in duration-300">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-6">
                     <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">UI & Layout</h3>
                     <div className="space-y-4">
                        <label className="flex items-center space-x-3 cursor-pointer p-3 bg-slate-700/50 rounded-lg border border-yellow-500/30">
-                            <input type="checkbox" checked={settings.uiUnlocked} onChange={(e) => handleChange('uiUnlocked', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-yellow-500 focus:ring-yellow-500" />
+                            <input type="checkbox" checked={settings.uiUnlocked} onChange={(e) => handleChange('uiUnlocked', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-yellow-500 focus:ring-yellow-500" aria-label="Unlock UI Layout" />
                             <div><span className={`font-bold block ${settings.uiUnlocked ? 'text-yellow-400' : 'text-slate-300'}`}>Unlock UI Layout</span></div>
                         </label>
                         <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-2">
@@ -721,13 +736,13 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                     <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Display Area</h3>
                     <div className="space-y-4 bg-slate-900/40 p-4 rounded border border-slate-700/50">
                         <div>
-                            <label className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>Canvas Resolution</span> <span className="text-white">{settings.canvasSize}px</span></label>
-                            <input type="range" min="1000" max="5000" step="100" value={settings.canvasSize} onChange={(e) => handleChange('canvasSize', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
+                            <label className="flex justify-between text-xs font-bold text-slate-400 mb-1" htmlFor="canvas-res"><span>Canvas Resolution</span> <span className="text-white">{settings.canvasSize}px</span></label>
+                            <input id="canvas-res" type="range" min="1000" max="5000" step="100" value={settings.canvasSize} onChange={(e) => handleChange('canvasSize', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
                             <p className="text-[10px] text-slate-500 mt-1 italic">Determines the total scrollable area size.</p>
                         </div>
                         <div>
-                            <label className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>Lattice Aspect Ratio</span> <span className="text-white">{settings.latticeAspectRatio.toFixed(2)}</span></label>
-                            <input type="range" min="0.5" max="2.0" step="0.05" value={settings.latticeAspectRatio} onChange={(e) => handleChange('latticeAspectRatio', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
+                            <label className="flex justify-between text-xs font-bold text-slate-400 mb-1" htmlFor="lattice-ratio"><span>Lattice Aspect Ratio</span> <span className="text-white">{settings.latticeAspectRatio.toFixed(2)}</span></label>
+                            <input id="lattice-ratio" type="range" min="0.5" max="2.0" step="0.05" value={settings.latticeAspectRatio} onChange={(e) => handleChange('latticeAspectRatio', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
                             <p className="text-[10px] text-slate-500 mt-1 italic">Adjusts horizontal compression relative to pitch height.</p>
                         </div>
                     </div>
@@ -736,15 +751,15 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                     <div className="space-y-4 bg-slate-900/40 p-4 rounded border border-slate-700/50">
                         <label className="flex items-center justify-between cursor-pointer">
                             <span className="text-xs font-bold text-slate-400 uppercase">Enable Voice Leading Animation</span>
-                            <input type="checkbox" checked={settings.isVoiceLeadingAnimationEnabled} onChange={(e) => handleChange('isVoiceLeadingAnimationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
+                            <input type="checkbox" checked={settings.isVoiceLeadingAnimationEnabled} onChange={(e) => handleChange('isVoiceLeadingAnimationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" aria-label="Toggle voice leading animation" />
                         </label>
                         <div className={`space-y-2 transition-opacity ${settings.isVoiceLeadingAnimationEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                            <label className="flex justify-between text-xs font-bold text-slate-400"><span>Animation Duration</span> <span className="text-white">{settings.voiceLeadingAnimationSpeed}s</span></label>
-                            <input type="range" min="0.5" max="5.0" step="0.1" value={settings.voiceLeadingAnimationSpeed} onChange={(e) => handleChange('voiceLeadingAnimationSpeed', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
+                            <label className="flex justify-between text-xs font-bold text-slate-400" htmlFor="anim-speed"><span>Animation Duration</span> <span className="text-white">{settings.voiceLeadingAnimationSpeed}s</span></label>
+                            <input id="anim-speed" type="range" min="0.5" max="5.0" step="0.1" value={settings.voiceLeadingAnimationSpeed} onChange={(e) => handleChange('voiceLeadingAnimationSpeed', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
                         </div>
                         <label className="flex items-center justify-between cursor-pointer border-t border-slate-700/50 pt-2">
                             <span className="text-xs font-bold text-slate-400 uppercase">Active Line Brightening</span>
-                            <input type="checkbox" checked={settings.lineBrighteningEnabled} onChange={(e) => handleChange('lineBrighteningEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
+                            <input type="checkbox" checked={settings.lineBrighteningEnabled} onChange={(e) => handleChange('lineBrighteningEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" aria-label="Toggle active line brightening" />
                         </label>
                     </div>
                   </div>
@@ -753,7 +768,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
             )}
 
             {activeTab === 'midi' && (
-              <div className="space-y-8 animate-in fade-in duration-300">
+              <div role="tabpanel" id="panel-midi" className="space-y-8 animate-in fade-in duration-300">
                 <div className="max-w-xl mx-auto space-y-6">
                   <h3 className="font-semibold text-green-400 border-b border-slate-700 pb-1">External MIDI Output</h3>
                   <div className="bg-slate-900/40 p-6 rounded-lg border border-slate-700 space-y-6">
@@ -762,7 +777,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         <span className="text-sm font-bold text-white">Enable MIDI Engine</span>
                         <p className="text-[10px] text-slate-500 uppercase">Requires Chrome, Edge, or Opera</p>
                       </div>
-                      <input type="checkbox" checked={settings.midiEnabled} onChange={(e) => handleChange('midiEnabled', e.target.checked)} className="w-6 h-6 rounded border-slate-600 text-green-500" />
+                      <input type="checkbox" checked={settings.midiEnabled} onChange={(e) => handleChange('midiEnabled', e.target.checked)} className="w-6 h-6 rounded border-slate-600 text-green-500" aria-label="Toggle MIDI Engine" />
                     </label>
 
                     <div className={`space-y-4 transition-opacity ${settings.midiEnabled ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
@@ -777,7 +792,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       <div>
                         <label className="block text-xs font-bold text-slate-400 mb-2 uppercase">Pitch Bend Range</label>
                         <div className="flex gap-4 items-center">
-                          <NumberInput value={settings.midiPitchBendRange} min={1} max={48} suffix="Semis" onChange={(val) => handleChange('midiPitchBendRange', val)} />
+                          <NumberInput value={settings.midiPitchBendRange} min={1} max={48} suffix="Semis" onChange={(val) => handleChange('midiPitchBendRange', val)} ariaLabel="MIDI Pitch Bend Range" />
                           <div className="flex-1 flex gap-2">
                             {[2, 12, 24, 48].map(range => (
                               <button key={range} onClick={() => handleChange('midiPitchBendRange', range)} className={`flex-1 py-1.5 text-[10px] font-bold rounded border ${settings.midiPitchBendRange === range ? 'bg-green-600 border-green-500' : 'bg-slate-700 border-slate-600'}`}>{range}</button>
@@ -797,7 +812,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
             )}
 
             {activeTab === 'data' && (
-                <div className="space-y-8 animate-in fade-in duration-300">
+                <div role="tabpanel" id="panel-data" className="space-y-8 animate-in fade-in duration-300">
                     <div className="space-y-6">
                         <h3 className="font-semibold text-orange-400 border-b border-slate-700 pb-1">Backup & Restore</h3>
                         <p className="text-sm text-slate-400">Manage your entire PrismaTonal configuration in a single XML file.</p>

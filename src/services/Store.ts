@@ -20,6 +20,14 @@ class PrismaStore {
     if (savedSettings) {
         try {
             const parsed = JSON.parse(savedSettings);
+            
+            // Explicitly merge UI positions to ensure new keys (like 'zoom') are present
+            // even if the saved object lacks them.
+            const mergedUiPositions = {
+                ...DEFAULT_SETTINGS.uiPositions,
+                ...(parsed.uiPositions || {})
+            };
+
             loadedSettings = {
                 ...DEFAULT_SETTINGS,
                 ...parsed,
@@ -28,7 +36,7 @@ class PrismaStore {
                 limitComplexities: { ...DEFAULT_SETTINGS.limitComplexities, ...(parsed.limitComplexities || {}) },
                 colors: { ...DEFAULT_COLORS, ...(parsed.colors || {}) }, 
                 limitVisuals: { ...DEFAULT_SETTINGS.limitVisuals, ...(parsed.limitVisuals || {}) },
-                uiPositions: { ...DEFAULT_SETTINGS.uiPositions, ...(parsed.uiPositions || {}) },
+                uiPositions: mergedUiPositions,
                 arpeggios: parsed.arpeggios || DEFAULT_SETTINGS.arpeggios,
                 arpBpm: parsed.arpBpm || DEFAULT_SETTINGS.arpBpm,
                 generationOrigins: parsed.generationOrigins || DEFAULT_SETTINGS.generationOrigins

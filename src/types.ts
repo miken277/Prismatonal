@@ -247,6 +247,7 @@ export interface AppSettings {
     chords: XYPos;
     layers: XYPos;
     arpeggioBar: XYPos;
+    zoom: XYPos; // NEW
   };
 }
 
