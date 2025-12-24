@@ -121,7 +121,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   activeSkin: 'default',
   limitDepths: { 3: 3, 5: 2, 7: 1, 11: 1, 13: 1 },
   limitComplexities: { 3: 1000, 5: 1000, 7: 100, 11: 100, 13: 100 },
-  generationOrigins: [{ coords: [0,0,0,0,0], octave: 0 }],
   showIncreaseDepthButton: true,
   centerResetsDepth: false,
   savedChords: generateChordSlots(),

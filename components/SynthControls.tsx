@@ -1,9 +1,8 @@
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { SynthPreset, WaveformType, OscillatorConfig, ModSource, ModTarget, ReverbType, PresetState, PlayMode, ArpDirection, ArpDivision } from '../types';
 import { PRESETS, REVERB_DEFAULTS } from '../constants';
 import { useStore } from '../services/Store';
-import { audioEngine } from '../services/AudioEngine';
 
 interface Props {
   presets: PresetState;
@@ -71,16 +70,6 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
   const [saveSlotIndex, setSaveSlotIndex] = useState(0);
   const [saveName, setSaveName] = useState("");
   const [draggingCell, setDraggingCell] = useState<{ source: ModSource, target: ModTarget, startY: number, startVal: number } | null>(null);
-  
-  // Sample State
-  const [availableSamples, setAvailableSamples] = useState<{id: string, name: string}[]>([]);
-  const sampleInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-      if (isOpen) {
-          setAvailableSamples(audioEngine.getAvailableSamples());
-      }
-  }, [isOpen]);
 
   const categorizedPresets = useMemo(() => {
       const groups: Record<string, SynthPreset[]> = {};
@@ -179,17 +168,6 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
       }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, oscKey: 'osc1' | 'osc2' | 'osc3') => {
-      const file = e.target.files?.[0];
-      if (file) {
-          audioEngine.loadUserSample(file).then(id => {
-              setAvailableSamples(audioEngine.getAvailableSamples());
-              updateOsc(oscKey, 'sampleId', id);
-          }).catch(err => console.error("Sample load failed", err));
-      }
-      if (sampleInputRef.current) sampleInputRef.current.value = '';
-  };
-
   const renderOscillatorTab = (oscKey: 'osc1' | 'osc2' | 'osc3', label: string) => {
       const config = currentPreset[oscKey];
       const canToggle = oscKey !== 'osc1'; 
@@ -206,42 +184,11 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
               </div>
               <div className={`space-y-6 ${!config.enabled ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
                 <div className="p-3 bg-slate-900/50 rounded border border-slate-700">
-                    <div className="grid grid-cols-5 gap-1 mb-4">
+                    <div className="grid grid-cols-4 gap-1 mb-4">
                         {Object.values(WaveformType).map(w => (
-                            <button key={w} onClick={() => updateOsc(oscKey, 'waveform', w)} className={`px-1 py-1 text-[9px] font-bold uppercase rounded border ${config.waveform === w ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>{w}</button>
+                            <button key={w} onClick={() => updateOsc(oscKey, 'waveform', w)} className={`px-1 py-1 text-[10px] rounded border ${config.waveform === w ? 'bg-indigo-600 border-indigo-500' : 'bg-slate-700 border-slate-600'}`}>{w}</button>
                         ))}
                     </div>
-                    
-                    {config.waveform === 'sample' && (
-                        <div className="mb-4 space-y-2 bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
-                            <label className="text-[10px] font-bold text-indigo-300 uppercase block">Sample Selection</label>
-                            <select 
-                                value={config.sampleId || ''} 
-                                onChange={(e) => updateOsc(oscKey, 'sampleId', e.target.value)}
-                                className="w-full bg-slate-800 text-xs rounded p-1 border border-slate-600 mb-2"
-                            >
-                                <option value="">Select a Sample...</option>
-                                {availableSamples.map(s => (
-                                    <option key={s.id} value={s.id}>{s.name}</option>
-                                ))}
-                            </select>
-                            <input 
-                                type="file" 
-                                ref={sampleInputRef} 
-                                className="hidden" 
-                                accept="audio/*" 
-                                onChange={(e) => handleFileUpload(e, oscKey)} 
-                            />
-                            <button 
-                                onClick={() => sampleInputRef.current?.click()} 
-                                className="w-full py-1.5 bg-slate-700 hover:bg-slate-600 text-xs font-bold rounded border border-slate-600 transition"
-                            >
-                                Upload Audio File
-                            </button>
-                            <p className="text-[9px] text-slate-500 italic">Samples are re-pitched automatically (Root: Middle C)</p>
-                        </div>
-                    )}
-
                     <div className="space-y-3">
                         <div>
                             <label className="flex justify-between text-xs mb-1"><span>Mix</span> <span>{(config.gain * 100).toFixed(0)}%</span></label>

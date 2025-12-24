@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
@@ -99,12 +100,12 @@ const App: React.FC = () => {
       // QUADRUPLED SPACING LOGIC
       // internalBlockGap is the primary spacer for Center Display and Latch clusters
       const internalBlockGap = 24 * scale; 
-      // baseGap reduced to keep things tight with larger Arp bar
-      const baseGap = Math.max(marginPx, 16 * scale); 
+      // baseGap is the distance between clusters; scaled to match the increased "breath"
+      const baseGap = Math.max(marginPx, 32 * scale); 
 
-      // Dimensions - Updated to match FloatingControls
-      const volumeBarWidth = 400 * scale; 
-      const arpBarWidth = 840 * scale; 
+      // Dimensions
+      const volumeBarWidth = 600 * scale; 
+      const arpBarWidth = 675 * scale; 
       const settingsGroupWidth = 170; 
       const settingsGroupHeight = 40; 
       const largeBtn = 80 * scale; 

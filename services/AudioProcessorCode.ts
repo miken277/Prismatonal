@@ -6,7 +6,6 @@ const TWO_PI = 2 * Math.PI;
 const DUMMY_OSC_CONFIG = {
     enabled: false,
     waveform: 'sine',
-    sampleId: null,
     coarseDetune: 0,
     fineDetune: 0,
     gain: 0,
@@ -149,73 +148,41 @@ class Envelope {
 class Oscillator {
   constructor(sampleRate) {
     this.phase = 0.0; 
-    this.sampleCursor = 0.0; // For sample playback
     this.blep = new PolyBLEP(sampleRate);
     this.sampleRate = sampleRate;
   }
 
   reset() {
-      this.phase = 0.0;
-      this.sampleCursor = 0.0;
+      // Free-running oscillators - do not reset phase on key press
+      // this.phase = 0.0; 
   }
 
-  // sampleBuffer is a Float32Array (mono) or null
-  process(freq, type, dt, sampleBuffer) {
+  process(freq, type, dt) {
     if (!Number.isFinite(freq) || freq <= 0 || freq > 24000) return 0.0;
 
+    this.phase += dt * freq;
+    while (this.phase >= 1.0) this.phase -= 1.0;
+
     let sample = 0.0;
-
-    if (type === 'sample' && sampleBuffer) {
-        // Resampling logic
-        // Assuming base frequency of sample is Middle C (approx 261.63 Hz)
-        // Playback Rate = TargetFreq / BaseFreq
-        const baseFreq = 261.63;
-        const rate = freq / baseFreq;
-        
-        this.sampleCursor += rate; // dt is 1/samplerate, so at rate 1.0 we advance 1 sample per sample
-        
-        const len = sampleBuffer.length;
-        
-        // Loop the sample
-        while (this.sampleCursor >= len) {
-            this.sampleCursor -= len;
-        }
-
-        // Linear Interpolation
-        const idx = Math.floor(this.sampleCursor);
-        const frac = this.sampleCursor - idx;
-        
-        const nextIdx = (idx + 1) >= len ? 0 : idx + 1;
-        
-        const s1 = sampleBuffer[idx];
-        const s2 = sampleBuffer[nextIdx];
-        
-        sample = s1 + frac * (s2 - s1);
-
-    } else {
-        // Synthesized Waveforms
-        this.phase += dt * freq;
-        while (this.phase >= 1.0) this.phase -= 1.0;
-
-        switch (type) {
-          case 'sine':
-            sample = Math.sin(TWO_PI * this.phase);
-            break;
-          case 'triangle':
-            let t = -1.0 + (2.0 * this.phase);
-            sample = 2.0 * (Math.abs(t) - 0.5);
-            break;
-          case 'sawtooth':
-            sample = (2.0 * this.phase) - 1.0;
-            sample -= this.blep.get(this.phase, dt * freq);
-            break;
-          case 'square':
-            sample = this.phase < 0.5 ? 1.0 : -1.0;
-            sample += this.blep.get(this.phase, dt * freq);
-            let phase2 = (this.phase + 0.5) % 1.0;
-            sample -= this.blep.get(phase2, dt * freq);
-            break;
-        }
+    
+    switch (type) {
+      case 'sine':
+        sample = Math.sin(TWO_PI * this.phase);
+        break;
+      case 'triangle':
+        let t = -1.0 + (2.0 * this.phase);
+        sample = 2.0 * (Math.abs(t) - 0.5);
+        break;
+      case 'sawtooth':
+        sample = (2.0 * this.phase) - 1.0;
+        sample -= this.blep.get(this.phase, dt * freq);
+        break;
+      case 'square':
+        sample = this.phase < 0.5 ? 1.0 : -1.0;
+        sample += this.blep.get(this.phase, dt * freq);
+        let phase2 = (this.phase + 0.5) % 1.0;
+        sample -= this.blep.get(phase2, dt * freq);
+        break;
     }
     
     return sample;
@@ -257,10 +224,12 @@ class Voice {
     this.startTime = currentTime; 
     this.releaseTime = 0; 
     
-    // Reset sample cursors on trigger to restart sample from beginning
-    this.oscs.forEach(osc => osc.reset());
+    // Do not reset oscillator phase to avoid clicks
+    // this.oscs.forEach(osc => osc.reset());
     
     this.envs.forEach(env => {
+        // Soft reset: don't force value to 0 if retriggering to avoid pops
+        // env.reset(); 
         env.trigger();
     });
     
@@ -283,8 +252,7 @@ class Voice {
     return Math.max(this.envs[0].value, this.envs[1].value, this.envs[2].value);
   }
 
-  // Pass loaded sample registry to process
-  process(presetData, dt, sampleRegistry) {
+  process(presetData, dt) {
     if (!this.active || !presetData) return 0.0;
     
     // Smooth Pitch Glide
@@ -386,13 +354,7 @@ class Voice {
         const detuneMult = Math.pow(2, cents / 1200.0);
         const oscFreq = this.baseFreq * detuneMult;
 
-        // Retrieve Sample Buffer if ID exists and type is sample
-        let buf = null;
-        if (config.waveform === 'sample' && config.sampleId) {
-            buf = sampleRegistry.get(config.sampleId);
-        }
-
-        let signal = this.oscs[i].process(oscFreq, config.waveform, dt, buf);
+        let signal = this.oscs[i].process(oscFreq, config.waveform, dt);
 
         let cutoff = config.filterCutoff + hardFilter + (modCutoff * 5000);
         let res = config.filterResonance + (modRes * 10);
@@ -417,9 +379,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
     const OVERSAMPLE = 2;
     this.oversample = OVERSAMPLE;
     const workingRate = sampleRate * OVERSAMPLE;
-
-    // Sample Registry: Map<string, Float32Array>
-    this.samples = new Map();
 
     this.voices = [];
     // Increase physical voice limit to 64 to allow for large strums/washes
@@ -452,11 +411,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
       } else if (msg.type === 'config') {
          if (msg.polyphony) this.maxPolyphony = msg.polyphony;
          if (msg.strumDuration) this.strumDuration = msg.strumDuration;
-      } else if (msg.type === 'load_sample') {
-         // Store raw float32 audio data
-         if (msg.id && msg.data) {
-             this.samples.set(msg.id, msg.data);
-         }
       } else if (msg.type === 'note_on') {
         this.triggerVoice(msg.id, msg.freq, msg.voiceType);
       } else if (msg.type === 'note_off') {
@@ -607,8 +561,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
                     }
 
                     const presetToUse = this.presets[v.type] || this.presets.normal;
-                    // Pass the Sample Registry to the voice process method
-                    const val = v.process(presetToUse, dt, this.samples);
+                    const val = v.process(presetToUse, dt);
                     
                     if (Number.isFinite(val)) {
                         const spreadAmount = presetToUse.spread || 0;

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDirection, ArpDivision, ArpeggioStep } from '../types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH, DEFAULT_COLORS } from '../constants';
@@ -134,9 +135,9 @@ const FloatingControls: React.FC<Props> = ({
   const baseSize = largeBtnSize; 
   const chordSize = baseSize * chordShortcutSizeScale;
   
-  // Standardized dimensions: Volume is now wider and thinner. Arp increased significantly to fit O-P.
-  const volumeBarWidth = 400 * uiScale; 
-  const arpBarWidth = 840 * uiScale;
+  // Standardized dimensions: Volume is now wider and thinner. Arp increased by 1/4.
+  const volumeBarWidth = 600 * uiScale; 
+  const arpBarWidth = 675 * uiScale;
   
   const draggableStyle = (key: string) => ({
       left: uiPositions[key as keyof typeof uiPositions].x,

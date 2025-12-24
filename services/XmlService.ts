@@ -4,13 +4,12 @@ import { StoreState } from '../types';
 export class XmlService {
     
     static exportState(state: StoreState): string {
-        const { settings, presets, userBank, layout } = state;
+        const { settings, presets, userBank } = state;
         
         // Wrap large data structures in CDATA for safe XML inclusion of JSON
         const settingsJson = JSON.stringify(settings);
         const presetsJson = JSON.stringify(presets);
         const userBankJson = JSON.stringify(userBank);
-        const layoutJson = layout ? JSON.stringify(layout) : "";
 
         const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <PrismaTonalData version="1.0">
@@ -18,7 +17,6 @@ export class XmlService {
     <Settings><![CDATA[${settingsJson}]]></Settings>
     <ActivePresets><![CDATA[${presetsJson}]]></ActivePresets>
     <UserBank><![CDATA[${userBankJson}]]></UserBank>
-    <Layout><![CDATA[${layoutJson}]]></Layout>
 </PrismaTonalData>`;
 
         return xml;
@@ -41,7 +39,6 @@ export class XmlService {
                     const settingsNode = xmlDoc.getElementsByTagName("Settings")[0];
                     const presetsNode = xmlDoc.getElementsByTagName("ActivePresets")[0];
                     const userBankNode = xmlDoc.getElementsByTagName("UserBank")[0];
-                    const layoutNode = xmlDoc.getElementsByTagName("Layout")[0];
                     
                     const partialState: Partial<StoreState> = {};
 
@@ -55,17 +52,6 @@ export class XmlService {
 
                     if (userBankNode && userBankNode.textContent) {
                         partialState.userBank = JSON.parse(userBankNode.textContent);
-                    }
-
-                    if (layoutNode && layoutNode.textContent) {
-                        try {
-                            const parsedLayout = JSON.parse(layoutNode.textContent);
-                            if (parsedLayout && parsedLayout.nodes) {
-                                partialState.layout = parsedLayout;
-                            }
-                        } catch(lErr) {
-                            console.warn("Could not parse layout from XML");
-                        }
                     }
 
                     resolve(partialState);

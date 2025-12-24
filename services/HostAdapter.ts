@@ -45,10 +45,10 @@ export class WebHostAdapter implements IHostAdapter {
     async init(): Promise<boolean> {
         if ((navigator as any).requestMIDIAccess) {
             try {
-                this.access = await (navigator as any).requestMIDIAccess({ sysex: false });
+                this.access = await (navigator as any).requestMIDIAccess();
                 return true;
             } catch (e) {
-                console.warn("Web MIDI Access Refused: MIDI features will be disabled.", e);
+                console.error("Web MIDI Access Refused", e);
                 return false;
             }
         }

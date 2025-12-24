@@ -1,6 +1,6 @@
 
 import { useSyncExternalStore } from 'react';
-import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState, StoredLayout } from '../types';
+import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState } from '../types';
 import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_ARP_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS } from '../constants';
 import { XmlService } from './XmlService';
 
@@ -30,8 +30,7 @@ class PrismaStore {
                 limitVisuals: { ...DEFAULT_SETTINGS.limitVisuals, ...(parsed.limitVisuals || {}) },
                 uiPositions: { ...DEFAULT_SETTINGS.uiPositions, ...(parsed.uiPositions || {}) },
                 arpeggios: parsed.arpeggios || DEFAULT_SETTINGS.arpeggios,
-                arpBpm: parsed.arpBpm || DEFAULT_SETTINGS.arpBpm,
-                generationOrigins: parsed.generationOrigins || DEFAULT_SETTINGS.generationOrigins
+                arpBpm: parsed.arpBpm || DEFAULT_SETTINGS.arpBpm
             };
         } catch (e) {
             console.error("Failed to parse settings, reverting to defaults", e);
@@ -83,8 +82,7 @@ class PrismaStore {
     this.state = {
         settings: loadedSettings,
         presets: loadedPresets,
-        userBank: loadedUserBank,
-        layout: null // Layout is not persisted to localStorage to save space/quota
+        userBank: loadedUserBank
     };
   }
 
@@ -125,12 +123,6 @@ class PrismaStore {
       
       this.state = { ...this.state, userBank: newBank };
       localStorage.setItem(USER_BANK_KEY, JSON.stringify(newBank));
-      this.notify();
-  };
-
-  setLayout = (layout: StoredLayout | null) => {
-      this.state = { ...this.state, layout };
-      // Do not save to localStorage
       this.notify();
   };
 
@@ -182,11 +174,9 @@ export function useStore() {
     settings: state.settings,
     presets: state.presets, 
     userBank: state.userBank,
-    layout: state.layout,
     updateSettings: store.updateSettings,
     setPreset: store.setPreset,
     saveUserPatch: store.saveUserPatch,
-    setLayout: store.setLayout,
     exportXML: store.exportXML,
     importXML: store.importXML
   };

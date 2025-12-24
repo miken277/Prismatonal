@@ -54,121 +54,8 @@ const NumberInput = ({ value, min, max, onChange, suffix = "", className = "", d
     );
 };
 
-const SkinPreviewCanvas = ({ skin, colors }: { skin: string, colors: LimitColorMap }) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        
-        const w = canvas.width;
-        const h = canvas.height;
-        ctx.clearRect(0, 0, w, h);
-        
-        // Background shim if technical
-        if (skin === 'technical') {
-            ctx.fillStyle = '#0f172a';
-            ctx.fillRect(0, 0, w, h);
-        }
-
-        // Configs
-        const isMinimal = skin === 'minimal';
-        const isTechnical = skin === 'technical';
-        const isOrganic = skin === 'organic';
-        
-        const cx = w / 2;
-        const cy = h / 2;
-        const offset = 25;
-        
-        // Draw Line
-        const limit = 3;
-        const color = colors[limit] || '#EAB308';
-
-        ctx.beginPath();
-        ctx.moveTo(cx - offset, cy);
-        ctx.lineTo(cx + offset, cy);
-        
-        if (isTechnical) {
-            ctx.lineWidth = 1;
-            ctx.strokeStyle = color;
-            ctx.setLineDash([2, 4]);
-        } else if (isMinimal) {
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = '#334155';
-            ctx.setLineDash([]);
-        } else if (isOrganic) {
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = color;
-            ctx.globalAlpha = 0.5;
-            ctx.setLineDash([]);
-        } else {
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = color;
-            ctx.globalAlpha = 0.5;
-            ctx.setLineDash([]);
-        }
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 1.0;
-
-        // Draw Nodes
-        const drawNode = (x: number, y: number, l: number) => {
-            const c = colors[l];
-            const r = 10;
-            ctx.beginPath();
-            
-            // Simple logic for preview shape (always circle for simplicity in preview)
-            ctx.arc(x, y, r, 0, Math.PI*2);
-            
-            if (isTechnical) {
-                ctx.fillStyle = '#0f172a';
-                ctx.fill();
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = '#0f0';
-                ctx.stroke();
-                
-                // Tech crosshair
-                ctx.beginPath();
-                ctx.moveTo(x - r, y); ctx.lineTo(x + r, y);
-                ctx.moveTo(x, y - r); ctx.lineTo(x, y + r);
-                ctx.lineWidth = 1;
-                ctx.strokeStyle = c;
-                ctx.stroke();
-
-            } else if (isMinimal) {
-                ctx.fillStyle = c;
-                ctx.fill();
-            } else if (isOrganic) {
-                const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-                grad.addColorStop(0, '#fff');
-                grad.addColorStop(0.3, c);
-                grad.addColorStop(1, 'rgba(0,0,0,0)');
-                ctx.fillStyle = grad;
-                ctx.fill();
-            } else {
-                const grad = ctx.createLinearGradient(x, y-r, x, y+r);
-                grad.addColorStop(0, c);
-                grad.addColorStop(1, '#333');
-                ctx.fillStyle = grad;
-                ctx.fill();
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = 'white';
-                ctx.stroke();
-            }
-        };
-        
-        drawNode(cx - offset, cy, 1);
-        drawNode(cx + offset, cy, 3);
-
-    }, [skin, colors]);
-
-    return <canvas ref={canvasRef} width={120} height={50} className="rounded border border-slate-600 bg-slate-900/50 shadow-inner" />;
-};
-
 const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings }) => {
-  const [activeTab, setActiveTab] = useState<'tonality' | 'behavior' | 'graphics' | 'midi' | 'data'>('tonality');
+  const [activeTab, setActiveTab] = useState<'tonality' | 'behavior' | 'visuals' | 'midi' | 'data'>('tonality');
   const [midiDevices, setMidiDevices] = useState<MidiDevice[]>([]);
   const { exportXML, importXML } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -286,8 +173,10 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
         break;
     }
 
+    // Default protection logic: if current layout approach isn't valid for system, reset it
     const isValid = options.some(o => o.value === settings.layoutApproach);
     if (!isValid && options.length > 0) {
+      // Trigger update next frame to avoid render loop issues
       setTimeout(() => handleChange('layoutApproach', options[0].value), 0);
     }
 
@@ -310,133 +199,23 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
     );
   };
 
-  // Re-designed Visuals Settings Section (2-Column Layout)
-  const renderVisualsSettings = (showLimitColors: boolean) => (
-      <div className="mt-8 pt-6 border-t border-slate-700">
-          <h3 className="font-semibold text-pink-300 border-b border-pink-500/30 pb-1 mb-4 text-left">Visuals</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
-              {/* Left Column: Skin & Node Graphics */}
-              <div className="space-y-6">
-                  {/* Skin Selector */}
-                  <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Skin Appearance</h4>
-                      <div className="flex gap-4 items-start">
-                          <select 
-                              value={settings.activeSkin} 
-                              onChange={(e) => handleChange('activeSkin', e.target.value)}
-                              className="flex-1 bg-slate-800 border border-slate-600 rounded p-2 text-xs text-white focus:outline-none focus:border-blue-500 min-h-[40px]"
-                          >
-                              <option value="default">Prisma Default</option>
-                              <option value="minimal">Minimalist</option>
-                              <option value="technical">Technical Diagram</option>
-                              <option value="organic">Organic Flow</option>
-                          </select>
-                          <div className="flex-shrink-0 pt-1">
-                              <SkinPreviewCanvas skin={settings.activeSkin} colors={settings.colors} />
-                          </div>
-                      </div>
-                  </div>
-
-                  {/* Node Graphics Controls */}
-                  <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Node Graphics</h4>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Button Shape</label>
-                        <div className="flex gap-2">
-                          <button onClick={() => handleChange('buttonShape', ButtonShape.CIRCLE)} className={`flex-1 py-1.5 text-[10px] font-bold rounded border ${settings.buttonShape === ButtonShape.CIRCLE ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>CIRCLE</button>
-                          <button onClick={() => handleChange('buttonShape', ButtonShape.DIAMOND)} className={`flex-1 py-1.5 text-[10px] font-bold rounded border ${settings.buttonShape === ButtonShape.DIAMOND ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>DIAMOND</button>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase">Button Size</label>
-                        <input type="range" min="0.5" max="2.0" step="0.1" value={settings.buttonSizeScale} onChange={(e) => handleChange('buttonSizeScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase">Spacing</label>
-                        <input type="range" min="0.5" max="5.0" step="0.1" value={settings.buttonSpacingScale} onChange={(e) => handleChange('buttonSpacingScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase">Latched Zoom</label>
-                        <input type="range" min="1.0" max="2.0" step="0.05" value={settings.latchedZoomScale} onChange={(e) => handleChange('latchedZoomScale', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                      </div>
-                      <label className="flex items-center justify-between cursor-pointer pt-1">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Show Fraction Bar</span>
-                        <input type="checkbox" checked={settings.showFractionBar} onChange={(e) => handleChange('showFractionBar', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
-                      </label>
-                  </div>
-              </div>
-
-              {/* Right Column: Background & Colors */}
-              <div className="space-y-6">
-                  {/* Background Controls */}
-                  <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Background</h4>
-                      <select value={settings.backgroundMode} onChange={(e) => handleChange('backgroundMode', e.target.value as BackgroundMode)} className="w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600">
-                        <option value="charcoal">Charcoal</option>
-                        <option value="midnight_blue">Midnight Blue</option>
-                        <option value="deep_maroon">Deep Maroon</option>
-                        <option value="forest_green">Forest Green</option>
-                        <option value="slate_grey">Slate Grey</option>
-                        <option value="rainbow">Rainbow Gradient</option>
-                        <option value="image">Custom Image</option>
-                        <option value="none">Solid Black</option>
-                      </select>
-                      
-                      {settings.backgroundMode === 'rainbow' && (
-                        <div className="space-y-3 bg-slate-800/50 p-3 rounded">
-                          <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Saturation</span> <span>{settings.rainbowSaturation}%</span></label>
-                            <input type="range" min="0" max="100" value={settings.rainbowSaturation} onChange={(e) => handleChange('rainbowSaturation', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Brightness</span> <span>{settings.rainbowBrightness}%</span></label>
-                            <input type="range" min="0" max="100" value={settings.rainbowBrightness} onChange={(e) => handleChange('rainbowBrightness', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Offset</span> <span>{settings.rainbowOffset}°</span></label>
-                            <input type="range" min="0" max="360" value={settings.rainbowOffset} onChange={(e) => handleChange('rainbowOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                          </div>
-                          <label className="flex items-center justify-between cursor-pointer">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Colored Node Illumination</span>
-                            <input type="checkbox" checked={settings.isColoredIlluminationEnabled} onChange={(e) => handleChange('isColoredIlluminationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
-                          </label>
-                        </div>
-                      )}
-
-                      {settings.backgroundMode === 'image' && (
-                        <div className="space-y-3 bg-slate-800/50 p-3 rounded">
-                          <input type="file" ref={bgImageInputRef} className="hidden" accept="image/*" onChange={handleBackgroundImageUpload} />
-                          <button onClick={() => bgImageInputRef.current?.click()} className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-xs font-bold rounded border border-slate-600 transition">Upload Image</button>
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Tiling</span>
-                            <input type="checkbox" checked={settings.backgroundTiling} onChange={(e) => handleChange('backgroundTiling', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Y Offset</span> <span>{settings.backgroundYOffset}px</span></label>
-                            <input type="range" min="-1000" max="1000" step="10" value={settings.backgroundYOffset} onChange={(e) => handleChange('backgroundYOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
-                          </div>
-                        </div>
-                      )}
-                  </div>
-
-                  {/* Limit Colors Controls */}
-                  {showLimitColors && (
-                      <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                          <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Limit Identity Colors</h4>
-                          <div className="grid grid-cols-3 gap-3">
-                            {[1, 3, 5, 7, 11, 13].map(limit => (
-                              <div key={limit} className="flex flex-col items-center p-2 bg-slate-800 rounded border border-slate-700/50">
-                                <span className="text-[9px] font-bold text-slate-500 mb-1">{limit}-L</span>
-                                <input type="color" value={settings.colors[limit]} onChange={(e) => handleColorChange(limit, e.target.value)} className="w-full h-6 bg-transparent border-none cursor-pointer rounded" />
-                              </div>
-                            ))}
-                          </div>
-                      </div>
-                  )}
-              </div>
-          </div>
-      </div>
+  const renderSkinSelector = () => (
+    <div className="mt-4 p-3 bg-slate-900/20 rounded border border-slate-700/50">
+        <label className="block text-[10px] text-slate-500 font-bold uppercase mb-2 tracking-widest">Skin</label>
+        <div className="flex gap-2">
+            <select 
+                value={settings.activeSkin} 
+                onChange={(e) => handleChange('activeSkin', e.target.value)}
+                className="flex-1 bg-slate-800 border border-slate-600 rounded p-1.5 text-[10px] text-white focus:outline-none focus:border-blue-500"
+            >
+                <option value="default">Prisma Default</option>
+                <option value="minimal">Minimalist</option>
+                <option value="technical">Technical Diagram</option>
+                <option value="organic">Organic Flow</option>
+            </select>
+            <button className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-[9px] font-bold rounded uppercase border border-slate-600 transition">Preview</button>
+        </div>
+    </div>
   );
 
   return (
@@ -454,7 +233,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
         <div className="flex border-b border-slate-700 bg-slate-900/50 overflow-x-auto flex-shrink-0 relative z-10">
            <button onClick={() => setActiveTab('tonality')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'tonality' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Tonality</button>
            <button onClick={() => setActiveTab('behavior')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'behavior' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Behavior</button>
-           <button onClick={() => setActiveTab('graphics')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'graphics' ? 'text-pink-400 border-b-2 border-pink-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Graphics</button>
+           <button onClick={() => setActiveTab('visuals')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'visuals' ? 'text-pink-400 border-b-2 border-pink-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Visuals</button>
            <button onClick={() => setActiveTab('midi')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'midi' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>MIDI</button>
            <button onClick={() => setActiveTab('data')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap ${activeTab === 'data' ? 'text-orange-400 border-b-2 border-orange-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Data</button>
         </div>
@@ -475,89 +254,89 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                   </div>
 
                   {settings.tuningSystem === 'ji' && (
-                      <div className="animate-in slide-in-from-left-2 duration-300">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
-                              <div className="space-y-6">
-                                  {renderLayoutSelector('ji')}
-                                  {renderBaseFrequency()}
-                                  <h3 className="font-semibold text-blue-300 border-b border-slate-700 pb-1 flex justify-between items-center">
-                                      <span>Lattice Axis Depth</span>
-                                      <span className="text-[10px] text-blue-500 uppercase font-black">ACTIVE</span>
-                                  </h3>
-                                  <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
-                                      <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Steps from center per prime limit</p>
-                                      {[3, 5, 7, 11, 13].map(limit => (
-                                          <div key={limit} className="flex items-center gap-3">
-                                              <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
-                                              <input type="range" min="0" max="6" step="1" value={settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0} onChange={(e) => handleLimitDepthChange(limit as any, parseInt(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
-                                              <span className="text-xs font-mono w-4 text-right text-blue-400">{settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0}</span>
-                                          </div>
-                                      ))}
-                                  </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-left-2 duration-300">
+                          <div className="space-y-6">
+                              {renderLayoutSelector('ji')}
+                              {renderBaseFrequency()}
+                              <h3 className="font-semibold text-blue-300 border-b border-slate-700 pb-1 flex justify-between items-center">
+                                  <span>Lattice Axis Depth</span>
+                                  <span className="text-[10px] text-blue-500 uppercase font-black">ACTIVE</span>
+                              </h3>
+                              <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
+                                  <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Steps from center per prime limit</p>
+                                  {[3, 5, 7, 11, 13].map(limit => (
+                                      <div key={limit} className="flex items-center gap-3">
+                                          <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
+                                          <input type="range" min="0" max="6" step="1" value={settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0} onChange={(e) => handleLimitDepthChange(limit as any, parseInt(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                                          <span className="text-xs font-mono w-4 text-right text-blue-400">{settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0}</span>
+                                      </div>
+                                  ))}
                               </div>
-                              <div className="space-y-6">
-                                  <h3 className="font-semibold text-blue-300 border-b border-slate-700 pb-1">Complexity Thresholds</h3>
-                                  <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-4">
-                                      <p className="text-[10px] text-slate-500 uppercase font-bold">Limit max complexity per axis</p>
-                                      {[3, 5, 7, 11, 13].map(limit => (
-                                          <div key={limit} className="flex flex-col gap-1">
-                                              <span className="text-[10px] font-bold text-slate-400 uppercase">{limit}-Limit MAX RATIO</span>
-                                              <NumberInput 
-                                                value={settings.limitComplexities?.[limit as 3|5|7|11|13] ?? 1000} 
-                                                min={1} max={10000} 
-                                                onChange={(val) => handleLimitComplexityChange(limit as any, val)} 
-                                              />
-                                          </div>
-                                      ))}
+                              {renderSkinSelector()}
+                          </div>
+                          <div className="space-y-6">
+                              <h3 className="font-semibold text-blue-300 border-b border-slate-700 pb-1">Complexity Thresholds</h3>
+                              <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-4">
+                                  <p className="text-[10px] text-slate-500 uppercase font-bold">Limit max complexity per axis</p>
+                                  {[3, 5, 7, 11, 13].map(limit => (
+                                      <div key={limit} className="flex flex-col gap-1">
+                                          <span className="text-[10px] font-bold text-slate-400 uppercase">{limit}-Limit MAX RATIO</span>
+                                          <NumberInput 
+                                            value={settings.limitComplexities?.[limit as 3|5|7|11|13] ?? 1000} 
+                                            min={1} max={10000} 
+                                            onChange={(val) => handleLimitComplexityChange(limit as any, val)} 
+                                          />
+                                      </div>
+                                  ))}
+                              </div>
+                              <div className="p-3 bg-slate-900/20 border border-slate-700/50 rounded-lg opacity-40 grayscale pointer-events-none">
+                                  <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2">Basis Projections</h4>
+                                  <div className="grid grid-cols-2 gap-2">
+                                      <div className="h-8 bg-slate-800 rounded"></div>
+                                      <div className="h-8 bg-slate-800 rounded"></div>
                                   </div>
                               </div>
                           </div>
-                          
-                          {/* Visuals Section (Full Width, 2-Column Grid Inside) */}
-                          {renderVisualsSettings(true)}
                       </div>
                   )}
 
                   {settings.tuningSystem === 'et' && (
-                      <div className="animate-in slide-in-from-right-2 duration-300">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
-                              <div className="space-y-6">
-                                  {renderLayoutSelector('et')}
-                                  {renderBaseFrequency()}
-                                  <h3 className="text-xs font-bold text-blue-300 uppercase border-b border-slate-700 pb-1">ET Divisions</h3>
-                                  <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                                      <div>
-                                          <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Equal Divisions (EDO)</label>
-                                          <NumberInput value={12} min={1} max={1200} onChange={() => {}} suffix="Notes" />
-                                      </div>
-                                      <div>
-                                          <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Root MIDI Note</label>
-                                          <NumberInput value={60} min={0} max={127} onChange={() => {}} suffix="Note #" />
-                                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-right-2 duration-300">
+                          <div className="space-y-6">
+                              {renderLayoutSelector('et')}
+                              {renderBaseFrequency()}
+                              <h3 className="text-xs font-bold text-blue-300 uppercase border-b border-slate-700 pb-1">ET Divisions</h3>
+                              <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
+                                  <div>
+                                      <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Equal Divisions (EDO)</label>
+                                      <NumberInput value={12} min={1} max={1200} onChange={() => {}} suffix="Notes" />
+                                  </div>
+                                  <div>
+                                      <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Root MIDI Note</label>
+                                      <NumberInput value={60} min={0} max={127} onChange={() => {}} suffix="Note #" />
                                   </div>
                               </div>
-                              <div className="space-y-6">
-                                  <h3 className="text-xs font-bold text-blue-300 uppercase border-b border-slate-700 pb-1">Tuning Offset</h3>
-                                  <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                                      <div>
-                                          <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Reference A4</label>
-                                          <NumberInput value={440} min={400} max={500} onChange={() => {}} suffix="Hz" />
-                                      </div>
-                                      <div className="opacity-50">
-                                          <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Octave Stretch</span> <span>0.00</span></label>
-                                          <input type="range" disabled className="w-full h-1.5 bg-slate-700 rounded appearance-none" />
-                                      </div>
+                              {renderSkinSelector()}
+                          </div>
+                          <div className="space-y-6">
+                              <h3 className="text-xs font-bold text-blue-300 uppercase border-b border-slate-700 pb-1">Tuning Offset</h3>
+                              <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
+                                  <div>
+                                      <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Reference A4</label>
+                                      <NumberInput value={440} min={400} max={500} onChange={() => {}} suffix="Hz" />
+                                  </div>
+                                  <div className="opacity-50">
+                                      <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Octave Stretch</span> <span>0.00</span></label>
+                                      <input type="range" disabled className="w-full h-1.5 bg-slate-700 rounded appearance-none" />
                                   </div>
                               </div>
                           </div>
-                          {/* New Visuals Section for ET */}
-                          {renderVisualsSettings(false)}
                       </div>
                   )}
 
                   {settings.tuningSystem === 'indian' && (
-                      <div className="animate-in slide-in-from-right-2 duration-300">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
+                      <div className="grid grid-cols-1 md:flex md:flex-col gap-6 animate-in slide-in-from-right-2 duration-300">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                              <div className="space-y-6">
                                 {renderLayoutSelector('indian')}
                                 {renderBaseFrequency()}
@@ -579,6 +358,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                         </select>
                                     </div>
                                 </div>
+                                {renderSkinSelector()}
                              </div>
                              <div className="space-y-6">
                                 <h3 className="text-xs font-bold text-orange-300 uppercase border-b border-slate-700 pb-1">Raga Parameters</h3>
@@ -590,49 +370,44 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                 </div>
                              </div>
                           </div>
-                          {/* New Visuals Section for Indian */}
-                          {renderVisualsSettings(false)}
                       </div>
                   )}
 
                   {settings.tuningSystem === 'pythagorean' && (
-                      <div className="animate-in slide-in-from-right-2 duration-300">
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-6">
-                              <div className="space-y-6">
-                                  {renderLayoutSelector('pythagorean')}
-                                  {renderBaseFrequency()}
-                                  <h3 className="text-xs font-bold text-purple-300 uppercase border-b border-slate-700 pb-1">Cycle of Fifths</h3>
-                                  <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                                      <div>
-                                          <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Stack Depth</label>
-                                          <NumberInput value={12} min={1} max={53} onChange={() => {}} suffix="Steps" />
-                                      </div>
-                                      <div className="space-y-2">
-                                          <label className="block text-[10px] text-slate-400 font-bold uppercase">Stack Direction</label>
-                                          <div className="flex gap-2">
-                                              <button className="flex-1 py-1 text-[10px] bg-purple-900/40 border border-purple-500/50 rounded uppercase font-bold text-purple-200">Sharp (3/2)</button>
-                                              <button className="flex-1 py-1 text-[10px] bg-slate-700 border border-slate-600 rounded uppercase font-bold text-slate-400">Flat (2/3)</button>
-                                          </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-right-2 duration-300">
+                          <div className="space-y-6">
+                              {renderLayoutSelector('pythagorean')}
+                              {renderBaseFrequency()}
+                              <h3 className="text-xs font-bold text-purple-300 uppercase border-b border-slate-700 pb-1">Cycle of Fifths</h3>
+                              <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
+                                  <div>
+                                      <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Stack Depth</label>
+                                      <NumberInput value={12} min={1} max={53} onChange={() => {}} suffix="Steps" />
+                                  </div>
+                                  <div className="space-y-2">
+                                      <label className="block text-[10px] text-slate-400 font-bold uppercase">Stack Direction</label>
+                                      <div className="flex gap-2">
+                                          <button className="flex-1 py-1 text-[10px] bg-purple-900/40 border border-purple-500/50 rounded uppercase font-bold text-purple-200">Sharp (3/2)</button>
+                                          <button className="flex-1 py-1 text-[10px] bg-slate-700 border border-slate-600 rounded uppercase font-bold text-slate-400">Flat (2/3)</button>
                                       </div>
                                   </div>
                               </div>
-                              <div className="space-y-6">
-                                  <h3 className="text-xs font-bold text-purple-300 uppercase border-b border-slate-700 pb-1">Comma Correction</h3>
-                                  <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                                      <div className="space-y-2">
-                                          <label className="block text-[10px] text-slate-400 font-bold uppercase">Wolf Interval Logic</label>
-                                          <select disabled className="w-full bg-slate-700 rounded p-2 text-xs text-white border border-slate-600">
-                                              <option>None (Infinite Spiral)</option>
-                                              <option>G# / Eb Closing</option>
-                                              <option>Distribute (Well Temperament)</option>
-                                          </select>
-                                      </div>
-                                      <p className="text-[10px] text-slate-500 italic">Wolf correction applies specific offsets to the final stack link to close the circle.</p>
+                              {renderSkinSelector()}
+                          </div>
+                          <div className="space-y-6">
+                              <h3 className="text-xs font-bold text-purple-300 uppercase border-b border-slate-700 pb-1">Comma Correction</h3>
+                              <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
+                                  <div className="space-y-2">
+                                      <label className="block text-[10px] text-slate-400 font-bold uppercase">Wolf Interval Logic</label>
+                                      <select disabled className="w-full bg-slate-700 rounded p-2 text-xs text-white border border-slate-600">
+                                          <option>None (Infinite Spiral)</option>
+                                          <option>G# / Eb Closing</option>
+                                          <option>Distribute (Well Temperament)</option>
+                                      </select>
                                   </div>
+                                  <p className="text-[10px] text-slate-500 italic">Wolf correction applies specific offsets to the final stack link to close the circle.</p>
                               </div>
                           </div>
-                          {/* New Visuals Section for Pythagorean */}
-                          {renderVisualsSettings(false)}
                       </div>
                   )}
               </div>
@@ -694,7 +469,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
               </div>
             )}
 
-            {activeTab === 'graphics' && (
+            {activeTab === 'visuals' && (
               <div className="space-y-8 animate-in fade-in duration-300">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-6">
@@ -715,37 +490,99 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                             </div>
                         </div>
                     </div>
+
+                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1 mt-6">Node Graphics</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-semibold mb-2">Button Shape</label>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleChange('buttonShape', ButtonShape.CIRCLE)} className={`flex-1 py-2 text-xs font-bold rounded border ${settings.buttonShape === ButtonShape.CIRCLE ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>Circle</button>
+                          <button onClick={() => handleChange('buttonShape', ButtonShape.DIAMOND)} className={`flex-1 py-2 text-xs font-bold rounded border ${settings.buttonShape === ButtonShape.DIAMOND ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>Diamond</button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold">Button Size Scale</label>
+                        <input type="range" min="0.5" max="2.0" step="0.1" value={settings.buttonSizeScale} onChange={(e) => handleChange('buttonSizeScale', parseFloat(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold">Button Spacing Scale</label>
+                        <input type="range" min="0.5" max="5.0" step="0.1" value={settings.buttonSpacingScale} onChange={(e) => handleChange('buttonSpacingScale', parseFloat(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold">Latched Node Zoom</label>
+                        <div className="flex items-center gap-3">
+                          <input type="range" min="1.0" max="2.0" step="0.05" value={settings.latchedZoomScale} onChange={(e) => handleChange('latchedZoomScale', parseFloat(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                          <span className="text-xs font-mono w-10">{settings.latchedZoomScale.toFixed(2)}x</span>
+                        </div>
+                      </div>
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <span className="text-sm font-semibold">Show Fraction Bar</span>
+                        <input type="checkbox" checked={settings.showFractionBar} onChange={(e) => handleChange('showFractionBar', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-pink-500" />
+                      </label>
+                    </div>
+
+                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1 mt-6">Limit Identity Colors</h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      {[1, 3, 5, 7, 11, 13].map(limit => (
+                        <div key={limit} className="flex flex-col items-center p-2 bg-slate-900/50 rounded border border-slate-700">
+                          <span className="text-[10px] font-bold text-slate-400 mb-1">{limit}-Limit</span>
+                          <input type="color" value={settings.colors[limit]} onChange={(e) => handleColorChange(limit, e.target.value)} className="w-full h-8 bg-transparent border-none cursor-pointer" />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   
                   <div className="space-y-6">
-                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Display Area</h3>
-                    <div className="space-y-4 bg-slate-900/40 p-4 rounded border border-slate-700/50">
-                        <div>
-                            <label className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>Canvas Resolution</span> <span className="text-white">{settings.canvasSize}px</span></label>
-                            <input type="range" min="1000" max="5000" step="100" value={settings.canvasSize} onChange={(e) => handleChange('canvasSize', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
-                            <p className="text-[10px] text-slate-500 mt-1 italic">Determines the total scrollable area size.</p>
+                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Lattice Background</h3>
+                    <div className="space-y-4">
+                      <select value={settings.backgroundMode} onChange={(e) => handleChange('backgroundMode', e.target.value as BackgroundMode)} className="w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600">
+                        <option value="charcoal">Charcoal</option>
+                        <option value="midnight_blue">Midnight Blue</option>
+                        <option value="deep_maroon">Deep Maroon</option>
+                        <option value="forest_green">Forest Green</option>
+                        <option value="slate_grey">Slate Grey</option>
+                        <option value="rainbow">Rainbow Gradient</option>
+                        <option value="image">Custom Image</option>
+                        <option value="none">Solid Black</option>
+                      </select>
+                      
+                      {settings.backgroundMode === 'rainbow' && (
+                        <div className="bg-slate-900/50 p-4 rounded border border-slate-700 space-y-4">
+                          <h4 className="text-xs font-bold text-slate-300 uppercase">Rainbow Parameters</h4>
+                          <div className="space-y-2">
+                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Saturation</span> <span>{settings.rainbowSaturation}%</span></label>
+                            <input type="range" min="0" max="100" value={settings.rainbowSaturation} onChange={(e) => handleChange('rainbowSaturation', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Brightness</span> <span>{settings.rainbowBrightness}%</span></label>
+                            <input type="range" min="0" max="100" value={settings.rainbowBrightness} onChange={(e) => handleChange('rainbowBrightness', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Offset</span> <span>{settings.rainbowOffset}°</span></label>
+                            <input type="range" min="0" max="360" value={settings.rainbowOffset} onChange={(e) => handleChange('rainbowOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
+                          </div>
+                          <label className="flex items-center justify-between cursor-pointer">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Colored Node Illumination</span>
+                            <input type="checkbox" checked={settings.isColoredIlluminationEnabled} onChange={(e) => handleChange('isColoredIlluminationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
+                          </label>
                         </div>
-                        <div>
-                            <label className="flex justify-between text-xs font-bold text-slate-400 mb-1"><span>Lattice Aspect Ratio</span> <span className="text-white">{settings.latticeAspectRatio.toFixed(2)}</span></label>
-                            <input type="range" min="0.5" max="2.0" step="0.05" value={settings.latticeAspectRatio} onChange={(e) => handleChange('latticeAspectRatio', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
-                            <p className="text-[10px] text-slate-500 mt-1 italic">Adjusts horizontal compression relative to pitch height.</p>
-                        </div>
-                    </div>
+                      )}
 
-                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Animation & Lines</h3>
-                    <div className="space-y-4 bg-slate-900/40 p-4 rounded border border-slate-700/50">
-                        <label className="flex items-center justify-between cursor-pointer">
-                            <span className="text-xs font-bold text-slate-400 uppercase">Enable Voice Leading Animation</span>
-                            <input type="checkbox" checked={settings.isVoiceLeadingAnimationEnabled} onChange={(e) => handleChange('isVoiceLeadingAnimationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
-                        </label>
-                        <div className={`space-y-2 transition-opacity ${settings.isVoiceLeadingAnimationEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                            <label className="flex justify-between text-xs font-bold text-slate-400"><span>Animation Duration</span> <span className="text-white">{settings.voiceLeadingAnimationSpeed}s</span></label>
-                            <input type="range" min="0.5" max="5.0" step="0.1" value={settings.voiceLeadingAnimationSpeed} onChange={(e) => handleChange('voiceLeadingAnimationSpeed', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded appearance-none cursor-pointer accent-pink-500" />
+                      {settings.backgroundMode === 'image' && (
+                        <div className="bg-slate-900/50 p-4 rounded border border-slate-700 space-y-4">
+                          <h4 className="text-xs font-bold text-slate-300 uppercase">Custom Image</h4>
+                          <input type="file" ref={bgImageInputRef} className="hidden" accept="image/*" onChange={handleBackgroundImageUpload} />
+                          <button onClick={() => bgImageInputRef.current?.click()} className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-xs font-bold rounded border border-slate-600 transition">Upload Image</button>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase">Tiling</span>
+                            <input type="checkbox" checked={settings.backgroundTiling} onChange={(e) => handleChange('backgroundTiling', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Y Offset</span> <span>{settings.backgroundYOffset}px</span></label>
+                            <input type="range" min="-1000" max="1000" step="10" value={settings.backgroundYOffset} onChange={(e) => handleChange('backgroundYOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                          </div>
                         </div>
-                        <label className="flex items-center justify-between cursor-pointer border-t border-slate-700/50 pt-2">
-                            <span className="text-xs font-bold text-slate-400 uppercase">Active Line Brightening</span>
-                            <input type="checkbox" checked={settings.lineBrighteningEnabled} onChange={(e) => handleChange('lineBrighteningEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
-                        </label>
+                      )}
                     </div>
                   </div>
                 </div>

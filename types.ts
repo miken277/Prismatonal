@@ -12,7 +12,6 @@ export enum WaveformType {
   SQUARE = 'square',
   SAWTOOTH = 'sawtooth',
   TRIANGLE = 'triangle',
-  SAMPLE = 'sample',
 }
 
 export enum ButtonShape {
@@ -110,11 +109,6 @@ export interface KeyMappings {
     decreaseDepth: string;
 }
 
-export interface GenerationOrigin {
-  coords: number[];
-  octave: number;
-}
-
 export interface AppSettings {
   // Global Tuning
   tuningSystem: TuningSystem;
@@ -139,9 +133,6 @@ export interface AppSettings {
     13: number;
   };
   
-  // Origins for lattice generation (Multiple tonality centers)
-  generationOrigins: GenerationOrigin[];
-
   // Increase Depth Settings
   showIncreaseDepthButton: boolean;
   centerResetsDepth: boolean;
@@ -253,7 +244,6 @@ export interface AppSettings {
 export interface OscillatorConfig {
   enabled: boolean;
   waveform: WaveformType;
-  sampleId?: string | null; // ID for custom sample
   coarseDetune: number; // Cents -1200 to 1200
   fineDetune: number; // Cents -50 to 50
   gain: number; // 0 to 1 (Mix)
@@ -341,6 +331,12 @@ export interface PresetState {
     arpeggio: SynthPreset;
 }
 
+export interface StoreState {
+    settings: AppSettings;
+    presets: PresetState;
+    userBank: SynthPreset[]; // 20 Save Slots
+}
+
 export interface LatticeNode {
   id: string; // Coordinate key "0,0,0,0,0:oct"
   ratio: number; // Absolute Frequency multiplier (including octave)
@@ -367,23 +363,14 @@ export interface LatticeLine {
   targetId: string;
 }
 
-export interface StoredLayout {
-    hash: string; // JSON hash of the settings that generated this layout
-    nodes: LatticeNode[];
-    lines: LatticeLine[];
-    dynamicSize: number;
-}
-
-export interface StoreState {
-    settings: AppSettings;
-    presets: PresetState;
-    userBank: SynthPreset[]; // 20 Save Slots
-    layout: StoredLayout | null;
-}
-
 export interface ActiveVoice {
   id: string; // Pointer ID or Node ID
   nodeId?: string;
   stop: () => void;
   setDetune: (cents: number) => void;
+}
+
+export interface GenerationOrigin {
+  coords: number[];
+  octave: number;
 }
