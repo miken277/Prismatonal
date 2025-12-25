@@ -1,3 +1,4 @@
+
 import { AppSettings, LayoutApproach } from '../types';
 
 export const PITCH_SCALE = 200; // Pixels per octave (Base Scale)
@@ -48,7 +49,23 @@ export const projectCoordinates = (
         y = coords[1] * spacing;
         // Rotation handled in LatticeService for simpler line logic
     }
-    
+    else if (approach === 'row') {
+        x = Math.log2(ratio) * 1200; 
+        const maxP = Math.max(1, ...coords.map((c, i) => c !== 0 ? [3,5,7,11,13][i] : 1));
+        const limitIndex = [1, 3, 5, 7, 11, 13].indexOf(maxP);
+        const dir = limitIndex % 2 === 0 ? 1 : -1;
+        y = dir * (limitIndex * spacing * 0.6);
+        y += (p3 * 5 + p5 * 3); 
+    }
+    else if (approach === 'honeycomb') {
+        const hexUnit = spacing * 0.9;
+        x = (p3 + p5 * 0.5 + p7 * -0.5) * hexUnit;
+        y = (p5 * 0.866 + p7 * 0.866) * hexUnit;
+        x += (p11 * 0.25) * hexUnit;
+        y += (p13 * 0.25) * hexUnit;
+        x = x * (1.0 / aspectRatio);
+    }
+
     return { x, y };
 };
 

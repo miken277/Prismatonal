@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDirection, ArpDivision, ArpeggioStep } from '../types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH, DEFAULT_COLORS } from '../constants';
@@ -135,9 +134,9 @@ const FloatingControls: React.FC<Props> = ({
   const baseSize = largeBtnSize; 
   const chordSize = baseSize * chordShortcutSizeScale;
   
-  // Standardized dimensions: Volume is now wider and thinner. Arp increased by 1/4.
-  const volumeBarWidth = 600 * uiScale; 
-  const arpBarWidth = 675 * uiScale;
+  // Standardized dimensions matching App.tsx
+  const volumeBarWidth = 500 * uiScale; 
+  const arpBarWidth = 760 * uiScale;    
   
   const draggableStyle = (key: string) => ({
       left: uiPositions[key as keyof typeof uiPositions].x,
@@ -206,7 +205,7 @@ const FloatingControls: React.FC<Props> = ({
 
   const isBendLocked = latchMode === 1;
 
-  // Label style refined: Larger font and balanced width
+  // Label style refined
   const labelStyle = { 
       fontSize: 20 * uiScale, 
       width: 120 * uiScale,
@@ -228,15 +227,15 @@ const FloatingControls: React.FC<Props> = ({
         .seq-scroll::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.8); }
       `}</style>
 
-      {/* Unified Audio Stack Control - WIDER AND THINNER */}
+      {/* Unified Audio Stack Control - Reduced vertical height */}
       <div 
-        className={`absolute bg-slate-900/50 rounded-xl flex flex-col px-4 py-1 gap-1 backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-lg ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        className={`absolute bg-slate-900/50 rounded-xl flex flex-col px-3 py-1 gap-0.5 backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-lg ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={{ ...draggableStyle('volume'), width: volumeBarWidth }}
         onPointerDown={(e) => handleDrag(e, 'volume')}
       >
-        <div className="flex items-center gap-4 w-full h-6">
+        <div className="flex items-center gap-2 w-full h-6">
              <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Volume</span>
-             <div className="flex-1 min-w-0 flex items-center">
+             <div className="flex-1 min-w-0 flex items-center pl-1">
                 <input 
                     type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-green-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
@@ -245,9 +244,9 @@ const FloatingControls: React.FC<Props> = ({
                 />
              </div>
         </div>
-        <div className="flex items-center gap-4 w-full h-6">
+        <div className="flex items-center gap-2 w-full h-6">
              <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Reverb</span>
-             <div className="flex-1 min-w-0 flex items-center">
+             <div className="flex-1 min-w-0 flex items-center pl-1">
                 <input 
                     type="range" min="0" max="2" step="0.01" value={spatialScale} onChange={(e) => setSpatialScale(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-blue-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
@@ -256,9 +255,9 @@ const FloatingControls: React.FC<Props> = ({
                 />
              </div>
         </div>
-        <div className="flex items-center gap-4 w-full h-6">
+        <div className="flex items-center gap-2 w-full h-6">
              <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Tone</span>
-             <div className="flex-1 min-w-0 flex items-center">
+             <div className="flex-1 min-w-0 flex items-center pl-1">
                 <input 
                     type="range" min="0" max="1" step="0.01" value={brightness} onChange={(e) => setBrightness(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-yellow-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
@@ -269,26 +268,31 @@ const FloatingControls: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* ARPEGGIATOR BAR - Wider for header balance */}
+      {/* ARPEGGIATOR BAR - Responsive Width & Wrapping */}
       <div 
         className={`absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl overflow-visible ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('arpeggioBar'), width: arpBarWidth, padding: 8 * uiScale }}
+        style={{ 
+            ...draggableStyle('arpeggioBar'), 
+            width: arpBarWidth, 
+            maxWidth: `calc(100vw - ${24 * uiScale}px)`, 
+            padding: `8px ${8 * uiScale}px`,
+            height: 'auto'
+        }}
         onPointerDown={(e) => handleDrag(e, 'arpeggioBar')}
         onPointerEnter={() => setIsArpBarHovered(true)}
         onPointerLeave={() => setIsArpBarHovered(false)}
       >
         <div className="w-full flex flex-col gap-2">
-             <div className="grid grid-cols-3 items-center px-1">
-                 <div className="flex justify-start">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ARPEGGIATOR</span>
+             <div className="flex items-center justify-between px-1 h-6">
+                 <div className="flex items-center gap-3">
+                    <span className="text-[12px] font-bold text-slate-400 uppercase tracking-widest">ARPEGGIATOR</span>
+                    <div className={`w-2.5 h-2.5 rounded-full transition-colors duration-100 ${getBpmLightClass()}`}></div>
                  </div>
-                 <div className="flex justify-center">
-                    <div className={`w-2 h-2 rounded-full transition-colors duration-100 ${getBpmLightClass()}`}></div>
-                 </div>
-                 <div className="flex justify-end items-center gap-1">
-                     <div className="flex items-center gap-px bg-slate-800/50 rounded border border-slate-700/50 overflow-hidden">
+                 
+                 <div className="flex items-center gap-1.5">
+                     <div className="flex items-center bg-slate-800/50 rounded border border-slate-700/50 overflow-hidden">
                         <button 
-                            className="px-1.5 py-0.5 hover:bg-slate-700 active:bg-slate-600 text-slate-400 hover:text-white transition-colors border-r border-slate-700/30"
+                            className="px-2 py-1 hover:bg-slate-700 active:bg-slate-600 text-slate-400 hover:text-white transition-colors border-r border-slate-700/30"
                             onPointerDown={(e) => { e.stopPropagation(); onArpBpmChange && onArpBpmChange(Math.max(1, (arpBpm || 120) - 1)); }}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -297,21 +301,21 @@ const FloatingControls: React.FC<Props> = ({
                             type="number" 
                             value={arpBpm} 
                             onChange={(e) => onArpBpmChange && onArpBpmChange(parseInt(e.target.value))}
-                            className="w-8 bg-transparent text-center text-[10px] font-mono font-bold text-slate-300 focus:outline-none focus:text-white no-spinner"
+                            className="w-9 bg-transparent text-center text-[10px] font-mono font-bold text-slate-300 focus:outline-none focus:text-white no-spinner"
                             onPointerDown={(e) => e.stopPropagation()}
                         />
                         <button 
-                            className="px-1.5 py-0.5 hover:bg-slate-700 active:bg-slate-600 text-slate-400 hover:text-white transition-colors border-l border-slate-700/30"
+                            className="px-2 py-1 hover:bg-slate-700 active:bg-slate-600 text-slate-400 hover:text-white transition-colors border-l border-slate-700/30"
                             onPointerDown={(e) => { e.stopPropagation(); onArpBpmChange && onArpBpmChange(Math.min(300, (arpBpm || 120) + 1)); }}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                         </button>
                      </div>
-                     <span className="text-[8px] text-slate-500 font-bold ml-1">BPM</span>
+                     <span className="text-[9px] text-slate-500 font-bold ml-1">BPM</span>
                  </div>
              </div>
 
-             <div className="flex gap-1 justify-center flex-wrap">
+             <div className="flex gap-1.5 justify-center flex-wrap w-full">
                  {arpeggios.map(arp => {
                      const isRecording = recordingArpId === arp.id;
                      const isPlaying = arp.isPlaying;
@@ -327,12 +331,12 @@ const FloatingControls: React.FC<Props> = ({
                      return (
                          <button 
                             key={arp.id}
-                            className={`rounded-lg flex items-center justify-center font-bold border-2 transition-all hover:scale-105 active:scale-95 ${btnClass}`}
-                            style={{ width: 38 * uiScale, height: 38 * uiScale, fontSize: 14 * uiScale }}
+                            className={`rounded flex items-center justify-center font-bold border-2 transition-all hover:scale-105 active:scale-95 ${btnClass}`}
+                            style={{ width: 34 * uiScale, height: 34 * uiScale, fontSize: 12 * uiScale, flexShrink: 0 }}
                             onPointerDown={(e) => { e.stopPropagation(); if(onArpToggle) onArpToggle(arp.id); }}
                          >
                              {showGreenDot ? (
-                                 <div className="w-2 h-2 bg-green-400 rounded-full shadow-[0_0_8px_#4ade80]"></div>
+                                 <div className="w-1.5 h-1.5 bg-green-400 rounded-full shadow-[0_0_8px_#4ade80]"></div>
                              ) : (
                                  arp.id
                              )}
@@ -343,7 +347,7 @@ const FloatingControls: React.FC<Props> = ({
         </div>
         
         <button 
-            className="w-full h-4 mt-2 bg-slate-800/50 hover:bg-slate-700/50 rounded flex items-center justify-center cursor-pointer transition-colors"
+            className="w-full h-4 mt-1 bg-slate-800/50 hover:bg-slate-700/50 rounded flex items-center justify-center cursor-pointer transition-colors"
             onPointerDown={(e) => { e.stopPropagation(); setShowSequencer(!showSequencer); }}
         >
              <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 text-slate-400 transition-transform ${showSequencer ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">

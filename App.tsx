@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
@@ -103,9 +102,10 @@ const App: React.FC = () => {
       // baseGap is the distance between clusters; scaled to match the increased "breath"
       const baseGap = Math.max(marginPx, 32 * scale); 
 
-      // Dimensions
-      const volumeBarWidth = 600 * scale; 
-      const arpBarWidth = 675 * scale; 
+      // Dimensions - Refined per user request
+      const volumeBarWidth = 500 * scale; 
+      const arpBarWidth = 760 * scale;    // Increased to ensure A-P fit
+      
       const settingsGroupWidth = 170; 
       const settingsGroupHeight = 40; 
       const largeBtn = 80 * scale; 
@@ -116,30 +116,38 @@ const App: React.FC = () => {
       // VERTICAL GAPS
       const verticalStackGap = 12 * PIXELS_PER_MM * scale; 
       
+      // Tighter gap for Volume Bar -> Settings to move it "closer" (Reduced from 12)
+      const headerGap = 8 * scale; 
+
       const newPos = { ...settings.uiPositions };
 
-      // Hiding Logic
-      const requiredWidth = volumeBarWidth + arpBarWidth + settingsGroupWidth + (baseGap * 4);
-      const shouldHideExtras = w < requiredWidth;
+      // Hiding Logic for Top Header
+      // We no longer strictly hide the Arp bar if it fits partially, 
+      // because it is now responsive (shrinks/wraps).
+      // However, we still need to position Volume Bar smartly.
+      
+      const availableWidth = w - marginLeft - marginRight;
+      const idealHeaderWidth = arpBarWidth + baseGap + volumeBarWidth + headerGap + settingsGroupWidth;
+      
+      // Logic: If constrained, Arp stays top-left but gets max-width logic in component.
+      // Volume bar stays top-right. If they would overlap, the Arp bar wraps/shrinks via CSS.
+      // But we should ensure Volume bar placement is robust.
+      
+      newPos.arpeggioBar = { x: marginLeft, y: marginTop };
+      
+      // Calculate Volume X. It is anchored right, next to settings.
+      const volX = w - marginRight - settingsGroupWidth - headerGap - volumeBarWidth;
+      newPos.volume = { x: volX, y: marginTop };
 
-      // Vertical calculation for layers
-      const extraLimitMargin = 12 * scale;
-      const limitBarX = w - marginRight - colWidth - extraLimitMargin;
-      const layersY = marginTop + settingsGroupHeight + verticalStackGap;
-
-      if (shouldHideExtras) {
-          newPos.arpeggioBar = { x: -9999, y: -9999 };
+      // Hiding Logic for Limit Layers (Right Side)
+      // Only hide if screen is extremely narrow (e.g. mobile portrait < 600px)
+      if (w < 600) {
           newPos.layers = { x: -9999, y: -9999 };
-          newPos.volume = { x: (w / 2) - (volumeBarWidth / 2), y: marginTop };
       } else {
-          // Arp Top Left
-          newPos.arpeggioBar = { x: marginLeft, y: marginTop };
-          
-          // Audio Stack - Aligned relative to Settings group
-          const volX = w - marginRight - settingsGroupWidth - baseGap - volumeBarWidth;
-          newPos.volume = { x: volX, y: marginTop };
-
-          // Right Side: Limit Layers
+          // Vertical calculation for layers
+          const extraLimitMargin = 12 * scale;
+          const limitBarX = w - marginRight - colWidth - extraLimitMargin;
+          const layersY = marginTop + settingsGroupHeight + verticalStackGap;
           newPos.layers = { x: limitBarX, y: layersY };
       }
 

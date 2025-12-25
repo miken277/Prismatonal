@@ -1,4 +1,3 @@
-
 import React, { useRef, useState, useEffect } from 'react';
 import { AppSettings, ButtonShape, ChordDefinition, BackgroundMode, LimitColorMap, KeyMappings, TuningSystem, LayoutApproach } from '../types';
 import { DEFAULT_COLORS } from '../constants';
@@ -147,9 +146,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
       case 'ji':
         options = [
           { value: 'lattice', label: 'Tonality Lattice' },
-          { value: 'diamond', label: 'Orthogonal Diamond' },
-          { value: 'row', label: 'Linear Ratios' },
-          { value: 'honeycomb', label: 'Hexagonal Honeycomb' },
+          { value: 'diamond', label: 'Tonality Diamond' },
         ];
         break;
       case 'et':
