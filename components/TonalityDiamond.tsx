@@ -22,6 +22,7 @@ interface Props {
   uiUnlocked: boolean;
   latchMode: 0 | 1 | 2; // 0=Off, 1=LatchAll, 2=Sustain
   globalScale?: number; 
+  viewZoom?: number;
   onNodeTrigger?: (nodeId: string, ratio: number, n?: number, d?: number, limit?: number) => void;
 }
 
@@ -37,7 +38,7 @@ interface ActiveCursor {
 const GRID_CELL_SIZE = 100; 
 
 const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) => {
-  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, globalScale = 1.0, onNodeTrigger } = props;
+  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, globalScale = 1.0, viewZoom = 1.0, onNodeTrigger } = props;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bgLineCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -63,7 +64,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const spatialGrid = useMemo(() => {
       const grid = new Map<string, LatticeNode[]>();
       const centerOffset = dynamicSize / 2;
-      const spacing = settings.buttonSpacingScale * globalScale;
+      const spacing = settings.buttonSpacingScale * globalScale * viewZoom;
 
       data.nodes.forEach(node => {
           const x = node.x * spacing + centerOffset;
@@ -75,7 +76,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           grid.get(key)!.push(node);
       });
       return grid;
-  }, [data.nodes, settings.buttonSpacingScale, dynamicSize, globalScale]);
+  }, [data.nodes, settings.buttonSpacingScale, dynamicSize, globalScale, viewZoom]);
 
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [persistentLatches, setPersistentLatches] = useState<Map<string, string>>(new Map());
@@ -215,6 +216,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const spatialGridRef = useRef(spatialGrid);
   const dynamicSizeRef = useRef(dynamicSize);
   const globalScaleRef = useRef(globalScale);
+  const viewZoomRef = useRef(viewZoom);
   const persistentLatchesRef = useRef(persistentLatches);
   
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
@@ -229,6 +231,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
   useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
   useEffect(() => { globalScaleRef.current = globalScale; }, [globalScale]);
+  useEffect(() => { viewZoomRef.current = viewZoom; }, [viewZoom]);
   useEffect(() => { persistentLatchesRef.current = persistentLatches; }, [persistentLatches]);
   
   const lastTouchedLimitRef = useRef<number | null>(null);
@@ -371,7 +374,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
 
         const padding = 600; 
-        const spacing = settingsRef.current.buttonSpacingScale * globalScale; 
+        const spacing = settingsRef.current.buttonSpacingScale * globalScale * viewZoom; 
         const calculatedSize = (maxExtent * spacing * 2) + padding;
         const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
 
@@ -397,7 +400,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           if (absY > maxExtent) maxExtent = absY;
       }
       const padding = 600; 
-      const spacing = settings.buttonSpacingScale * globalScale;
+      const spacing = settings.buttonSpacingScale * globalScale * viewZoom;
       const calculatedSize = (maxExtent * spacing * 2) + padding;
       const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
       
@@ -405,7 +408,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
 
       if (Math.abs(clampedSize - dynamicSize) > 50) setDynamicSize(clampedSize);
-  }, [settings.buttonSpacingScale, globalScale]);
+  }, [settings.buttonSpacingScale, globalScale, viewZoom]);
 
 
   const visualDeps = useMemo(() => JSON.stringify({
@@ -419,8 +422,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       textScale: settings.nodeTextSizeScale,
       fractionBar: settings.showFractionBar,
       canvasSize: dynamicSize,
-      globalScale: globalScale 
-  }), [settings.tuningSystem, settings.layoutApproach, settings.activeSkin, settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale]);
+      globalScale: globalScale,
+      viewZoom: viewZoom 
+  }), [settings.tuningSystem, settings.layoutApproach, settings.activeSkin, settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale, viewZoom]);
 
   useEffect(() => {
       const canvas = staticCanvasRef.current;
@@ -442,8 +446,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       ctx.scale(dpr, dpr);
 
       const centerOffset = size / 2;
-      const spacing = settings.buttonSpacingScale * globalScale;
-      const baseRadius = (60 * settings.buttonSizeScale * globalScale) / 2;
+      const effectiveScale = globalScale * viewZoom;
+      const spacing = settings.buttonSpacingScale * effectiveScale;
+      const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
       const isDiamond = settings.buttonShape === ButtonShape.DIAMOND;
 
       const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
@@ -467,11 +472,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               ctx.moveTo(coords[i], coords[i+1]);
               ctx.lineTo(coords[i+2], coords[i+3]);
           }
-          ctx.lineWidth = (limit === 1 ? 3 : 1) * globalScale; 
+          ctx.lineWidth = (limit === 1 ? 3 : 1) * effectiveScale; 
           ctx.strokeStyle = color;
           ctx.globalAlpha = (isJIOverride ? 0.15 : 0.3); 
           
-          if (limit === 1) ctx.setLineDash([5 * globalScale, 5 * globalScale]);
+          if (limit === 1) ctx.setLineDash([5 * effectiveScale, 5 * effectiveScale]);
           else ctx.setLineDash([]);
           ctx.stroke();
       }
@@ -501,7 +506,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           if (isJIOverride) {
               ctx.fillStyle = '#111';
               ctx.fill();
-              ctx.lineWidth = 2 * globalScale;
+              ctx.lineWidth = 2 * effectiveScale;
               ctx.strokeStyle = '#fff';
               ctx.stroke();
           } else {
@@ -512,12 +517,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               ctx.fill();
           }
 
-          const combinedScale = settings.buttonSizeScale;
+          const combinedScale = settings.buttonSizeScale * viewZoom; // Use viewZoom to scale text readability
           if (combinedScale > 0.4) {
               ctx.fillStyle = isJIOverride ? '#fff' : 'white';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              let fontSize = Math.max(10, Math.min(18, 14 * combinedScale)) * settings.nodeTextSizeScale * globalScale;
+              let fontSize = Math.max(10, Math.min(18, 14 * combinedScale)) * settings.nodeTextSizeScale * effectiveScale;
               ctx.font = `bold ${fontSize}px sans-serif`; 
               
               const spacingY = settings.showFractionBar ? 0.55 : 0.50;
@@ -526,7 +531,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                   ctx.beginPath();
                   ctx.moveTo(x - (radius * 0.4), y);
                   ctx.lineTo(x + (radius * 0.4), y);
-                  ctx.lineWidth = 1 * globalScale;
+                  ctx.lineWidth = 1 * effectiveScale;
                   ctx.strokeStyle = isJIOverride ? 'rgba(255,255,255,0.4)' : `rgba(255,255,255,0.8)`;
                   ctx.stroke();
               }
@@ -598,8 +603,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const y = clientY - rect.top;
 
       const centerOffset = dynamicSizeRef.current / 2;
-      const spacing = settings.buttonSpacingScale * globalScale;
-      const baseRadius = (60 * settings.buttonSizeScale * globalScale) / 2;
+      const effectiveScale = globalScaleRef.current * viewZoomRef.current;
+      const spacing = settings.buttonSpacingScale * effectiveScale;
+      const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
 
       const col = Math.floor(x / GRID_CELL_SIZE);
       const row = Math.floor(y / GRID_CELL_SIZE);
@@ -735,10 +741,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
          
          const originNode = nodeMapRef.current.get(cursor.originNodeId);
          if (originNode) {
-             const spacing = settingsRef.current.buttonSpacingScale * globalScaleRef.current;
+             const effectiveScale = globalScaleRef.current * viewZoomRef.current;
+             const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
              const originScreenY = rect.top + (originNode.y * spacing) + centerOffset;
              const deltaY = e.clientY - originScreenY;
-             const bentRatio = getPitchRatioFromScreenDelta(deltaY, settingsRef.current.buttonSpacingScale * globalScaleRef.current);
+             const bentRatio = getPitchRatioFromScreenDelta(deltaY, settingsRef.current.buttonSpacingScale * effectiveScale);
              const finalRatio = originNode.ratio * bentRatio;
              
              const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
@@ -880,7 +887,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const currentBrightenedLines = brightenedLinesRef.current;
       const size = dynamicSizeRef.current;
       const cursors = activeCursorsRef.current;
-      const currentGlobalScale = globalScaleRef.current;
+      const currentGlobalScale = globalScaleRef.current * viewZoomRef.current; // Multiply global scale by zoom
 
       const isJIOverride = currentSettings.tuningSystem === 'ji' && currentSettings.layoutApproach !== 'lattice' && currentSettings.layoutApproach !== 'diamond';
       
@@ -1105,7 +1112,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
       switch(mode) {
           case 'rainbow':
-              const period = getRainbowPeriod(settings.buttonSpacingScale * globalScale);
+              const period = getRainbowPeriod(settings.buttonSpacingScale * globalScale * viewZoom);
               const stops = [];
               for(let i=0; i<=6; i++) {
                   const pct = (i/6)*100;

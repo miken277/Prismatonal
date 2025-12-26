@@ -14,7 +14,7 @@ const gcd = (a: number, b: number): number => {
   return x;
 };
 
-const getMaxPrime = (n: number): number => {
+export const getMaxPrime = (n: number): number => {
   let temp = Math.abs(Math.round(n));
   while (temp % 2 === 0 && temp > 1) temp /= 2;
   if (temp === 1) return 1;

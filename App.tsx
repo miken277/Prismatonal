@@ -19,6 +19,7 @@ const App: React.FC = () => {
   const [masterVolume, setMasterVolume] = useState(0.8);
   const [spatialScale, setSpatialScale] = useState(1.0); 
   const [brightness, setBrightness] = useState(1.0); // Tone control
+  const [viewZoom, setViewZoom] = useState(1.0);
 
   const [activeChordIds, setActiveChordIds] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -113,9 +114,8 @@ const App: React.FC = () => {
       // baseGap is the distance between clusters; scaled to match the increased "breath"
       const baseGap = Math.max(marginPx, 32 * scale); 
 
-      // Dimensions - Refined per user request
-      const volumeBarWidth = 500 * scale; 
-      const arpBarWidth = 760 * scale;    // Increased to ensure A-P fit
+      // Dimensions - Refined per user request + Extra for Zoom
+      const volumeBarWidth = 600 * scale; 
       
       const settingsGroupWidth = 170; 
       const settingsGroupHeight = 40; 
@@ -133,16 +133,6 @@ const App: React.FC = () => {
       const newPos = { ...settings.uiPositions };
 
       // Hiding Logic for Top Header
-      // We no longer strictly hide the Arp bar if it fits partially, 
-      // because it is now responsive (shrinks/wraps).
-      // However, we still need to position Volume Bar smartly.
-      
-      const availableWidth = w - marginLeft - marginRight;
-      const idealHeaderWidth = arpBarWidth + baseGap + volumeBarWidth + headerGap + settingsGroupWidth;
-      
-      // Logic: If constrained, Arp stays top-left but gets max-width logic in component.
-      // Volume bar stays top-right. If they would overlap, the Arp bar wraps/shrinks via CSS.
-      // But we should ensure Volume bar placement is robust.
       
       newPos.arpeggioBar = { x: marginLeft, y: marginTop };
       
@@ -475,6 +465,21 @@ const App: React.FC = () => {
 
   const headerBtnClass = "bg-slate-900/50 hover:bg-slate-800 px-3 py-1 rounded-xl backdrop-blur-sm transition border border-slate-700/50 h-8 flex items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-white shadow-lg";
 
+  // Calculate available width for Arpeggiator Bar based on Volume Bar position
+  // Volume bar is positioned based on its right edge logic in applyLayout, but we can access its computed left position from state.
+  const arpX = settings.uiPositions.arpeggioBar.x;
+  const volX = settings.uiPositions.volume.x;
+  // Gap between the two bars
+  const gap = 20 * effectiveScale;
+  
+  // Available width is the space from Arp's left edge to Volume's left edge minus gap.
+  // If volX is very small (layout weirdness), ensure non-negative.
+  const availableArpWidth = Math.max(0, volX - arpX - gap);
+  
+  // Hide Logic: If available width is too small (e.g. < 250px), don't show the bar to prevent overlap/ugly squashing.
+  // Unless the screen is huge, then it's fine.
+  const showArpBar = availableArpWidth > 250 * effectiveScale;
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
       <div className="absolute z-50 pointer-events-none" style={{ top: headerTop, left: leftOffset }}>
@@ -496,40 +501,91 @@ const App: React.FC = () => {
         uiUnlocked={settings.uiUnlocked}
         latchMode={latchMode}
         globalScale={effectiveScale}
+        viewZoom={viewZoom}
         onNodeTrigger={handleArpRecordNote} 
       />
 
-      <FloatingControls 
-        volume={masterVolume} setVolume={setMasterVolume}
-        spatialScale={spatialScale} setSpatialScale={setSpatialScale}
-        brightness={brightness} setBrightness={setBrightness}
-        
-        onPanic={handlePanic} onOff={handleOff}
-        onLatch={handleLatchToggle} latchMode={latchMode}
-        onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
-        onCenter={handleCenter}
-        onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
-        onAddChord={handleAddChord} toggleChord={toggleChord}
-        activeChordIds={activeChordIds} savedChords={settings.savedChords}
-        chordShortcutSizeScale={settings.chordShortcutSizeScale}
-        showIncreaseDepthButton={settings.showIncreaseDepthButton}
-        uiUnlocked={settings.uiUnlocked}
-        uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
-        draggingId={draggingId} setDraggingId={setDraggingId}
-        uiScale={effectiveScale}
-        
-        arpeggios={settings.arpeggios}
-        arpBpm={settings.arpBpm}
-        onArpToggle={handleArpToggle}
-        onArpBpmChange={handleArpBpmChange}
-        onArpRowConfigChange={handleArpRowConfigChange}
-        onArpPatternUpdate={handleArpPatternUpdate}
-        recordingArpId={recordingArpId}
-        currentArpStep={currentArpStep}
-        recordingFlash={recordingFlash}
-        onPlayAll={handlePlayAll}
-        onStopAll={handleStopAll}
-      />
+      {showArpBar && (
+          <FloatingControls 
+            volume={masterVolume} setVolume={setMasterVolume}
+            spatialScale={spatialScale} setSpatialScale={setSpatialScale}
+            brightness={brightness} setBrightness={setBrightness}
+            viewZoom={viewZoom} setViewZoom={setViewZoom}
+            
+            onPanic={handlePanic} onOff={handleOff}
+            onLatch={handleLatchToggle} latchMode={latchMode}
+            onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
+            onCenter={handleCenter}
+            onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
+            onAddChord={handleAddChord} toggleChord={toggleChord}
+            activeChordIds={activeChordIds} savedChords={settings.savedChords}
+            chordShortcutSizeScale={settings.chordShortcutSizeScale}
+            showIncreaseDepthButton={settings.showIncreaseDepthButton}
+            uiUnlocked={settings.uiUnlocked}
+            uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
+            draggingId={draggingId} setDraggingId={setDraggingId}
+            uiScale={effectiveScale}
+            
+            arpeggios={settings.arpeggios}
+            arpBpm={settings.arpBpm}
+            onArpToggle={handleArpToggle}
+            onArpBpmChange={handleArpBpmChange}
+            onArpRowConfigChange={handleArpRowConfigChange}
+            onArpPatternUpdate={handleArpPatternUpdate}
+            recordingArpId={recordingArpId}
+            currentArpStep={currentArpStep}
+            recordingFlash={recordingFlash}
+            onPlayAll={handlePlayAll}
+            onStopAll={handleStopAll}
+            
+            maxArpWidth={availableArpWidth}
+          />
+      )}
+      
+      {!showArpBar && (
+          <FloatingControls 
+            // Render only the bottom controls + Volume/Zoom bar if Arp is hidden
+            // But FloatingControls renders everything absolutely positioned based on props.
+            // If we simply don't render the Arp bar inside FloatingControls when width is 0/undefined?
+            // Actually, FloatingControls renders *all* floating UI. We cannot conditional render the whole component.
+            // We must pass the maxArpWidth and let FloatingControls decide visibility of just the arp bar?
+            // Re-instantiating logic: The above condition `showArpBar &&` removes EVERYTHING. That's wrong.
+            // FloatingControls manages ALL UI.
+            
+            volume={masterVolume} setVolume={setMasterVolume}
+            spatialScale={spatialScale} setSpatialScale={setSpatialScale}
+            brightness={brightness} setBrightness={setBrightness}
+            viewZoom={viewZoom} setViewZoom={setViewZoom}
+            
+            onPanic={handlePanic} onOff={handleOff}
+            onLatch={handleLatchToggle} latchMode={latchMode}
+            onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
+            onCenter={handleCenter}
+            onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
+            onAddChord={handleAddChord} toggleChord={toggleChord}
+            activeChordIds={activeChordIds} savedChords={settings.savedChords}
+            chordShortcutSizeScale={settings.chordShortcutSizeScale}
+            showIncreaseDepthButton={settings.showIncreaseDepthButton}
+            uiUnlocked={settings.uiUnlocked}
+            uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
+            draggingId={draggingId} setDraggingId={setDraggingId}
+            uiScale={effectiveScale}
+            
+            arpeggios={settings.arpeggios}
+            arpBpm={settings.arpBpm}
+            onArpToggle={handleArpToggle}
+            onArpBpmChange={handleArpBpmChange}
+            onArpRowConfigChange={handleArpRowConfigChange}
+            onArpPatternUpdate={handleArpPatternUpdate}
+            recordingArpId={recordingArpId}
+            currentArpStep={currentArpStep}
+            recordingFlash={recordingFlash}
+            onPlayAll={handlePlayAll}
+            onStopAll={handleStopAll}
+            
+            maxArpWidth={0} // Force hide arp bar internally if needed, or pass 0 to trigger hidden logic
+          />
+      )}
 
       <LimitLayerControls settings={settings} updateSettings={updateSettings} draggingId={draggingId} setDraggingId={setDraggingId} uiScale={effectiveScale} />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} updateSettings={updateSettings} />
