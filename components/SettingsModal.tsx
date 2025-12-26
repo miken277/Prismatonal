@@ -1,5 +1,3 @@
-
-
 import React, { useRef, useState, useEffect } from 'react';
 import { AppSettings, ButtonShape, ChordDefinition, BackgroundMode, LimitColorMap, KeyMappings, TuningSystem, LayoutApproach } from '../types';
 import { DEFAULT_COLORS, PIXELS_PER_MM } from '../constants';
@@ -229,7 +227,21 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
           <div className="flex gap-2">
               <select 
                   value={settings.layoutApproach} 
-                  onChange={(e) => handleChange('layoutApproach', e.target.value as LayoutApproach)}
+                  onChange={(e) => {
+                      const newLayout = e.target.value as LayoutApproach;
+                      let newSpacing = settings.buttonSpacingScale;
+                      
+                      // Auto-adjust spacing defaults for specific layouts
+                      // 0.756 = 20mm, 1.89 = 50mm
+                      if (newLayout === 'diamond') newSpacing = 0.756; 
+                      else if (newLayout === 'lattice') newSpacing = 1.89; 
+                      
+                      updateSettings({ 
+                          ...settings, 
+                          layoutApproach: newLayout,
+                          buttonSpacingScale: newSpacing
+                      });
+                  }}
                   className="flex-1 bg-slate-800 border border-slate-600 rounded p-1.5 text-[10px] text-white focus:outline-none focus:border-indigo-500"
               >
                   {options.map(opt => (

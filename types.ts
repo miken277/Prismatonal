@@ -1,5 +1,3 @@
-
-
 export enum LimitType {
   LIMIT_3 = 3,
   LIMIT_5 = 5,
@@ -34,15 +32,6 @@ export type BackgroundMode = 'rainbow' | 'charcoal' | 'midnight_blue' | 'deep_ma
 
 export interface LimitColorMap {
   [key: number]: string;
-}
-
-export interface LimitVisualSetting {
-    size: number;   // 0.1 to 2.0 (Multiplier of base size)
-    opacity: number; // 0.0 to 1.0
-}
-
-export interface LimitVisualsMap {
-    [key: number]: LimitVisualSetting;
 }
 
 export interface ChordNode {
@@ -190,9 +179,6 @@ export interface AppSettings {
   canvasSize: number; // Width/Height of the scrollable area in pixels (e.g. 3000, 5000)
   buttonShape: ButtonShape;
   colors: LimitColorMap;
-  
-  // Per-Limit Visuals (Size/Opacity)
-  limitVisuals: LimitVisualsMap;
   
   // Text Appearance
   nodeTextSizeScale: number; // 0.5 to 2.0

@@ -361,13 +361,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       size: settings.buttonSizeScale,
       spacing: settings.buttonSpacingScale,
       colors: settings.colors,
-      visuals: settings.limitVisuals,
       shape: settings.buttonShape,
       textScale: settings.nodeTextSizeScale,
       fractionBar: settings.showFractionBar,
       canvasSize: dynamicSize,
       globalScale: globalScale 
-  }), [settings.tuningSystem, settings.layoutApproach, settings.activeSkin, settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.limitVisuals, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale]);
+  }), [settings.tuningSystem, settings.layoutApproach, settings.activeSkin, settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale]);
 
   useEffect(() => {
       const canvas = staticCanvasRef.current;
@@ -393,7 +392,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const baseRadius = (60 * settings.buttonSizeScale * globalScale) / 2;
       const isDiamond = settings.buttonShape === ButtonShape.DIAMOND;
 
-      const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice';
+      const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
       
       const linesByLimit: Record<number, number[]> = {};
       for (const line of data.lines) {
@@ -408,16 +407,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           const limit = parseInt(limitStr);
           const coords = linesByLimit[limit];
           const color = isJIOverride ? '#fff' : (settings.colors[limit] || '#666');
-          const visualSettings = settings.limitVisuals?.[limit] || { size: 1, opacity: 1 };
           
           ctx.beginPath();
           for(let i=0; i<coords.length; i+=4) {
               ctx.moveTo(coords[i], coords[i+1]);
               ctx.lineTo(coords[i+2], coords[i+3]);
           }
-          ctx.lineWidth = (limit === 1 ? 3 : 1) * visualSettings.size * globalScale; 
+          // Standardized line width logic - uniform unless 1/1 line
+          ctx.lineWidth = (limit === 1 ? 3 : 1) * globalScale; 
           ctx.strokeStyle = color;
-          ctx.globalAlpha = (isJIOverride ? 0.15 : 0.3) * visualSettings.opacity; 
+          // Standardized opacity
+          ctx.globalAlpha = (isJIOverride ? 0.15 : 0.3); 
           
           if (limit === 1) ctx.setLineDash([5 * globalScale, 5 * globalScale]);
           else ctx.setLineDash([]);
@@ -430,12 +430,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           const y = node.y * spacing + centerOffset;
           const cTop = isJIOverride ? '#fff' : (settings.colors[node.limitTop] || '#666');
           const cBottom = isJIOverride ? '#eee' : (settings.colors[node.limitBottom] || '#666');
-          const topVis = settings.limitVisuals?.[node.limitTop] || { size: 1, opacity: 1 };
-          const limitScale = topVis.size;
-          const limitOpacity = topVis.opacity;
-          const radius = baseRadius * limitScale;
+          
+          // Uniform size for all nodes
+          const radius = baseRadius;
 
-          ctx.globalAlpha = 1.0 * limitOpacity;
+          // Uniform opacity
+          ctx.globalAlpha = 1.0;
           
           ctx.beginPath();
           if (isDiamond) {
@@ -462,7 +462,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               ctx.fill();
           }
 
-          const combinedScale = settings.buttonSizeScale * limitScale;
+          const combinedScale = settings.buttonSizeScale;
           if (combinedScale > 0.4) {
               ctx.fillStyle = isJIOverride ? '#fff' : 'white';
               ctx.textAlign = 'center';
@@ -477,7 +477,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                   ctx.moveTo(x - (radius * 0.4), y);
                   ctx.lineTo(x + (radius * 0.4), y);
                   ctx.lineWidth = 1 * globalScale;
-                  ctx.strokeStyle = isJIOverride ? 'rgba(255,255,255,0.4)' : `rgba(255,255,255,${0.8 * limitOpacity})`;
+                  ctx.strokeStyle = isJIOverride ? 'rgba(255,255,255,0.4)' : `rgba(255,255,255,0.8)`;
                   ctx.stroke();
               }
               ctx.fillText(node.d.toString(), x, y + (radius * spacingY));
@@ -564,8 +564,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               for (const node of nodesInCell) {
                   const nx = node.x * spacing + centerOffset;
                   const ny = node.y * spacing + centerOffset;
-                  const vis = settings.limitVisuals?.[node.limitTop] || { size: 1 };
-                  const r = baseRadius * vis.size;
+                  const r = baseRadius; // Uniform radius
                   
                   if (x < nx - r || x > nx + r || y < ny - r || y > ny + r) continue;
                   
@@ -632,8 +631,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 });
             } else if (!isAudioLatched) {
                 const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
-                // Uses 'normal' patch for Mode 0 and Mode 2 (Partial Latch) manual play
-                const voiceType = 'normal'; 
+                const voiceType = (latchMode === 2) ? 'normal' : 'normal'; // Always use normal voice for transient clicks (even in Partial Latch)
                 audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, voiceType);
                 if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
             }
@@ -675,15 +673,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     }
 
     if (cursor.hoverNodeId !== hitId) {
-        // Stop previous note if it wasn't a bending origin or if we are sliding between nodes
-        // This applies to Mode 0 and Mode 2 (Partial Latch)
-        if (latchMode !== 1 && cursor.hoverNodeId) {
-             const isBendingOrigin = settings.isPitchBendEnabled && cursor.originNodeId === cursor.hoverNodeId;
-             if (!isBendingOrigin) {
-                 const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
-                 audioEngine.stopVoice(oldVoiceId);
-                 if (settings.midiEnabled) midiService.noteOff(oldVoiceId);
-             }
+        const isBending = settingsRef.current.isPitchBendEnabled && cursor.originNodeId;
+        const shouldStop = latchMode !== 1 && (!isBending || cursor.hoverNodeId !== cursor.originNodeId);
+
+        if (shouldStop && cursor.hoverNodeId) {
+             const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+             audioEngine.stopVoice(oldVoiceId);
+             if (settings.midiEnabled) midiService.noteOff(oldVoiceId);
         }
 
         if (hitNode) {
@@ -702,11 +698,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 }
              } 
              else {
+                 // Mode 0 or 2 (Partial/Sustain)
                  const isAlreadyLatched = audioLatchedNodes.has(hitNode.id);
-                 const isBending = settingsRef.current.isPitchBendEnabled && cursor.originNodeId;
                  
+                 // If bending the origin node, we generally don't want to trigger neighbors 
                  if (!isAlreadyLatched && !isBending) {
                      const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
+                     // In Partial Latch, transient interactions act like Normal Mode.
+                     // Dragging triggers Strum preset.
                      audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, 'strum');
                      if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                  }
@@ -729,20 +728,26 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const handlePointerUp = (e: React.PointerEvent) => {
     if (activeCursorsRef.current.has(e.pointerId)) {
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
+        const isBending = settings.isPitchBendEnabled && cursor.originNodeId;
         
-        if (cursor.originNodeId) {
-            // Stop voice in both Normal Mode (0) and Partial Latch/Sustain Mode (2).
-            // Mode 1 (Full Latch) manages persistency via state, so we don't stop it here.
-            if (latchMode !== 1) {
+        if (latchMode === 1) {
+            // Full Latch: notes persist, no stop action on release
+        } else {
+            // Mode 0 (Normal) or Mode 2 (Partial/Sustain)
+            // Transient notes should stop on release.
+            
+            // If bending, the active voice is the origin node (maintained during drag)
+            if (isBending && cursor.originNodeId) {
                 const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
                 audioEngine.stopVoice(voiceId);
                 if (settings.midiEnabled) midiService.noteOff(voiceId);
             }
-        } 
-        else if (cursor.hoverNodeId && cursor.hoverNodeId !== cursor.originNodeId && latchMode !== 1) {
-             const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
-             audioEngine.stopVoice(voiceId);
-             if (settings.midiEnabled) midiService.noteOff(voiceId);
+            // If strumming/clicking, the active voice is the last hovered node
+            else if (cursor.hoverNodeId) {
+                const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+                audioEngine.stopVoice(voiceId);
+                if (settings.midiEnabled) midiService.noteOff(voiceId);
+            }
         }
         
         cursorPositionsRef.current.delete(e.pointerId);
@@ -774,7 +779,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const cursors = activeCursorsRef.current;
       const currentGlobalScale = globalScaleRef.current;
 
-      const isJIOverride = currentSettings.tuningSystem === 'ji' && currentSettings.layoutApproach !== 'lattice';
+      const isJIOverride = currentSettings.tuningSystem === 'ji' && currentSettings.layoutApproach !== 'lattice' && currentSettings.layoutApproach !== 'diamond';
       
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
@@ -880,10 +885,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              const y = node.y * spacing + centerOffset;
              if (x < leftBound || x > rightBound || y < topBound || y > bottomBound) continue;
              const cTop = isJIOverride ? '#fff' : (colorCache[node.limitTop] || '#666');
-             const vis = currentSettings.limitVisuals?.[node.limitTop] || { size: 1 };
-             const limitScale = vis.size;
              const zoomScale = currentSettings.latchedZoomScale;
-             const radius = baseRadius * limitScale * zoomScale;
+             const radius = baseRadius * zoomScale;
              activeCtx.globalAlpha = 1.0; 
              activeCtx.beginPath();
              if (isDiamond) {
@@ -924,7 +927,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              activeCtx.stroke();
              activeCtx.shadowBlur = 0; // Reset
 
-             const combinedScale = currentSettings.buttonSizeScale * limitScale * zoomScale;
+             const combinedScale = currentSettings.buttonSizeScale * zoomScale;
              if (combinedScale > 0.4) {
                 activeCtx.fillStyle = isJIOverride ? '#000' : 'white';
                 activeCtx.textAlign = 'center';
@@ -984,7 +987,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const getBackgroundStyle = () => {
       const mode = settings.backgroundMode;
       const offset = settings.backgroundYOffset || 0;
-      const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice';
+      const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
 
       const baseStyle: React.CSSProperties = {
           minWidth: '100%', minHeight: '100%', width: dynamicSize, height: dynamicSize,

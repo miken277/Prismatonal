@@ -1,6 +1,4 @@
-
-
-import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, LimitVisualsMap, ReverbType, ArpeggioDefinition, KeyMappings } from './types';
+import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, ReverbType, ArpeggioDefinition, KeyMappings } from './types';
 
 export const DEFAULT_COLORS: LimitColorMap = {
   1: '#EF4444', // Red (Unity)
@@ -11,17 +9,6 @@ export const DEFAULT_COLORS: LimitColorMap = {
   11: '#A855F7', // Purple (11-Limit)
   13: '#F97316', // Orange (13-Limit)
   15: '#3B82F6', // Blue (15-Limit - Same as 5)
-};
-
-export const DEFAULT_LIMIT_VISUALS: LimitVisualsMap = {
-    1: { size: 1.0, opacity: 1.0 },
-    3: { size: 1.0, opacity: 1.0 },
-    5: { size: 0.9, opacity: 0.9 },
-    7: { size: 0.8, opacity: 0.8 },
-    9: { size: 0.8, opacity: 0.8 },
-    11: { size: 0.7, opacity: 0.7 },
-    13: { size: 0.6, opacity: 0.6 },
-    15: { size: 0.6, opacity: 0.6 }
 };
 
 export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
@@ -149,12 +136,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   isMomentumEnabled: false, 
   latchedZoomScale: 1.3,
   buttonSizeScale: 1.26, // 10mm default with 2x correction
-  buttonSpacingScale: 1.89, // 50mm default with 2x correction
+  buttonSpacingScale: 1.89, // 50mm default with 2x correction (Lattice default)
   latticeAspectRatio: 0.7, 
   canvasSize: 2000, 
   buttonShape: ButtonShape.CIRCLE,
   colors: { ...DEFAULT_COLORS },
-  limitVisuals: { ...DEFAULT_LIMIT_VISUALS },
   nodeTextSizeScale: 1.0,
   showFractionBar: false,
   isPitchBendEnabled: false, 

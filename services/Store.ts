@@ -1,4 +1,3 @@
-
 import { useSyncExternalStore } from 'react';
 import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState } from '../types';
 import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_ARP_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS } from '../constants';
@@ -27,7 +26,6 @@ class PrismaStore {
                 limitDepths: { ...DEFAULT_SETTINGS.limitDepths, ...(parsed.limitDepths || {}) },
                 limitComplexities: { ...DEFAULT_SETTINGS.limitComplexities, ...(parsed.limitComplexities || {}) },
                 colors: { ...DEFAULT_COLORS, ...(parsed.colors || {}) }, 
-                limitVisuals: { ...DEFAULT_SETTINGS.limitVisuals, ...(parsed.limitVisuals || {}) },
                 uiPositions: { ...DEFAULT_SETTINGS.uiPositions, ...(parsed.uiPositions || {}) },
                 arpeggios: parsed.arpeggios || DEFAULT_SETTINGS.arpeggios,
                 arpBpm: parsed.arpBpm || DEFAULT_SETTINGS.arpBpm

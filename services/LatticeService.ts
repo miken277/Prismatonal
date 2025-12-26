@@ -1,5 +1,3 @@
-
-
 import { LatticeNode, LatticeLine, AppSettings, GenerationOrigin } from '../types';
 import { projectCoordinates } from './ProjectionService';
 
@@ -225,15 +223,10 @@ const generatePartchDiamond = (settings: AppSettings): { nodes: LatticeNode[], l
     const nodes: LatticeNode[] = [];
     const lines: LatticeLine[] = [];
     
-    // Find highest enabled odd limit
-    let maxEnabledLimit = 1;
-    settings.layerOrder.forEach(l => {
-        if (!settings.hiddenLimits.includes(l) && ODD_IDENTITIES.includes(l)) {
-            if (l > maxEnabledLimit) maxEnabledLimit = l;
-        }
-    });
-
-    const activeIdentities = ODD_IDENTITIES.filter(id => id <= maxEnabledLimit);
+    // Directly filter enabled identities based on hiddenLimits.
+    // This allows for disjoint diamonds (e.g. 1,3,5,15 enabled, but 7,9,11,13 hidden).
+    const activeIdentities = ODD_IDENTITIES.filter(id => !settings.hiddenLimits.includes(id));
+    
     const N = activeIdentities.length;
     
     // Scale factor to ensure nodes are visually separated
