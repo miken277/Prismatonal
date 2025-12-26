@@ -44,6 +44,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const staticCanvasRef = useRef<HTMLCanvasElement>(null); 
   const dynamicCanvasRef = useRef<HTMLCanvasElement>(null); 
   
+  // Cache the bounding rect to avoid reflows on every pointer move
+  const canvasRectRef = useRef<DOMRect | null>(null);
+
   const animationFrameRef = useRef<number>(0);
   
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
@@ -80,8 +83,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   // Listen for voice stealing from AudioEngine to update persistent latches visually
   useEffect(() => {
       const unsubscribe = audioEngine.onVoiceSteal((voiceId) => {
-          // If a voice ID starting with 'node-' is stolen, it means a latched note was killed by polyphony limits.
-          // We should remove it from the visual latch state to match.
           if (voiceId.startsWith('node-')) {
               const nodeId = voiceId.replace('node-', '');
               setPersistentLatches(prev => {
@@ -115,17 +116,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const isDiamond = settings.layoutApproach === 'diamond';
 
       activeCursors.forEach(cursor => {
-          // Check if bend is active for this cursor interaction
           const isBending = settings.isPitchBendEnabled && !!cursor.originNodeId && latchMode !== 1;
 
           if (isBending && isDiamond) {
-              // In Diamond layout during Bend, decoupling implies we should only 
-              // visualize the source node (the one actually sounding), not the nodes we pass over.
               if (cursor.originNodeId) {
                   visual.set(cursor.originNodeId, cursor.originNodeId);
               }
           } else {
-              // Standard behavior: visualize the node currently being touched/hovered
               if (cursor.hoverNodeId) {
                   visual.set(cursor.hoverNodeId, cursor.hoverNodeId);
               }
@@ -238,6 +235,27 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const depthHistoryRef = useRef<number[]>([]);
   const prevActiveChordIds = useRef<string[]>([]);
 
+  const updateRect = () => {
+      if (dynamicCanvasRef.current) {
+          canvasRectRef.current = dynamicCanvasRef.current.getBoundingClientRect();
+      }
+  };
+
+  useEffect(() => {
+      window.addEventListener('resize', updateRect);
+      const scroller = scrollContainerRef.current;
+      if (scroller) scroller.addEventListener('scroll', updateRect);
+      updateRect();
+      return () => {
+          window.removeEventListener('resize', updateRect);
+          if (scroller) scroller.removeEventListener('scroll', updateRect);
+      };
+  }, []);
+
+  useEffect(() => {
+      updateRect();
+  }, [dynamicSize]);
+
   useEffect(() => {
       const handleBlur = () => {
           if (activeCursorsRef.current.size > 0) {
@@ -290,6 +308,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const viewportH = scrollContainerRef.current.clientHeight;
         scrollContainerRef.current.scrollLeft = center - viewportW / 2;
         scrollContainerRef.current.scrollTop = center - viewportH / 2;
+        requestAnimationFrame(updateRect);
       }
   };
 
@@ -308,6 +327,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const diff = (dynamicSize - prevDynamicSizeRef.current) / 2;
         container.scrollLeft += diff;
         container.scrollTop += diff;
+        requestAnimationFrame(updateRect);
     }
     prevDynamicSizeRef.current = dynamicSize;
   }, [dynamicSize, isInitialLoad]);
@@ -447,10 +467,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               ctx.moveTo(coords[i], coords[i+1]);
               ctx.lineTo(coords[i+2], coords[i+3]);
           }
-          // Standardized line width logic - uniform unless 1/1 line
           ctx.lineWidth = (limit === 1 ? 3 : 1) * globalScale; 
           ctx.strokeStyle = color;
-          // Standardized opacity
           ctx.globalAlpha = (isJIOverride ? 0.15 : 0.3); 
           
           if (limit === 1) ctx.setLineDash([5 * globalScale, 5 * globalScale]);
@@ -465,10 +483,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           const cTop = isJIOverride ? '#fff' : (settings.colors[node.limitTop] || '#666');
           const cBottom = isJIOverride ? '#eee' : (settings.colors[node.limitBottom] || '#666');
           
-          // Uniform size for all nodes
           const radius = baseRadius;
 
-          // Uniform opacity
           ctx.globalAlpha = 1.0;
           
           ctx.beginPath();
@@ -483,7 +499,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           ctx.closePath();
 
           if (isJIOverride) {
-              ctx.fillStyle = '#111'; // Dark center for alternate layouts
+              ctx.fillStyle = '#111';
               ctx.fill();
               ctx.lineWidth = 2 * globalScale;
               ctx.strokeStyle = '#fff';
@@ -572,7 +588,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const getHitNode = (clientX: number, clientY: number): LatticeNode | null => {
       if (!dynamicCanvasRef.current) return null;
-      const rect = dynamicCanvasRef.current.getBoundingClientRect();
+      let rect = canvasRectRef.current;
+      if (!rect) {
+          rect = dynamicCanvasRef.current.getBoundingClientRect();
+          canvasRectRef.current = rect;
+      }
+      
       const x = clientX - rect.left;
       const y = clientY - rect.top;
 
@@ -598,7 +619,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               for (const node of nodesInCell) {
                   const nx = node.x * spacing + centerOffset;
                   const ny = node.y * spacing + centerOffset;
-                  const r = baseRadius; // Uniform radius
+                  const r = baseRadius;
                   
                   if (x < nx - r || x > nx + r || y < ny - r || y > ny + r) continue;
                   
@@ -623,16 +644,22 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const hitNode = getHitNode(e.clientX, e.clientY);
       const nodeId = hitNode ? hitNode.id : null;
 
+      const newCursor: ActiveCursor = {
+          pointerId: e.pointerId,
+          currentX: e.clientX,
+          currentY: e.clientY,
+          originNodeId: nodeId, 
+          hoverNodeId: nodeId,
+          hasMoved: false
+      };
+
+      const nextRef = new Map(activeCursorsRef.current);
+      nextRef.set(e.pointerId, newCursor);
+      activeCursorsRef.current = nextRef;
+
       setActiveCursors(prev => {
           const next = new Map(prev);
-          next.set(e.pointerId, {
-              pointerId: e.pointerId,
-              currentX: e.clientX,
-              currentY: e.clientY,
-              originNodeId: nodeId, 
-              hoverNodeId: nodeId,
-              hasMoved: false
-          });
+          next.set(e.pointerId, newCursor);
           return next;
       });
 
@@ -665,7 +692,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 });
             } else if (!isAudioLatched) {
                 const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
-                const voiceType = (latchMode === 2) ? 'normal' : 'normal'; // Always use normal voice for transient clicks (even in Partial Latch)
+                const voiceType = 'normal'; 
                 audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, voiceType);
                 if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
             }
@@ -675,52 +702,81 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (uiUnlocked) return;
+    
+    // Safety check: verify this cursor exists in REF
     if (!activeCursorsRef.current.has(e.pointerId)) return;
 
+    // Direct ref usage prevents stale closure state
+    const cursor = activeCursorsRef.current.get(e.pointerId)!;
+    
     cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     
-    const cursor = activeCursorsRef.current.get(e.pointerId)!;
     const hitNode = getHitNode(e.clientX, e.clientY);
     const hitId = hitNode ? hitNode.id : null;
 
     const deltaMoveX = Math.abs(e.clientX - cursor.currentX);
     const deltaMoveY = Math.abs(e.clientY - cursor.currentY);
-    if (deltaMoveX > 3 || deltaMoveY > 3) {
-        cursor.hasMoved = true;
+    
+    let hasMoved = cursor.hasMoved;
+    if (!hasMoved && (deltaMoveX > 3 || deltaMoveY > 3)) {
+        hasMoved = true;
     }
 
-    if (cursor.originNodeId && settings.isPitchBendEnabled && latchMode !== 1 && scrollContainerRef.current) {
+    // Determine if bending is active for THIS cursor
+    const isBendEnabled = settingsRef.current.isPitchBendEnabled;
+    const isOriginActive = !!cursor.originNodeId;
+    const isBending = isBendEnabled && isOriginActive && latchMode !== 1;
+
+    // --- BEND AUDIO LOGIC ---
+    if (isBending && cursor.originNodeId && dynamicCanvasRef.current) {
          const centerOffset = dynamicSizeRef.current / 2;
-         const rect = scrollContainerRef.current.getBoundingClientRect();
+         // Optimization: Use cached rect if available, fallback to getBoundingClientRect
+         const rect = canvasRectRef.current || dynamicCanvasRef.current.getBoundingClientRect();
+         
          const originNode = nodeMapRef.current.get(cursor.originNodeId);
          if (originNode) {
-             const spacing = settings.buttonSpacingScale * globalScaleRef.current;
-             const originScreenY = (originNode.y * spacing + centerOffset) + rect.top - scrollContainerRef.current.scrollTop;
+             const spacing = settingsRef.current.buttonSpacingScale * globalScaleRef.current;
+             const originScreenY = rect.top + (originNode.y * spacing) + centerOffset;
              const deltaY = e.clientY - originScreenY;
-             const bentRatio = getPitchRatioFromScreenDelta(deltaY, settings.buttonSpacingScale * globalScaleRef.current);
+             const bentRatio = getPitchRatioFromScreenDelta(deltaY, settingsRef.current.buttonSpacingScale * globalScaleRef.current);
              const finalRatio = originNode.ratio * bentRatio;
              
              const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
-             audioEngine.glideVoice(voiceId, finalRatio, settings.baseFrequency);
-             if (settings.midiEnabled) midiService.pitchBend(voiceId, finalRatio, settings.baseFrequency, settings.midiPitchBendRange);
+             audioEngine.glideVoice(voiceId, finalRatio, settingsRef.current.baseFrequency);
+             if (settingsRef.current.midiEnabled) midiService.pitchBend(voiceId, finalRatio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
          }
     }
 
+    // --- NODE CHANGE / STOP LOGIC ---
     if (cursor.hoverNodeId !== hitId) {
-        const isBending = settingsRef.current.isPitchBendEnabled && cursor.originNodeId;
-        const shouldStop = latchMode !== 1 && (!isBending || cursor.hoverNodeId !== cursor.originNodeId);
+        
+        // Logic: Stop the old note UNLESS we are bending from origin
+        // If bending, the voice (originNodeId) must persist even if we hover null or another node
+        
+        const isLeavingOrigin = cursor.hoverNodeId === cursor.originNodeId;
+        const shouldSustainBend = isBending && isLeavingOrigin;
 
-        if (shouldStop && cursor.hoverNodeId) {
-             const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
-             audioEngine.stopVoice(oldVoiceId);
-             if (settings.midiEnabled) midiService.noteOff(oldVoiceId);
+        if (latchMode === 0) {
+             if (shouldSustainBend) {
+                 // Do not stop voice. It is sustaining for the bend.
+             } else if (cursor.hoverNodeId) {
+                 // Stop the previous note if we are simply moving between nodes (strum) or leaving without bend
+                 const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+                 audioEngine.stopVoice(oldVoiceId);
+                 if (settingsRef.current.midiEnabled) midiService.noteOff(oldVoiceId);
+             }
         }
 
+        // Logic: Trigger NEW note if we hit a node
+        // BUT if bending, we generally DON'T trigger new notes (monophonic bend gesture)
+        // Unless user wants to slide over notes? Usually bend implies holding the origin.
+        
         if (hitNode) {
              const topLayer = settingsRef.current.layerOrder[settingsRef.current.layerOrder.length - 1];
              if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
              
              if (latchMode === 1) {
+                // Full Latch Logic (Toggle)
                 const isAlreadyLatched = persistentLatchesRef.current.has(hitNode.id);
                 if (!isAlreadyLatched) {
                     setPersistentLatches(prev => {
@@ -732,28 +788,37 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 }
              } 
              else {
-                 // Mode 0 or 2 (Partial/Sustain)
+                 // Normal/Partial Mode
                  const isAlreadyLatched = audioLatchedNodes.has(hitNode.id);
                  
-                 // If bending the origin node, we generally don't want to trigger neighbors 
+                 // Don't retrigger if already playing via latch
+                 // Don't trigger new notes if we are currently performing a bend on the origin
                  if (!isAlreadyLatched && !isBending) {
                      const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
-                     // In Partial Latch, transient interactions act like Normal Mode.
-                     // Dragging triggers Strum preset.
-                     audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, 'strum');
-                     if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
+                     audioEngine.startVoice(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, 'strum');
+                     if (settingsRef.current.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
                  }
              }
         }
         
-        setActiveCursors((prev: Map<number, ActiveCursor>) => {
+        // Update State & Ref
+        const updatedCursor = { ...cursor, hoverNodeId: hitId, hasMoved: hasMoved };
+        activeCursorsRef.current.set(e.pointerId, updatedCursor);
+        
+        setActiveCursors(prev => {
             const next = new Map(prev);
-            const c = next.get(e.pointerId);
-            if (c) {
-                const cursorObj: ActiveCursor = c;
-                const updated: ActiveCursor = { ...cursorObj, hoverNodeId: hitId, hasMoved: true };
-                next.set(e.pointerId, updated);
-            }
+            next.set(e.pointerId, updatedCursor);
+            return next;
+        });
+
+    } else if (hasMoved !== cursor.hasMoved) {
+        // Just update movement status if nothing else changed
+        const updatedCursor = { ...cursor, hasMoved: true };
+        activeCursorsRef.current.set(e.pointerId, updatedCursor);
+        
+        setActiveCursors(prev => {
+            const next = new Map(prev);
+            next.set(e.pointerId, updatedCursor);
             return next;
         });
     }
@@ -762,29 +827,33 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const handlePointerUp = (e: React.PointerEvent) => {
     if (activeCursorsRef.current.has(e.pointerId)) {
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
-        const isBending = settings.isPitchBendEnabled && cursor.originNodeId;
+        const isBending = settingsRef.current.isPitchBendEnabled && cursor.originNodeId && latchMode !== 1;
         
         if (latchMode === 1) {
-            // Full Latch: notes persist, no stop action on release
+            // Full Latch: notes persist
         } else {
-            // Mode 0 (Normal) or Mode 2 (Partial/Sustain)
-            // Transient notes should stop on release.
+            // Stop logic for Normal/Partial
             
-            // If bending, the active voice is the origin node (maintained during drag)
             if (isBending && cursor.originNodeId) {
+                // If we were bending, stop the origin voice
                 const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
                 audioEngine.stopVoice(voiceId);
-                if (settings.midiEnabled) midiService.noteOff(voiceId);
-            }
-            // If strumming/clicking, the active voice is the last hovered node
+                if (settingsRef.current.midiEnabled) midiService.noteOff(voiceId);
+            } 
             else if (cursor.hoverNodeId) {
-                const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
-                audioEngine.stopVoice(voiceId);
-                if (settings.midiEnabled) midiService.noteOff(voiceId);
+                 // Otherwise stop the last hovered note
+                 const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+                 audioEngine.stopVoice(voiceId);
+                 if (settingsRef.current.midiEnabled) midiService.noteOff(voiceId);
             }
         }
         
         cursorPositionsRef.current.delete(e.pointerId);
+        
+        const nextRef = new Map(activeCursorsRef.current);
+        nextRef.delete(e.pointerId);
+        activeCursorsRef.current = nextRef;
+
         setActiveCursors(prev => {
             const next = new Map(prev);
             next.delete(e.pointerId);

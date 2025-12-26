@@ -1,7 +1,6 @@
 
-
-export const AUDIO_PROCESSOR_CODE = `
-// --- DSP UTILS ---
+// --- 1. DSP UTILS & CONSTANTS ---
+const DSP_UTILS = `
 const TWO_PI = 2 * Math.PI;
 
 const DUMMY_OSC_CONFIG = {
@@ -31,7 +30,10 @@ const DUMMY_PRESET_DATA = {
     stereoPanSpeed: 0,
     stereoPanDepth: 0
 };
+`;
 
+// --- 2. BASIC DSP CLASSES (Oscillator, Filter, Envelope) ---
+const DSP_CLASSES = `
 class PolyBLEP {
   constructor(sampleRate) {
     this.sampleRate = sampleRate;
@@ -188,7 +190,10 @@ class Oscillator {
     return sample;
   }
 }
+`;
 
+// --- 3. VOICE LOGIC (Signal Path) ---
+const VOICE_LOGIC = `
 class Voice {
   constructor(sampleRate) {
     this.sampleRate = sampleRate;
@@ -365,7 +370,10 @@ class Voice {
     return voiceMix;
   }
 }
+`;
 
+// --- 4. PROCESSOR LOGIC (Worklet Core) ---
+const PROCESSOR_LOGIC = `
 class PrismaProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -602,3 +610,5 @@ class PrismaProcessor extends AudioWorkletProcessor {
 
 registerProcessor('synth-processor', PrismaProcessor);
 `;
+
+export const AUDIO_PROCESSOR_CODE = `${DSP_UTILS}\n${DSP_CLASSES}\n${VOICE_LOGIC}\n${PROCESSOR_LOGIC}`;

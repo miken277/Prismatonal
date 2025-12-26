@@ -80,7 +80,17 @@ class AudioEngine {
      return safe;
   }
 
-  private updatePresets(newPresets: PresetState) {
+  public updateSettings(settings: AppSettings) {
+      if (this.workletNode) {
+          this.workletNode.port.postMessage({ 
+              type: 'config', 
+              polyphony: settings.polyphony,
+              strumDuration: settings.strumDuration
+          });
+      }
+  }
+
+  public updatePresets(newPresets: PresetState) {
       const modes: PlayMode[] = ['normal', 'latch', 'strum', 'arpeggio'];
       let recomputeReverb = false;
 

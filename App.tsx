@@ -37,6 +37,17 @@ const App: React.FC = () => {
 
   const effectiveScale = autoScaleFactor * (settings.uiScale || 1.0);
 
+  // --- AUDIO ENGINE SYNC ---
+  // These effects replace the direct store subscription in AudioEngine
+  useEffect(() => {
+      audioEngine.updatePresets(presets);
+  }, [presets]);
+
+  useEffect(() => {
+      audioEngine.updateSettings(settings);
+  }, [settings]);
+  // -------------------------
+
   useEffect(() => {
     const warmup = (e: Event) => {
         audioEngine.resume().then(() => {});
