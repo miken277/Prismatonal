@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { AppSettings, LatticeNode, LatticeLine, ButtonShape } from '../types';
 import { generateLattice } from '../services/LatticeService';
@@ -633,7 +632,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 });
             } else if (!isAudioLatched) {
                 const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
-                const voiceType = (latchMode === 2) ? 'latch' : 'normal';
+                // Uses 'normal' patch for Mode 0 and Mode 2 (Partial Latch) manual play
+                const voiceType = 'normal'; 
                 audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, voiceType);
                 if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
             }
@@ -675,10 +675,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     }
 
     if (cursor.hoverNodeId !== hitId) {
-        if (latchMode === 0 && cursor.hoverNodeId) {
-             const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
-             audioEngine.stopVoice(oldVoiceId);
-             if (settings.midiEnabled) midiService.noteOff(oldVoiceId);
+        // Stop previous note if it wasn't a bending origin or if we are sliding between nodes
+        // This applies to Mode 0 and Mode 2 (Partial Latch)
+        if (latchMode !== 1 && cursor.hoverNodeId) {
+             const isBendingOrigin = settings.isPitchBendEnabled && cursor.originNodeId === cursor.hoverNodeId;
+             if (!isBendingOrigin) {
+                 const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+                 audioEngine.stopVoice(oldVoiceId);
+                 if (settings.midiEnabled) midiService.noteOff(oldVoiceId);
+             }
         }
 
         if (hitNode) {
@@ -711,9 +716,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         setActiveCursors((prev: Map<number, ActiveCursor>) => {
             const next = new Map(prev);
             const c = next.get(e.pointerId);
-            if(c) { 
-                const updatedCursor = { ...c, hoverNodeId: hitId, hasMoved: true };
-                next.set(e.pointerId, updatedCursor); 
+            if (c) {
+                const cursorObj: ActiveCursor = c;
+                const updated: ActiveCursor = { ...cursorObj, hoverNodeId: hitId, hasMoved: true };
+                next.set(e.pointerId, updated);
             }
             return next;
         });
@@ -725,21 +731,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
         
         if (cursor.originNodeId) {
+            // Stop voice in both Normal Mode (0) and Partial Latch/Sustain Mode (2).
+            // Mode 1 (Full Latch) manages persistency via state, so we don't stop it here.
             if (latchMode !== 1) {
-                if (settings.isPitchBendEnabled && cursor.hasMoved) {
-                    setPersistentLatches(prev => {
-                        const next = new Map(prev);
-                        next.set(cursor.originNodeId!, cursor.originNodeId!);
-                        return next;
-                    });
-                } else {
-                    const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
-                    audioEngine.stopVoice(voiceId);
-                    if (settings.midiEnabled) midiService.noteOff(voiceId);
-                }
+                const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
+                audioEngine.stopVoice(voiceId);
+                if (settings.midiEnabled) midiService.noteOff(voiceId);
             }
         } 
-        else if (cursor.hoverNodeId && cursor.hoverNodeId !== cursor.originNodeId && latchMode === 0) {
+        else if (cursor.hoverNodeId && cursor.hoverNodeId !== cursor.originNodeId && latchMode !== 1) {
              const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
              audioEngine.stopVoice(voiceId);
              if (settings.midiEnabled) midiService.noteOff(voiceId);

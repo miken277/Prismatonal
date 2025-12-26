@@ -1,10 +1,13 @@
 
+
 export enum LimitType {
   LIMIT_3 = 3,
   LIMIT_5 = 5,
   LIMIT_7 = 7,
+  LIMIT_9 = 9,
   LIMIT_11 = 11,
   LIMIT_13 = 13,
+  LIMIT_15 = 15,
 }
 
 export enum WaveformType {
@@ -120,8 +123,10 @@ export interface AppSettings {
     3: number;
     5: number;
     7: number;
+    9: number;
     11: number;
     13: number;
+    15: number;
   };
 
   // Individual complexity limits (Max Numerator/Denominator per axis)
@@ -129,8 +134,10 @@ export interface AppSettings {
     3: number;
     5: number;
     7: number;
+    9: number;
     11: number;
     13: number;
+    15: number;
   };
   
   // Increase Depth Settings
@@ -348,7 +355,7 @@ export interface LatticeNode {
   limitTop: number; 
   limitBottom: number;
   maxPrime: number; // For Z-sorting
-  coords: number[]; // [p3, p5, p7, p11, p13]
+  coords: number[]; // [p3, p5, p7, p9, p11, p13, p15]
   octave: number; // -2, -1, 0, 1, 2
 }
 

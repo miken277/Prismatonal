@@ -1,6 +1,8 @@
+
+
 import React, { useRef, useState, useEffect } from 'react';
 import { AppSettings, ButtonShape, ChordDefinition, BackgroundMode, LimitColorMap, KeyMappings, TuningSystem, LayoutApproach } from '../types';
-import { DEFAULT_COLORS } from '../constants';
+import { DEFAULT_COLORS, PIXELS_PER_MM } from '../constants';
 import { midiService, MidiDevice } from '../services/MidiService';
 import { useStore } from '../services/Store'; 
 
@@ -11,12 +13,52 @@ interface Props {
   updateSettings: (s: AppSettings) => void;
 }
 
-const PRESET_PALETTES: Record<string, LimitColorMap> = {
-    'charcoal': { 1: '#FFFFFF', 3: '#D4D4D8', 5: '#A1A1AA', 7: '#71717A', 11: '#52525B', 13: '#3F3F46' },
-    'midnight_blue': { 1: '#FFFFFF', 3: '#67E8F9', 5: '#3B82F6', 7: '#60A5FA', 11: '#818CF8', 13: '#A5B4FC' },
-    'deep_maroon': { 1: '#FCD34D', 3: '#FB923C', 5: '#EF4444', 7: '#F87171', 11: '#FCA5A5', 13: '#FDA4AF' },
-    'forest_green': { 1: '#BEF264', 3: '#4ADE80', 5: '#10B981', 7: '#34D399', 11: '#2DD4BF', 13: '#5EEAD4' },
-    'slate_grey': { 1: '#F1F5F9', 3: '#94A3B8', 5: '#64748B', 7: '#F43F5E', 11: '#818CF8', 13: '#34D399' }
+const BASE_NODE_SIZE_PX = 60;
+const BASE_NODE_SPACING_PX = 200;
+
+// Adjustment factor based on user feedback that screen dimensions appear half the calculated size
+const VISUAL_CORRECTION_FACTOR = 2.0;
+
+const MmSlider = ({ 
+    valueScale, 
+    onChangeScale, 
+    toMm, 
+    fromMm, 
+    minMm, 
+    maxMm, 
+    stepMm = 1 
+}: { 
+    valueScale: number; 
+    onChangeScale: (v: number) => void; 
+    toMm: (v: number) => number; 
+    fromMm: (v: number) => number; 
+    minMm: number; 
+    maxMm: number;
+    stepMm?: number;
+}) => {
+    const currentMm = toMm(valueScale);
+    
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newMm = parseFloat(e.target.value);
+        onChangeScale(fromMm(newMm));
+    };
+
+    return (
+        <div className="relative pt-6 pb-2 mt-1">
+            <span className="absolute top-0 left-1/2 -translate-x-1/2 text-[10px] font-bold text-blue-300 bg-slate-800 px-2 py-0.5 rounded border border-blue-500/30 z-10 pointer-events-none">
+                {Math.round(currentMm)} mm
+            </span>
+            <input 
+                type="range" 
+                min={minMm} 
+                max={maxMm} 
+                step={stepMm} 
+                value={currentMm} 
+                onChange={handleChange} 
+                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
+            />
+        </div>
+    );
 };
 
 const NumberInput = ({ value, min, max, onChange, suffix = "", className = "", disabled = false }: { value: number; min: number; max: number; onChange: (val: number) => void; suffix?: string; className?: string; disabled?: boolean; }) => {
@@ -82,8 +124,14 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   if (!isOpen) return null;
 
   const handleChange = (key: keyof AppSettings, value: any) => updateSettings({ ...settings, [key]: value });
-  const handleLimitDepthChange = (limit: 3 | 5 | 7 | 11 | 13, val: number) => updateSettings({ ...settings, limitDepths: { ...settings.limitDepths, [limit]: val } });
-  const handleLimitComplexityChange = (limit: 3 | 5 | 7 | 11 | 13, val: number) => updateSettings({ ...settings, limitComplexities: { ...settings.limitComplexities, [limit]: val } });
+  const handleLimitDepthChange = (limit: number, val: number) => {
+      // @ts-ignore
+      updateSettings({ ...settings, limitDepths: { ...settings.limitDepths, [limit]: val } });
+  };
+  const handleLimitComplexityChange = (limit: number, val: number) => {
+      // @ts-ignore
+      updateSettings({ ...settings, limitComplexities: { ...settings.limitComplexities, [limit]: val } });
+  };
   const handleColorChange = (limit: number, color: string) => updateSettings({ ...settings, colors: { ...settings.colors, [limit]: color } });
   
   const handleImportClick = () => {
@@ -170,10 +218,8 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
         break;
     }
 
-    // Default protection logic: if current layout approach isn't valid for system, reset it
     const isValid = options.some(o => o.value === settings.layoutApproach);
     if (!isValid && options.length > 0) {
-      // Trigger update next frame to avoid render loop issues
       setTimeout(() => handleChange('layoutApproach', options[0].value), 0);
     }
 
@@ -196,24 +242,13 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
     );
   };
 
-  const renderSkinSelector = () => (
-    <div className="mt-4 p-3 bg-slate-900/20 rounded border border-slate-700/50">
-        <label className="block text-[10px] text-slate-500 font-bold uppercase mb-2 tracking-widest">Skin</label>
-        <div className="flex gap-2">
-            <select 
-                value={settings.activeSkin} 
-                onChange={(e) => handleChange('activeSkin', e.target.value)}
-                className="flex-1 bg-slate-800 border border-slate-600 rounded p-1.5 text-[10px] text-white focus:outline-none focus:border-blue-500"
-            >
-                <option value="default">Prisma Default</option>
-                <option value="minimal">Minimalist</option>
-                <option value="technical">Technical Diagram</option>
-                <option value="organic">Organic Flow</option>
-            </select>
-            <button className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-[9px] font-bold rounded uppercase border border-slate-600 transition">Preview</button>
-        </div>
-    </div>
-  );
+  const scaleToMmSize = (s: number) => (s * BASE_NODE_SIZE_PX) / (PIXELS_PER_MM * VISUAL_CORRECTION_FACTOR);
+  const mmToScaleSize = (mm: number) => (mm * PIXELS_PER_MM * VISUAL_CORRECTION_FACTOR) / BASE_NODE_SIZE_PX;
+  
+  const scaleToMmSpacing = (s: number) => (s * BASE_NODE_SPACING_PX) / (PIXELS_PER_MM * VISUAL_CORRECTION_FACTOR);
+  const mmToScaleSpacing = (mm: number) => (mm * PIXELS_PER_MM * VISUAL_CORRECTION_FACTOR) / BASE_NODE_SPACING_PX;
+
+  const PRIMES = [3, 5, 7, 9, 11, 13, 15];
 
   return (
     <div className="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center backdrop-blur-sm">
@@ -261,37 +296,32 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                               </h3>
                               <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
                                   <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Steps from center per prime limit</p>
-                                  {[3, 5, 7, 11, 13].map(limit => (
+                                  {PRIMES.map(limit => (
                                       <div key={limit} className="flex items-center gap-3">
                                           <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
-                                          <input type="range" min="0" max="6" step="1" value={settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0} onChange={(e) => handleLimitDepthChange(limit as any, parseInt(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
-                                          <span className="text-xs font-mono w-4 text-right text-blue-400">{settings.limitDepths?.[limit as 3|5|7|11|13] ?? 0}</span>
+                                          {/* @ts-ignore */}
+                                          <input type="range" min="0" max="6" step="1" value={settings.limitDepths?.[limit] ?? 0} onChange={(e) => handleLimitDepthChange(limit, parseInt(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                                          {/* @ts-ignore */}
+                                          <span className="text-xs font-mono w-4 text-right text-blue-400">{settings.limitDepths?.[limit] ?? 0}</span>
                                       </div>
                                   ))}
                               </div>
-                              {renderSkinSelector()}
                           </div>
                           <div className="space-y-6">
                               <h3 className="font-semibold text-blue-300 border-b border-slate-700 pb-1">Complexity Thresholds</h3>
                               <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-4">
                                   <p className="text-[10px] text-slate-500 uppercase font-bold">Limit max complexity per axis</p>
-                                  {[3, 5, 7, 11, 13].map(limit => (
+                                  {PRIMES.map(limit => (
                                       <div key={limit} className="flex flex-col gap-1">
                                           <span className="text-[10px] font-bold text-slate-400 uppercase">{limit}-Limit MAX RATIO</span>
                                           <NumberInput 
-                                            value={settings.limitComplexities?.[limit as 3|5|7|11|13] ?? 1000} 
+                                            // @ts-ignore
+                                            value={settings.limitComplexities?.[limit] ?? 1000} 
                                             min={1} max={10000} 
-                                            onChange={(val) => handleLimitComplexityChange(limit as any, val)} 
+                                            onChange={(val) => handleLimitComplexityChange(limit, val)} 
                                           />
                                       </div>
                                   ))}
-                              </div>
-                              <div className="p-3 bg-slate-900/20 border border-slate-700/50 rounded-lg opacity-40 grayscale pointer-events-none">
-                                  <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2">Basis Projections</h4>
-                                  <div className="grid grid-cols-2 gap-2">
-                                      <div className="h-8 bg-slate-800 rounded"></div>
-                                      <div className="h-8 bg-slate-800 rounded"></div>
-                                  </div>
                               </div>
                           </div>
                       </div>
@@ -311,20 +341,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                   <div>
                                       <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Root MIDI Note</label>
                                       <NumberInput value={60} min={0} max={127} onChange={() => {}} suffix="Note #" />
-                                  </div>
-                              </div>
-                              {renderSkinSelector()}
-                          </div>
-                          <div className="space-y-6">
-                              <h3 className="text-xs font-bold text-blue-300 uppercase border-b border-slate-700 pb-1">Tuning Offset</h3>
-                              <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                                  <div>
-                                      <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">Reference A4</label>
-                                      <NumberInput value={440} min={400} max={500} onChange={() => {}} suffix="Hz" />
-                                  </div>
-                                  <div className="opacity-50">
-                                      <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Octave Stretch</span> <span>0.00</span></label>
-                                      <input type="range" disabled className="w-full h-1.5 bg-slate-700 rounded appearance-none" />
                                   </div>
                               </div>
                           </div>
@@ -355,16 +371,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                         </select>
                                     </div>
                                 </div>
-                                {renderSkinSelector()}
-                             </div>
-                             <div className="space-y-6">
-                                <h3 className="text-xs font-bold text-orange-300 uppercase border-b border-slate-700 pb-1">Raga Parameters</h3>
-                                <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4 h-full">
-                                    <p className="text-[10px] text-slate-500 italic">Individual Shruti tuning adjustments and Gamaka (ornamentation) physics will appear here in the final version.</p>
-                                    <div className="p-3 bg-slate-800 rounded border border-slate-700/50 flex items-center justify-center opacity-30">
-                                        <span className="text-[10px] font-bold tracking-tighter">RAGA PRESETS ENABLED</span>
-                                    </div>
-                                </div>
                              </div>
                           </div>
                       </div>
@@ -389,21 +395,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                       </div>
                                   </div>
                               </div>
-                              {renderSkinSelector()}
-                          </div>
-                          <div className="space-y-6">
-                              <h3 className="text-xs font-bold text-purple-300 uppercase border-b border-slate-700 pb-1">Comma Correction</h3>
-                              <div className="bg-slate-900/40 p-4 rounded border border-slate-700 space-y-4">
-                                  <div className="space-y-2">
-                                      <label className="block text-[10px] text-slate-400 font-bold uppercase">Wolf Interval Logic</label>
-                                      <select disabled className="w-full bg-slate-700 rounded p-2 text-xs text-white border border-slate-600">
-                                          <option>None (Infinite Spiral)</option>
-                                          <option>G# / Eb Closing</option>
-                                          <option>Distribute (Well Temperament)</option>
-                                      </select>
-                                  </div>
-                                  <p className="text-[10px] text-slate-500 italic">Wolf correction applies specific offsets to the final stack link to close the circle.</p>
-                              </div>
                           </div>
                       </div>
                   )}
@@ -425,6 +416,24 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                             ))}
                         </div>
                         <p className="text-[10px] text-slate-500 italic">Lower latency is better for performance but may cause clicks on weaker devices.</p>
+                    </div>
+                    
+                    {/* Polyphony Limit Control */}
+                    <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
+                        <label className="block text-sm font-semibold text-slate-300">Max Polyphony</label>
+                        <div className="flex items-center gap-3">
+                            <input 
+                                type="range" 
+                                min="1" 
+                                max="64" 
+                                step="1" 
+                                value={settings.polyphony} 
+                                onChange={(e) => handleChange('polyphony', parseInt(e.target.value))} 
+                                className="flex-grow h-2 bg-indigo-900 rounded-lg appearance-none cursor-pointer accent-indigo-500" 
+                            />
+                            <span className="text-xs font-mono font-bold w-8 text-right text-indigo-300">{settings.polyphony}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 italic">Limits simultaneous voices. Lower this if audio crackles.</p>
                     </div>
 
                     <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1 mt-6">Interaction</h3>
@@ -491,20 +500,39 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                     <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1 mt-6">Node Graphics</h3>
                     <div className="space-y-4">
                       <div>
-                        <label className="block text-sm font-semibold mb-2">Button Shape</label>
+                        <label className="block text-sm font-semibold mb-2">Node Shape</label>
                         <div className="flex gap-2">
                           <button onClick={() => handleChange('buttonShape', ButtonShape.CIRCLE)} className={`flex-1 py-2 text-xs font-bold rounded border ${settings.buttonShape === ButtonShape.CIRCLE ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>Circle</button>
                           <button onClick={() => handleChange('buttonShape', ButtonShape.DIAMOND)} className={`flex-1 py-2 text-xs font-bold rounded border ${settings.buttonShape === ButtonShape.DIAMOND ? 'bg-pink-600 border-pink-500' : 'bg-slate-700 border-slate-600'}`}>Diamond</button>
                         </div>
                       </div>
+                      
                       <div className="space-y-2">
-                        <label className="block text-sm font-semibold">Button Size Scale</label>
-                        <input type="range" min="0.5" max="2.0" step="0.1" value={settings.buttonSizeScale} onChange={(e) => handleChange('buttonSizeScale', parseFloat(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                        <label className="block text-sm font-semibold">Node Size in mm</label>
+                        <MmSlider 
+                            valueScale={settings.buttonSizeScale} 
+                            onChangeScale={(v) => handleChange('buttonSizeScale', v)}
+                            toMm={scaleToMmSize}
+                            fromMm={mmToScaleSize}
+                            minMm={4}
+                            maxMm={16}
+                            stepMm={1}
+                        />
                       </div>
+
                       <div className="space-y-2">
-                        <label className="block text-sm font-semibold">Button Spacing Scale</label>
-                        <input type="range" min="0.5" max="5.0" step="0.1" value={settings.buttonSpacingScale} onChange={(e) => handleChange('buttonSpacingScale', parseFloat(e.target.value))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                        <label className="block text-sm font-semibold">Node Spacing in mm</label>
+                        <MmSlider 
+                            valueScale={settings.buttonSpacingScale} 
+                            onChangeScale={(v) => handleChange('buttonSpacingScale', v)}
+                            toMm={scaleToMmSpacing}
+                            fromMm={mmToScaleSpacing}
+                            minMm={10}
+                            maxMm={90}
+                            stepMm={1}
+                        />
                       </div>
+
                       <div className="space-y-2">
                         <label className="block text-sm font-semibold">Latched Node Zoom</label>
                         <div className="flex items-center gap-3">
@@ -520,7 +548,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
                     <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1 mt-6">Limit Identity Colors</h3>
                     <div className="grid grid-cols-3 gap-3">
-                      {[1, 3, 5, 7, 11, 13].map(limit => (
+                      {PRIMES.map(limit => (
                         <div key={limit} className="flex flex-col items-center p-2 bg-slate-900/50 rounded border border-slate-700">
                           <span className="text-[10px] font-bold text-slate-400 mb-1">{limit}-Limit</span>
                           <input type="color" value={settings.colors[limit]} onChange={(e) => handleColorChange(limit, e.target.value)} className="w-full h-8 bg-transparent border-none cursor-pointer" />

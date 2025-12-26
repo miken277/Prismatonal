@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { AppSettings } from '../types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
@@ -11,7 +12,7 @@ interface Props {
   uiScale?: number;
 }
 
-const LIMITS = [1, 3, 5, 7, 11, 13];
+const LIMITS = [1, 3, 5, 7, 9, 11, 13, 15];
 
 const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggingId, setDraggingId, uiScale = 1.0 }) => {
   const { uiUnlocked, uiPositions } = settings;

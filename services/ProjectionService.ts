@@ -1,14 +1,19 @@
+
+
 import { AppSettings, LayoutApproach } from '../types';
 
 export const PITCH_SCALE = 200; // Pixels per octave (Base Scale)
 
 // Basis vectors for the lattice projection (X-axis contribution per prime index)
+// Order corresponds to [3, 5, 7, 9, 11, 13, 15]
 export const BASIS_VECTORS_X = [
     100, // Prime 3
     30,  // Prime 5
     20,  // Prime 7
+    200, // Prime 9 (2 * Prime 3 vector approx)
     -20, // Prime 11
-    -30  // Prime 13
+    -30, // Prime 13
+    130  // Prime 15 (Prime 3 + Prime 5 vector approx)
 ];
 
 /**
@@ -27,8 +32,10 @@ export const projectCoordinates = (
     const p3 = coords[0] || 0;
     const p5 = coords[1] || 0;
     const p7 = coords[2] || 0;
-    const p11 = coords[3] || 0;
-    const p13 = coords[4] || 0;
+    const p9 = coords[3] || 0;
+    const p11 = coords[4] || 0;
+    const p13 = coords[5] || 0;
+    const p15 = coords[6] || 0;
 
     if (approach === 'lattice') {
         for(let i = 0; i < coords.length; i++) {
@@ -48,7 +55,23 @@ export const projectCoordinates = (
         y = coords[1] * spacing;
         // Rotation handled in LatticeService for simpler line logic
     }
-    
+    else if (approach === 'row') {
+        x = Math.log2(ratio) * 1200; 
+        const maxP = Math.max(1, ...coords.map((c, i) => c !== 0 ? [3,5,7,9,11,13,15][i] : 1));
+        const limitIndex = [1, 3, 5, 7, 9, 11, 13, 15].indexOf(maxP);
+        const dir = limitIndex % 2 === 0 ? 1 : -1;
+        y = dir * (limitIndex * spacing * 0.6);
+        y += (p3 * 5 + p5 * 3); 
+    }
+    else if (approach === 'honeycomb') {
+        const hexUnit = spacing * 0.9;
+        x = (p3 + p5 * 0.5 + p7 * -0.5) * hexUnit;
+        y = (p5 * 0.866 + p7 * 0.866) * hexUnit;
+        x += (p11 * 0.25) * hexUnit;
+        y += (p13 * 0.25) * hexUnit;
+        x = x * (1.0 / aspectRatio);
+    }
+
     return { x, y };
 };
 

@@ -1,4 +1,5 @@
 
+
 export const AUDIO_PROCESSOR_CODE = `
 // --- DSP UTILS ---
 const TWO_PI = 2 * Math.PI;
@@ -153,8 +154,7 @@ class Oscillator {
   }
 
   reset() {
-      // Free-running oscillators - do not reset phase on key press
-      // this.phase = 0.0; 
+      // Free-running oscillators
   }
 
   process(freq, type, dt) {
@@ -194,7 +194,7 @@ class Voice {
     this.sampleRate = sampleRate;
     this.active = false;
     this.id = '';
-    this.type = 'normal'; // 'normal', 'latch', 'strum'
+    this.type = 'normal';
     this.panPos = 0; 
     
     this.baseFreq = 440;
@@ -224,12 +224,8 @@ class Voice {
     this.startTime = currentTime; 
     this.releaseTime = 0; 
     
-    // Do not reset oscillator phase to avoid clicks
-    // this.oscs.forEach(osc => osc.reset());
-    
     this.envs.forEach(env => {
-        // Soft reset: don't force value to 0 if retriggering to avoid pops
-        // env.reset(); 
+        // Soft reset to avoid clicks on retrigger
         env.trigger();
     });
     
@@ -255,7 +251,6 @@ class Voice {
   process(presetData, dt) {
     if (!this.active || !presetData) return 0.0;
     
-    // Smooth Pitch Glide
     const diff = this.targetFreq - this.baseFreq;
     if (Math.abs(diff) > 0.001) {
       this.baseFreq += diff * 0.005; 
@@ -272,7 +267,6 @@ class Voice {
 
     let anyEnvActive = false;
 
-    // 1. Compute Sources
     for (let i = 0; i < 3; i++) {
         const config = oscConfigs[i];
         const envVal = this.envs[i].process(config, dt);
@@ -381,7 +375,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
     const workingRate = sampleRate * OVERSAMPLE;
 
     this.voices = [];
-    // Increase physical voice limit to 64 to allow for large strums/washes
+    // Increase physical voice limit to 64
     for(let i=0; i<64; i++) {
         const v = new Voice(workingRate);
         v.panPos = Math.sin(i * 123.456); 
@@ -394,7 +388,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
         strum: DUMMY_PRESET_DATA
     };
     
-    this.maxPolyphony = 32; // Default starting high
+    this.maxPolyphony = 32; 
     this.strumDuration = 0.5;
     
     this.xm1L = 0; this.ym1L = 0;
@@ -448,59 +442,48 @@ class PrismaProcessor extends AudioWorkletProcessor {
         }
     }
 
-    let heldCount = 0;
-    let physicallyFree = null;
-    let quietestVoice = null;
-    let minLevel = 1000.0;
-    
-    // Improved Stealing Candidate Logic
+    let activeCount = 0;
     let oldestReleased = null;
-    let minReleaseTime = Number.MAX_VALUE;
+    let oldestReleaseTime = Infinity;
+    let oldestHeld = null;
+    let oldestStartTime = Infinity;
+    let freeVoice = null;
 
     for (let i = 0; i < this.voices.length; i++) {
         const v = this.voices[i];
-        
-        if (!v.active) {
-            if (!physicallyFree) physicallyFree = v;
-            continue;
-        }
-
-        const level = v.getLevel();
-        if (level < minLevel) {
-            minLevel = level;
-            quietestVoice = v;
-        }
-
-        if (v.releaseTime === 0) {
-            // Actively held
-            heldCount++;
-        } else {
-            // Releasing - track oldest
-            if (v.releaseTime < minReleaseTime) {
-                minReleaseTime = v.releaseTime;
-                oldestReleased = v;
+        if (v.active) {
+            activeCount++;
+            if (v.releaseTime > 0) {
+                // Releasing voice
+                if (v.releaseTime < oldestReleaseTime) {
+                    oldestReleaseTime = v.releaseTime;
+                    oldestReleased = v;
+                }
+            } else {
+                // Held voice - FIFO
+                if (v.startTime < oldestStartTime) {
+                    oldestStartTime = v.startTime;
+                    oldestHeld = v;
+                }
             }
+        } else {
+            if (!freeVoice) freeVoice = v;
         }
     }
 
-    // STEALING LOGIC
-    if (heldCount >= this.maxPolyphony) {
-        if (oldestReleased) {
-            oldestReleased.trigger(id, freq, type);
-            return;
-        }
-        if (quietestVoice) {
-            quietestVoice.trigger(id, freq, type);
-            return;
-        }
+    // 2. Use free voice if under polyphony limit
+    if (activeCount < this.maxPolyphony && freeVoice) {
+        freeVoice.trigger(id, freq, type);
+        return;
     }
 
-    if (physicallyFree) {
-        physicallyFree.trigger(id, freq, type);
-    } else if (oldestReleased) {
-        oldestReleased.trigger(id, freq, type);
-    } else if (quietestVoice) {
-        quietestVoice.trigger(id, freq, type);
+    // 3. Steal Priority: Oldest Released -> Oldest Held (FIFO)
+    // If activeCount >= maxPolyphony, we must steal.
+    // If activeCount < maxPolyphony but no free physical voices (limit > 64), we steal.
+    
+    const victim = oldestReleased || oldestHeld || freeVoice || this.voices[0];
+    if (victim) {
+        victim.trigger(id, freq, type);
     }
   }
 
@@ -594,7 +577,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
         }
 
         // --- DOWNSAMPLE (Decimation) ---
-        // Simple averaging filter
         const outL = accL / OVERSAMPLE;
         const outR = accR / OVERSAMPLE;
 
