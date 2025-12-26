@@ -77,6 +77,26 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [persistentLatches, setPersistentLatches] = useState<Map<string, string>>(new Map());
 
+  // Listen for voice stealing from AudioEngine to update persistent latches visually
+  useEffect(() => {
+      const unsubscribe = audioEngine.onVoiceSteal((voiceId) => {
+          // If a voice ID starting with 'node-' is stolen, it means a latched note was killed by polyphony limits.
+          // We should remove it from the visual latch state to match.
+          if (voiceId.startsWith('node-')) {
+              const nodeId = voiceId.replace('node-', '');
+              setPersistentLatches(prev => {
+                  if (prev.has(nodeId)) {
+                      const next = new Map(prev);
+                      next.delete(nodeId);
+                      return next;
+                  }
+                  return prev;
+              });
+          }
+      });
+      return unsubscribe;
+  }, [audioEngine]);
+
   const audioLatchedNodes = useMemo(() => {
       const effective = new Map<string, string>(persistentLatches);
       activeChordIds.forEach(chordId => {
@@ -92,13 +112,27 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const visualLatchedNodes = useMemo(() => {
       const visual = new Map(audioLatchedNodes);
+      const isDiamond = settings.layoutApproach === 'diamond';
+
       activeCursors.forEach(cursor => {
-          if (cursor.hoverNodeId) {
-              visual.set(cursor.hoverNodeId, cursor.hoverNodeId);
+          // Check if bend is active for this cursor interaction
+          const isBending = settings.isPitchBendEnabled && !!cursor.originNodeId && latchMode !== 1;
+
+          if (isBending && isDiamond) {
+              // In Diamond layout during Bend, decoupling implies we should only 
+              // visualize the source node (the one actually sounding), not the nodes we pass over.
+              if (cursor.originNodeId) {
+                  visual.set(cursor.originNodeId, cursor.originNodeId);
+              }
+          } else {
+              // Standard behavior: visualize the node currently being touched/hovered
+              if (cursor.hoverNodeId) {
+                  visual.set(cursor.hoverNodeId, cursor.hoverNodeId);
+              }
           }
       });
       return visual;
-  }, [audioLatchedNodes, activeCursors]);
+  }, [audioLatchedNodes, activeCursors, settings.layoutApproach, settings.isPitchBendEnabled, latchMode]);
 
   const activeLines = useMemo(() => {
     const latched = visualLatchedNodes;

@@ -1,4 +1,3 @@
-
 import { SynthPreset, AppSettings, ReverbType, PresetState, PlayMode } from '../types';
 import { store } from './Store';
 import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
@@ -25,6 +24,8 @@ class AudioEngine {
   
   // Cache active presets for FX updates
   private activePresets: PresetState;
+  
+  private voiceStealListeners: Set<(id: string) => void> = new Set();
 
   constructor() {
     // Initialize Presets safely
@@ -40,6 +41,11 @@ class AudioEngine {
         const newPresets = store.getSnapshot().presets;
         this.updatePresets(newPresets);
     });
+  }
+
+  public onVoiceSteal(callback: (id: string) => void) {
+      this.voiceStealListeners.add(callback);
+      return () => { this.voiceStealListeners.delete(callback); };
   }
 
   private isMobile() {
@@ -159,6 +165,13 @@ class AudioEngine {
                     numberOfOutputs: 1,
                     outputChannelCount: [2]
                 });
+
+                // Set up message handler for voice stealing events
+                this.workletNode.port.onmessage = (e) => {
+                    if (e.data.type === 'voice_stolen') {
+                        this.voiceStealListeners.forEach(cb => cb(e.data.id));
+                    }
+                };
                 
                 (['normal', 'latch', 'strum', 'arpeggio'] as PlayMode[]).forEach(mode => {
                     this.workletNode!.port.postMessage({ 

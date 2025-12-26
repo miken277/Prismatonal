@@ -1,8 +1,6 @@
-
-
 import React from 'react';
-import { AppSettings } from '../types';
-import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
+import { AppSettings, XYPos } from '../types';
+import { useDragManager } from '../hooks/useDragManager';
 
 interface Props {
   settings: AppSettings;
@@ -47,66 +45,30 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
     updateSettings({ ...settings, layerOrder: newOrder });
   };
 
-  // Drag Handler
-  const handleDrag = (e: React.PointerEvent) => {
-    if (!uiUnlocked) return;
-    
-    // Lock check
-    if (draggingId !== null && draggingId !== 'layers') return;
-
-    const el = e.currentTarget as HTMLElement;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    
-    // Initial position
-    const initialLeft = uiPositions.layers.x;
-    const initialTop = uiPositions.layers.y;
-
-    el.setPointerCapture(e.pointerId);
-    setDraggingId('layers');
-
-    const onMove = (evt: PointerEvent) => {
-        const deltaX = evt.clientX - startX;
-        const deltaY = evt.clientY - startY;
-        
-        let newX = initialLeft + deltaX;
-        let newY = initialTop + deltaY;
-        
-        // Clamp to window bounds with Margin + Scrollbar safety
-        const maxX = window.innerWidth - el.offsetWidth - MARGIN_3MM - SCROLLBAR_WIDTH;
-        const maxY = window.innerHeight - el.offsetHeight - MARGIN_3MM - SCROLLBAR_WIDTH;
-        const minX = MARGIN_3MM;
-        const minY = MARGIN_3MM;
-        
-        newX = Math.max(minX, Math.min(newX, maxX));
-        newY = Math.max(minY, Math.min(newY, maxY));
-        
-        updateSettings({ 
-            ...settings, 
-            uiPositions: { 
-                ...settings.uiPositions, 
-                layers: { x: newX, y: newY } 
-            } 
-        });
-    };
-
-    const onUp = () => {
-        setDraggingId(null);
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        window.removeEventListener('pointercancel', onUp);
-    };
-
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+  // Wrapper for updateSettings to match signature expected by hook
+  const handlePositionUpdate = (id: string, pos: XYPos) => {
+      updateSettings({ 
+          ...settings, 
+          uiPositions: { 
+              ...settings.uiPositions, 
+              layers: pos 
+          } 
+      });
   };
+
+  const handleDrag = useDragManager(
+      uiUnlocked,
+      draggingId,
+      setDraggingId,
+      handlePositionUpdate,
+      uiPositions as unknown as Record<string, XYPos> // Cast safe here as we access by key
+  );
 
   return (
     <div 
         className={`absolute flex flex-col gap-1 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={{ left: uiPositions.layers.x, top: uiPositions.layers.y, touchAction: 'none' }}
-        onPointerDown={handleDrag}
+        onPointerDown={(e) => handleDrag(e, 'layers')}
     >
       {LIMITS.map(limit => {
         const visible = isVisible(limit);

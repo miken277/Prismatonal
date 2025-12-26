@@ -483,6 +483,9 @@ class PrismaProcessor extends AudioWorkletProcessor {
     
     const victim = oldestReleased || oldestHeld || freeVoice || this.voices[0];
     if (victim) {
+        if (victim.active && victim.id !== id) {
+             this.port.postMessage({ type: 'voice_stolen', id: victim.id });
+        }
         victim.trigger(id, freq, type);
     }
   }
