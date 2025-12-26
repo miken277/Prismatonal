@@ -162,9 +162,11 @@ export interface AppSettings {
   voiceLeadingGlowAmount: number; // 0.0 to 1.0 (Controls width/intensity of the lobe)
   voiceLeadingSteps: number; // 1 or 2 (Reach for active voice leading lines)
   
-  // Line Brightening
+  // Line Appearance
+  baseLineWidth: number; // 0.5 to 3.0 (Static lines)
   lineBrighteningEnabled: boolean;
   lineBrighteningSteps: number; // 1 or 2
+  lineBrighteningWidth: number; // 1.0 to 4.0
 
   // Momentum is deprecated/greyed out in favor of Latch Mode
   isMomentumEnabled: boolean; 
@@ -179,6 +181,7 @@ export interface AppSettings {
   canvasSize: number; // Width/Height of the scrollable area in pixels (e.g. 3000, 5000)
   buttonShape: ButtonShape;
   colors: LimitColorMap;
+  limitVisuals?: { [key: number]: { size: number; opacity: number } };
   
   // Text Appearance
   nodeTextSizeScale: number; // 0.5 to 2.0

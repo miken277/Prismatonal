@@ -131,8 +131,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   voiceLeadingReverseDir: false,
   voiceLeadingGlowAmount: 0.5,
   voiceLeadingSteps: 1,
+  baseLineWidth: 1.0, 
   lineBrighteningEnabled: true,
   lineBrighteningSteps: 1,
+  lineBrighteningWidth: 1.0, // Default width for brightened lines
   isMomentumEnabled: false, 
   latchedZoomScale: 1.3,
   buttonSizeScale: 1.26, // 10mm default with 2x correction

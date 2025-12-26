@@ -423,8 +423,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       fractionBar: settings.showFractionBar,
       canvasSize: dynamicSize,
       globalScale: globalScale,
-      viewZoom: viewZoom 
-  }), [settings.tuningSystem, settings.layoutApproach, settings.activeSkin, settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale, viewZoom]);
+      viewZoom: viewZoom,
+      baseLineWidth: settings.baseLineWidth,
+      lineBrighteningWidth: settings.lineBrighteningWidth
+  }), [settings.tuningSystem, settings.layoutApproach, settings.activeSkin, settings.buttonSizeScale, settings.buttonSpacingScale, settings.colors, settings.buttonShape, settings.nodeTextSizeScale, settings.showFractionBar, dynamicSize, globalScale, viewZoom, settings.baseLineWidth, settings.lineBrighteningWidth]);
 
   useEffect(() => {
       const canvas = staticCanvasRef.current;
@@ -461,6 +463,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
 
       ctx.lineCap = 'round';
+      const baseWidth = settings.baseLineWidth || 1.0;
       
       for (const limitStr in linesByLimit) {
           const limit = parseInt(limitStr);
@@ -472,7 +475,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               ctx.moveTo(coords[i], coords[i+1]);
               ctx.lineTo(coords[i+2], coords[i+3]);
           }
-          ctx.lineWidth = (limit === 1 ? 3 : 1) * effectiveScale; 
+          // Make Limit 1 (Identity) lines significantly thicker than base width to standout
+          ctx.lineWidth = (limit === 1 ? Math.max(2.5, baseWidth * 2.5) : baseWidth) * effectiveScale; 
           ctx.strokeStyle = color;
           ctx.globalAlpha = (isJIOverride ? 0.15 : 0.3); 
           
@@ -935,6 +939,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       
       if (currentBrightenedLines.length > 0) {
             bgCtx.setLineDash([]);
+            const brightWidth = currentSettings.lineBrighteningWidth || 1.0;
             for (const line of currentBrightenedLines) {
                 const x1 = line.x1 * spacing + centerOffset;
                 const y1 = line.y1 * spacing + centerOffset;
@@ -945,7 +950,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 bgCtx.beginPath();
                 bgCtx.moveTo(x1, y1);
                 bgCtx.lineTo(x2, y2);
-                bgCtx.lineWidth = 1 * currentGlobalScale;
+                bgCtx.lineWidth = brightWidth * currentGlobalScale;
                 bgCtx.strokeStyle = limitColor;
                 bgCtx.globalAlpha = isJIOverride ? 0.4 : 0.8; 
                 bgCtx.stroke();

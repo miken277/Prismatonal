@@ -570,7 +570,55 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                   </div>
                   
                   <div className="space-y-6">
-                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Lattice Background</h3>
+                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Connections & Voice Leading</h3>
+                    <div className="space-y-4">
+                        <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-4">
+                            
+                            {/* Base Line Width */}
+                            <div>
+                                <label className="block text-sm font-semibold mb-1 text-slate-300">Base Line Width</label>
+                                <div className="flex items-center gap-3">
+                                    <input 
+                                        type="range" 
+                                        min="0.5" 
+                                        max="3.0" 
+                                        step="0.1" 
+                                        value={settings.baseLineWidth || 1.0} 
+                                        onChange={(e) => handleChange('baseLineWidth', parseFloat(e.target.value))} 
+                                        className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
+                                    />
+                                    <span className="text-xs font-mono w-10 text-right text-blue-300">{(settings.baseLineWidth || 1.0).toFixed(1)}</span>
+                                </div>
+                                <p className="text-[10px] text-slate-500 italic mt-1">Controls thickness of the static lattice grid.</p>
+                            </div>
+
+                            <hr className="border-slate-700/50" />
+
+                            <label className="flex items-center justify-between cursor-pointer">
+                                <span className="text-sm font-semibold text-slate-300">Enable Line Brightening</span>
+                                <input type="checkbox" checked={settings.lineBrighteningEnabled} onChange={(e) => handleChange('lineBrighteningEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-pink-500" />
+                            </label>
+                            
+                            <div className={`${!settings.lineBrighteningEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
+                                <label className="block text-sm font-semibold mb-1 text-slate-300">Brightening Width</label>
+                                <div className="flex items-center gap-3">
+                                    <input 
+                                        type="range" 
+                                        min="1.0" 
+                                        max="4.0" 
+                                        step="0.1" 
+                                        value={settings.lineBrighteningWidth || 1.0} 
+                                        onChange={(e) => handleChange('lineBrighteningWidth', parseFloat(e.target.value))} 
+                                        className="flex-grow h-2 bg-pink-900 rounded-lg appearance-none cursor-pointer accent-pink-500" 
+                                    />
+                                    <span className="text-xs font-mono w-10 text-right text-pink-300">{(settings.lineBrighteningWidth || 1.0).toFixed(1)}</span>
+                                </div>
+                                <p className="text-[10px] text-slate-500 italic mt-1">Controls thickness of highlighted connections between active nodes.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1 mt-2">Lattice Background</h3>
                     <div className="space-y-4">
                       <select value={settings.backgroundMode} onChange={(e) => handleChange('backgroundMode', e.target.value as BackgroundMode)} className="w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600">
                         <option value="charcoal">Charcoal</option>
