@@ -1,4 +1,5 @@
-import { SynthPreset, AppSettings, ReverbType, PresetState, PlayMode } from '../types';
+
+import { SynthPreset, AppSettings, ReverbType, PresetState, PlayMode, PlaybackMode } from '../types';
 import { store } from './Store';
 import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
 import { AUDIO_PROCESSOR_CODE } from './AudioProcessorCode';
@@ -17,6 +18,9 @@ class AudioEngine {
   private delayNode: DelayNode | null = null;
   private delayFeedbackGain: GainNode | null = null;
   private delayOutputGain: GainNode | null = null;
+  
+  // Final Output Stage
+  private finalMasterGain: GainNode | null = null;
 
   private currentMasterVol: number = 0.8;
   private globalSpatialScale: number = 1.0;
@@ -231,6 +235,7 @@ class AudioEngine {
         this.delayOutputGain?.disconnect();
         this.limiter?.disconnect();
         this.masterFilter?.disconnect();
+        this.finalMasterGain?.disconnect();
     } catch(e) { /* ignore */ }
 
     // Master Filter (Tone Control)
@@ -243,10 +248,15 @@ class AudioEngine {
     this.limiter.threshold.value = -8.0; 
     this.limiter.ratio.value = 10.0;
     this.limiter.attack.value = 0.005;
-    this.limiter.connect(this.ctx.destination);
+    
+    // Final Master Gain (Global Volume)
+    this.finalMasterGain = this.ctx.createGain();
+    this.finalMasterGain.gain.value = this.currentMasterVol;
 
-    // Filter -> Limiter -> Out
+    // Filter -> Limiter -> FinalGain -> Destination
     this.masterFilter.connect(this.limiter);
+    this.limiter.connect(this.finalMasterGain);
+    this.finalMasterGain.connect(this.ctx.destination);
 
     this.dryGain = this.ctx.createGain();
     this.dryGain.connect(this.masterFilter);
@@ -275,7 +285,6 @@ class AudioEngine {
     }
 
     this.updateFX();
-    this.setMasterVolume(this.currentMasterVol);
   }
 
   private updateReverbBuffer() {
@@ -342,9 +351,14 @@ class AudioEngine {
           this.masterFilter.frequency.setTargetAtTime(freq, now, ramp);
       }
 
+      if (this.finalMasterGain) {
+          this.finalMasterGain.gain.setTargetAtTime(this.currentMasterVol, now, ramp);
+      }
+
       if (this.dryGain) {
           const dryLevel = Math.max(0.5, 1.0 - (scaledReverbMix * 0.4));
-          this.dryGain.gain.setTargetAtTime(dryLevel * this.currentMasterVol, now, ramp);
+          // Normalized dry level logic, volume now handled by finalMasterGain
+          this.dryGain.gain.setTargetAtTime(dryLevel, now, ramp);
       }
   }
 
@@ -434,7 +448,7 @@ class AudioEngine {
       this.updateFX();
   }
 
-  public async startVoice(id: string, ratio: number, baseFrequency: number, type: PlayMode = 'normal') {
+  public async startVoice(id: string, ratio: number, baseFrequency: number, presetSlot: PlayMode = 'normal', playbackMode: PlaybackMode = 'gate') {
     if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
         this.ctx.resume();
     }
@@ -446,7 +460,8 @@ class AudioEngine {
         type: 'note_on', 
         id: id, 
         freq: freq,
-        voiceType: type
+        voiceType: presetSlot,
+        mode: playbackMode
     });
   }
 

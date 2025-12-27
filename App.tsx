@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
@@ -24,8 +25,17 @@ const App: React.FC = () => {
   const [activeChordIds, setActiveChordIds] = useState<string[]>([]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [autoScaleFactor, setAutoScaleFactor] = useState(1.0);
-  const [latchMode, setLatchMode] = useState<0 | 1 | 2>(0);
   
+  // Latch Modes: 0=Off, 1=Drone, 2=Strings, 3=Plucked
+  const [latchMode, setLatchMode] = useState<0 | 1 | 2 | 3>(2);
+  
+  // Track sustain ON/OFF preference per instrument mode
+  // 1: Drone (Default True), 2: Strings (Default False), 3: Plucked (N/A)
+  const [sustainStates, setSustainStates] = useState<{ [key: number]: boolean }>({ 1: true, 2: false, 3: false });
+
+  // Track which modes currently have active voices sustained
+  const [activeSustainedModes, setActiveSustainedModes] = useState<number[]>([]);
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSynthOpen, setIsSynthOpen] = useState(false);
 
@@ -39,7 +49,6 @@ const App: React.FC = () => {
   const effectiveScale = autoScaleFactor * (settings.uiScale || 1.0);
 
   // --- AUDIO ENGINE SYNC ---
-  // These effects replace the direct store subscription in AudioEngine
   useEffect(() => {
       audioEngine.updatePresets(presets);
   }, [presets]);
@@ -109,12 +118,10 @@ const App: React.FC = () => {
       const marginBottom = marginPx + safeArea.bottom + SCROLLBAR_WIDTH;
       
       // QUADRUPLED SPACING LOGIC
-      // internalBlockGap is the primary spacer for Center Display and Latch clusters
       const internalBlockGap = 24 * scale; 
-      // baseGap is the distance between clusters; scaled to match the increased "breath"
       const baseGap = Math.max(marginPx, 32 * scale); 
 
-      // Dimensions - Refined per user request + Extra for Zoom
+      // Dimensions
       const volumeBarWidth = 600 * scale; 
       
       const settingsGroupWidth = 170; 
@@ -127,7 +134,6 @@ const App: React.FC = () => {
       // VERTICAL GAPS
       const verticalStackGap = 12 * PIXELS_PER_MM * scale; 
       
-      // Tighter gap for Volume Bar -> Settings to move it "closer" (Reduced from 12)
       const headerGap = 8 * scale; 
 
       const newPos = { ...settings.uiPositions };
@@ -141,15 +147,19 @@ const App: React.FC = () => {
       newPos.volume = { x: volX, y: marginTop };
 
       // Hiding Logic for Limit Layers (Right Side)
-      // Only hide if screen is extremely narrow (e.g. mobile portrait < 600px)
       if (w < 600) {
           newPos.layers = { x: -9999, y: -9999 };
+          newPos.instruments = { x: -9999, y: -9999 };
       } else {
-          // Vertical calculation for layers
+          // Vertical calculation for layers (Right)
           const extraLimitMargin = 12 * scale;
           const limitBarX = w - marginRight - colWidth - extraLimitMargin;
           const layersY = marginTop + settingsGroupHeight + verticalStackGap;
           newPos.layers = { x: limitBarX, y: layersY };
+
+          // Instruments (Left) - Pushed down to avoid overlapping the Arpeggiator Bar
+          // 280 * scale ensures robust clearance
+          newPos.instruments = { x: marginLeft, y: marginTop + (280 * scale) };
       }
 
       newPos.space = { x: -9999, y: -9999 };
@@ -172,7 +182,7 @@ const App: React.FC = () => {
       currentX += baseGap; 
       newPos.chords = { x: currentX, y: bottomY };
 
-      // PERFORMANCE CLUSTER (BOTTOM RIGHT) - Horizontal Order: Bend, Latch, Off, Panic
+      // PERFORMANCE CLUSTER (BOTTOM RIGHT) - Horizontal Order: Bend, Sust, Off, Panic
       const perfY = h - marginBottom - perfBtn;
       
       let rightX = w - marginRight - perfBtn; // Panic (far right)
@@ -181,11 +191,14 @@ const App: React.FC = () => {
       rightX -= (perfBtn + internalBlockGap); // Off
       newPos.off = { x: rightX, y: perfY };
       
-      rightX -= (perfBtn + internalBlockGap); // Latch
-      newPos.latch = { x: rightX, y: perfY };
+      rightX -= (perfBtn + internalBlockGap); // Sust
+      newPos.sust = { x: rightX, y: perfY };
       
       rightX -= (perfBtn + internalBlockGap); // Bend
       newPos.bend = { x: rightX, y: perfY };
+      
+      // Legacy latch prop - cleared from UI layout but kept in logic
+      newPos.latch = { x: -9999, y: -9999 };
 
       return newPos;
   };
@@ -237,7 +250,7 @@ const App: React.FC = () => {
     midiService.panic();
     diamondRef.current?.clearLatches(); 
     setActiveChordIds([]); 
-    setLatchMode(0);
+    // setLatchMode(0); // Don't reset instrument selection on Panic
     setRecordingArpId(null);
     updateSettings(prev => ({ 
         ...prev, 
@@ -250,25 +263,71 @@ const App: React.FC = () => {
   const handleOff = () => {
     diamondRef.current?.clearLatches(); 
     setActiveChordIds([]);
-    setLatchMode(0);
+    // Do not change latchMode (instrument selection) on OFF
     setRecordingArpId(null);
   };
 
-  const handleLatchToggle = () => {
-      setLatchMode(prev => {
-          const next = prev + 1;
-          if (next > 2) {
-              diamondRef.current?.clearLatches();
-              return 0;
-          }
-          return next as 0 | 1 | 2;
-      });
+  // Helper to switch instruments and restore their sustain state
+  const switchInstrument = (newMode: 0 | 1 | 2 | 3) => {
+      // 1. Save current sustain state
+      setSustainStates(prev => ({ ...prev, [latchMode]: settings.isSustainEnabled }));
+      
+      // 2. Switch mode
+      setLatchMode(newMode);
+      
+      // 3. Restore new mode's sustain state
+      const nextSustainState = sustainStates[newMode] ?? false;
+      updateSettings(prev => ({
+          ...prev,
+          isSustainEnabled: nextSustainState,
+          isPitchBendEnabled: nextSustainState ? false : prev.isPitchBendEnabled // Auto-disable bend if sustain is on
+      }));
+  };
+
+  const handleDroneSelect = () => switchInstrument(1);
+  const handleStringSelect = () => switchInstrument(2);
+  const handlePluckedSelect = () => switchInstrument(3);
+
+  const handleSustainToggle = () => {
+      const willEnable = !settings.isSustainEnabled;
+      
+      if (!willEnable) {
+          // If turning Sustain OFF, clear latches ONLY for the current mode
+          diamondRef.current?.clearLatches(latchMode);
+      }
+
+      // Update Local Map immediately
+      setSustainStates(prev => ({ ...prev, [latchMode]: willEnable }));
+
+      updateSettings(prev => ({
+          ...prev,
+          isSustainEnabled: willEnable,
+          // Exclusivity: Turning Sustain ON turns Bend OFF
+          isPitchBendEnabled: willEnable ? false : prev.isPitchBendEnabled
+      }));
   };
 
   const handleBendToggle = () => {
-      // Disabled if in Full Latch mode
-      if (latchMode === 1) return;
-      updateSettings(prev => ({ ...prev, isPitchBendEnabled: !prev.isPitchBendEnabled }));
+      updateSettings(prev => ({ 
+          ...prev, 
+          isPitchBendEnabled: !prev.isPitchBendEnabled,
+          // Exclusivity: Turning Bend ON turns Sustain OFF
+          isSustainEnabled: !prev.isPitchBendEnabled ? false : prev.isSustainEnabled
+      }));
+      
+      // If turning Bend ON, implicit Sustain OFF
+      if (!settings.isPitchBendEnabled) {
+           setSustainStates(prev => ({ ...prev, [latchMode]: false }));
+           diamondRef.current?.clearLatches(latchMode);
+      }
+  };
+
+  const handleSustainStatusChange = (modes: number[]) => {
+      setActiveSustainedModes(modes);
+  };
+
+  const handleClearSustain = (mode: number) => {
+      diamondRef.current?.clearLatches(mode);
   };
 
   const handleCenter = () => diamondRef.current?.centerView();
@@ -298,6 +357,20 @@ const App: React.FC = () => {
 
   const toggleChord = (id: string) => {
       setActiveChordIds(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
+  };
+
+  const handleRemoveChord = (id: string) => {
+      const newChords = settings.savedChords.map(c => {
+          if (c.id === id) {
+              return { ...c, nodes: [], visible: false };
+          }
+          return c;
+      });
+      updateSettings(prev => ({ ...prev, savedChords: newChords }));
+      
+      if (activeChordIds.includes(id)) {
+          setActiveChordIds(prev => prev.filter(cid => cid !== id));
+      }
   };
 
   const handleUiPositionUpdate = (key: keyof AppSettings['uiPositions'], pos: XYPos) => {
@@ -438,10 +511,12 @@ const App: React.FC = () => {
 
           if ([map.latch, map.volumeUp, map.volumeDown, map.spatialScaleUp, map.spatialScaleDown].map(k => k.toLowerCase()).includes(key)) e.preventDefault();
 
-          if (key === map.latch.toLowerCase()) handleLatchToggle();
+          if (key === map.latch.toLowerCase()) {
+              if (latchMode === 1) handleStringSelect(); else handleDroneSelect(); // Toggle between modes on keypress
+          }
           else if (key === map.panic.toLowerCase()) handlePanic();
           else if (key === map.center.toLowerCase()) handleCenter();
-          else if (key === map.settings.toLowerCase()) { setIsSettingsOpen(prev => !prev); if(isSynthOpen) setIsSynthOpen(false); }
+          else if (key === map.settings.toLowerCase()) { setIsSettingsOpen(prev => !prev); if(isSynthOpen) setIsSettingsOpen(false); }
           else if (key === map.synth.toLowerCase()) { setIsSynthOpen(prev => !prev); if(isSettingsOpen) setIsSettingsOpen(false); }
           else if (key === map.off.toLowerCase()) handleOff();
           else if (key === map.bend.toLowerCase()) handleBendToggle();
@@ -466,18 +541,11 @@ const App: React.FC = () => {
   const headerBtnClass = "bg-slate-900/50 hover:bg-slate-800 px-3 py-1 rounded-xl backdrop-blur-sm transition border border-slate-700/50 h-8 flex items-center text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-white shadow-lg";
 
   // Calculate available width for Arpeggiator Bar based on Volume Bar position
-  // Volume bar is positioned based on its right edge logic in applyLayout, but we can access its computed left position from state.
   const arpX = settings.uiPositions.arpeggioBar.x;
   const volX = settings.uiPositions.volume.x;
-  // Gap between the two bars
   const gap = 20 * effectiveScale;
   
-  // Available width is the space from Arp's left edge to Volume's left edge minus gap.
-  // If volX is very small (layout weirdness), ensure non-negative.
   const availableArpWidth = Math.max(0, volX - arpX - gap);
-  
-  // Hide Logic: If available width is too small (e.g. < 250px), don't show the bar to prevent overlap/ugly squashing.
-  // Unless the screen is huge, then it's fine.
   const showArpBar = availableArpWidth > 250 * effectiveScale;
 
   return (
@@ -500,92 +568,54 @@ const App: React.FC = () => {
         activeChordIds={activeChordIds}
         uiUnlocked={settings.uiUnlocked}
         latchMode={latchMode}
+        isCurrentSustainEnabled={settings.isSustainEnabled} 
         globalScale={effectiveScale}
         viewZoom={viewZoom}
-        onNodeTrigger={handleArpRecordNote} 
+        onNodeTrigger={handleArpRecordNote}
+        onSustainStatusChange={handleSustainStatusChange}
       />
 
-      {showArpBar && (
-          <FloatingControls 
-            volume={masterVolume} setVolume={setMasterVolume}
-            spatialScale={spatialScale} setSpatialScale={setSpatialScale}
-            brightness={brightness} setBrightness={setBrightness}
-            viewZoom={viewZoom} setViewZoom={setViewZoom}
-            
-            onPanic={handlePanic} onOff={handleOff}
-            onLatch={handleLatchToggle} latchMode={latchMode}
-            onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
-            onCenter={handleCenter}
-            onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
-            onAddChord={handleAddChord} toggleChord={toggleChord}
-            activeChordIds={activeChordIds} savedChords={settings.savedChords}
-            chordShortcutSizeScale={settings.chordShortcutSizeScale}
-            showIncreaseDepthButton={settings.showIncreaseDepthButton}
-            uiUnlocked={settings.uiUnlocked}
-            uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
-            draggingId={draggingId} setDraggingId={setDraggingId}
-            uiScale={effectiveScale}
-            
-            arpeggios={settings.arpeggios}
-            arpBpm={settings.arpBpm}
-            onArpToggle={handleArpToggle}
-            onArpBpmChange={handleArpBpmChange}
-            onArpRowConfigChange={handleArpRowConfigChange}
-            onArpPatternUpdate={handleArpPatternUpdate}
-            recordingArpId={recordingArpId}
-            currentArpStep={currentArpStep}
-            recordingFlash={recordingFlash}
-            onPlayAll={handlePlayAll}
-            onStopAll={handleStopAll}
-            
-            maxArpWidth={availableArpWidth}
-          />
-      )}
-      
-      {!showArpBar && (
-          <FloatingControls 
-            // Render only the bottom controls + Volume/Zoom bar if Arp is hidden
-            // But FloatingControls renders everything absolutely positioned based on props.
-            // If we simply don't render the Arp bar inside FloatingControls when width is 0/undefined?
-            // Actually, FloatingControls renders *all* floating UI. We cannot conditional render the whole component.
-            // We must pass the maxArpWidth and let FloatingControls decide visibility of just the arp bar?
-            // Re-instantiating logic: The above condition `showArpBar &&` removes EVERYTHING. That's wrong.
-            // FloatingControls manages ALL UI.
-            
-            volume={masterVolume} setVolume={setMasterVolume}
-            spatialScale={spatialScale} setSpatialScale={setSpatialScale}
-            brightness={brightness} setBrightness={setBrightness}
-            viewZoom={viewZoom} setViewZoom={setViewZoom}
-            
-            onPanic={handlePanic} onOff={handleOff}
-            onLatch={handleLatchToggle} latchMode={latchMode}
-            onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
-            onCenter={handleCenter}
-            onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
-            onAddChord={handleAddChord} toggleChord={toggleChord}
-            activeChordIds={activeChordIds} savedChords={settings.savedChords}
-            chordShortcutSizeScale={settings.chordShortcutSizeScale}
-            showIncreaseDepthButton={settings.showIncreaseDepthButton}
-            uiUnlocked={settings.uiUnlocked}
-            uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
-            draggingId={draggingId} setDraggingId={setDraggingId}
-            uiScale={effectiveScale}
-            
-            arpeggios={settings.arpeggios}
-            arpBpm={settings.arpBpm}
-            onArpToggle={handleArpToggle}
-            onArpBpmChange={handleArpBpmChange}
-            onArpRowConfigChange={handleArpRowConfigChange}
-            onArpPatternUpdate={handleArpPatternUpdate}
-            recordingArpId={recordingArpId}
-            currentArpStep={currentArpStep}
-            recordingFlash={recordingFlash}
-            onPlayAll={handlePlayAll}
-            onStopAll={handleStopAll}
-            
-            maxArpWidth={0} // Force hide arp bar internally if needed, or pass 0 to trigger hidden logic
-          />
-      )}
+      <FloatingControls 
+        volume={masterVolume} setVolume={setMasterVolume}
+        spatialScale={spatialScale} setSpatialScale={setSpatialScale}
+        brightness={brightness} setBrightness={setBrightness}
+        viewZoom={viewZoom} setViewZoom={setViewZoom}
+        
+        onPanic={handlePanic} onOff={handleOff}
+        onLatch={handleDroneSelect} 
+        onSust={handleStringSelect} 
+        onPluck={handlePluckedSelect}
+        latchMode={latchMode} 
+        onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
+        onSustainToggle={handleSustainToggle} isSustainEnabled={settings.isSustainEnabled}
+        onCenter={handleCenter}
+        onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
+        onAddChord={handleAddChord} toggleChord={toggleChord}
+        onRemoveChord={handleRemoveChord}
+        activeChordIds={activeChordIds} savedChords={settings.savedChords}
+        chordShortcutSizeScale={settings.chordShortcutSizeScale}
+        showIncreaseDepthButton={settings.showIncreaseDepthButton}
+        uiUnlocked={settings.uiUnlocked}
+        uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
+        draggingId={draggingId} setDraggingId={setDraggingId}
+        uiScale={effectiveScale}
+        
+        arpeggios={settings.arpeggios}
+        arpBpm={settings.arpBpm}
+        onArpToggle={handleArpToggle}
+        onArpBpmChange={handleArpBpmChange}
+        onArpRowConfigChange={handleArpRowConfigChange}
+        onArpPatternUpdate={handleArpPatternUpdate}
+        recordingArpId={recordingArpId}
+        currentArpStep={currentArpStep}
+        recordingFlash={recordingFlash}
+        onPlayAll={handlePlayAll}
+        onStopAll={handleStopAll}
+        
+        activeSustainedModes={activeSustainedModes}
+        maxArpWidth={showArpBar ? availableArpWidth : 0}
+        onClearSustain={handleClearSustain}
+      />
 
       <LimitLayerControls settings={settings} updateSettings={updateSettings} draggingId={draggingId} setDraggingId={setDraggingId} uiScale={effectiveScale} />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} updateSettings={updateSettings} />

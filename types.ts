@@ -1,3 +1,4 @@
+
 export enum LimitType {
   LIMIT_3 = 3,
   LIMIT_5 = 5,
@@ -188,6 +189,8 @@ export interface AppSettings {
   showFractionBar: boolean;
 
   isPitchBendEnabled: boolean;
+  isSustainEnabled: boolean; // Global Sustain Modifier (Gate vs Latch)
+  isStrumEnabled: boolean; // Global Strum Modifier (Trigger vs Gate)
   isPitchSnapEnabled: boolean;
   polyphony: number;
   pitchOffLocked: boolean;
@@ -226,7 +229,8 @@ export interface AppSettings {
     space: XYPos;
     panic: XYPos;
     off: XYPos;
-    latch: XYPos;
+    latch: XYPos; // Legacy key, kept for data compatibility, now usually unused or re-mapped
+    sust: XYPos;
     bend: XYPos;
     center: XYPos;
     depth: XYPos;
@@ -234,6 +238,7 @@ export interface AppSettings {
     chords: XYPos;
     layers: XYPos;
     arpeggioBar: XYPos;
+    instruments: XYPos; // New cluster for Drone/String
   };
 }
 
@@ -318,7 +323,9 @@ export interface SynthPreset {
 }
 
 // Slot Types
-export type PlayMode = 'normal' | 'latch' | 'strum' | 'arpeggio';
+export type PresetSlot = 'normal' | 'latch' | 'strum' | 'arpeggio';
+export type PlayMode = PresetSlot; // Alias for backward compatibility
+export type PlaybackMode = 'gate' | 'trigger' | 'latch'; // Behavior type
 
 export interface PresetState {
     normal: SynthPreset;

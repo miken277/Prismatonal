@@ -1,3 +1,4 @@
+
 import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, ReverbType, ArpeggioDefinition, KeyMappings } from './types';
 
 export const DEFAULT_COLORS: LimitColorMap = {
@@ -95,13 +96,15 @@ const getDefaults = () => {
         panic: { x: w - 80 - margin, y: h - 80 - margin },
         off: { x: w - 80 - margin, y: h - 180 },
         latch: { x: w - 80 - margin, y: h - 280 },
+        sust: { x: w - 80 - margin, y: h - 330 },
         bend: { x: w - 80 - margin, y: h - 380 },
         center: { x: margin, y: h - 48 - margin },
         depth: { x: margin + 60, y: h - 48 - margin },
         decreaseDepth: { x: margin + 120, y: h - 48 - margin },
         chords: { x: margin + 180, y: h - 48 - margin },
         layers: { x: w - 90 - margin, y: margin + 60 },
-        arpeggioBar: { x: margin, y: margin }
+        arpeggioBar: { x: margin, y: margin },
+        instruments: { x: margin, y: margin + 60 }
     };
 };
 
@@ -146,6 +149,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   nodeTextSizeScale: 1.0,
   showFractionBar: false,
   isPitchBendEnabled: false, 
+  isSustainEnabled: true, // Default to true so Drone behaves as legacy Drone initially
+  isStrumEnabled: false, // Default to false so String behaves like a normal Gate instrument
   isPitchSnapEnabled: true,
   polyphony: 4, 
   pitchOffLocked: false,

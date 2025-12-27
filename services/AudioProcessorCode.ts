@@ -199,7 +199,8 @@ class Voice {
     this.sampleRate = sampleRate;
     this.active = false;
     this.id = '';
-    this.type = 'normal';
+    this.type = 'normal'; // Preset selection
+    this.mode = 'gate';   // Playback behavior: 'gate', 'trigger', 'latch'
     this.panPos = 0; 
     
     this.baseFreq = 440;
@@ -220,9 +221,10 @@ class Voice {
     this.lfoVals = new Float32Array(3);
   }
 
-  trigger(id, freq, type) {
+  trigger(id, freq, type, mode) {
     this.id = id;
     this.type = type || 'normal';
+    this.mode = mode || 'gate';
     this.baseFreq = freq;
     this.targetFreq = freq;
     this.active = true;
@@ -414,7 +416,8 @@ class PrismaProcessor extends AudioWorkletProcessor {
          if (msg.polyphony) this.maxPolyphony = msg.polyphony;
          if (msg.strumDuration) this.strumDuration = msg.strumDuration;
       } else if (msg.type === 'note_on') {
-        this.triggerVoice(msg.id, msg.freq, msg.voiceType);
+        // Trigger with optional playbackMode (gate vs trigger)
+        this.triggerVoice(msg.id, msg.freq, msg.voiceType, msg.mode);
       } else if (msg.type === 'note_off') {
         this.releaseVoice(msg.id);
       } else if (msg.type === 'glide') {
@@ -441,11 +444,11 @@ class PrismaProcessor extends AudioWorkletProcessor {
       };
   }
 
-  triggerVoice(id, freq, type) {
+  triggerVoice(id, freq, type, mode) {
     // 1. If voice ID already active (re-trigger), use it
     for (let i = 0; i < this.voices.length; i++) {
         if (this.voices[i].active && this.voices[i].id === id) {
-            this.voices[i].trigger(id, freq, type);
+            this.voices[i].trigger(id, freq, type, mode);
             return;
         }
     }
@@ -481,20 +484,18 @@ class PrismaProcessor extends AudioWorkletProcessor {
 
     // 2. Use free voice if under polyphony limit
     if (activeCount < this.maxPolyphony && freeVoice) {
-        freeVoice.trigger(id, freq, type);
+        freeVoice.trigger(id, freq, type, mode);
         return;
     }
 
     // 3. Steal Priority: Oldest Released -> Oldest Held (FIFO)
-    // If activeCount >= maxPolyphony, we must steal.
-    // If activeCount < maxPolyphony but no free physical voices (limit > 64), we steal.
     
     const victim = oldestReleased || oldestHeld || freeVoice || this.voices[0];
     if (victim) {
         if (victim.active && victim.id !== id) {
              this.port.postMessage({ type: 'voice_stolen', id: victim.id });
         }
-        victim.trigger(id, freq, type);
+        victim.trigger(id, freq, type, mode);
     }
   }
 
@@ -509,9 +510,9 @@ class PrismaProcessor extends AudioWorkletProcessor {
   glideVoice(id, freq) {
     for (let i = 0; i < this.voices.length; i++) {
         if (this.voices[i].active && this.voices[i].id === id) {
-             if (this.voices[i].type !== 'strum') {
-                 this.voices[i].targetFreq = freq;
-             }
+             // Glide only applies if note is sustaining (not already released/decaying triggers)
+             // But for 'trigger' mode voices, we allow bending while they decay
+             this.voices[i].targetFreq = freq;
         }
     }
   }
@@ -548,7 +549,11 @@ class PrismaProcessor extends AudioWorkletProcessor {
             for (let i = 0; i < this.voices.length; i++) {
                 const v = this.voices[i];
                 if (v.active) {
-                    if (v.type === 'strum' && v.releaseTime === 0) {
+                    // AUTO-RELEASE logic for Trigger Mode (e.g. Strumming)
+                    // If mode is 'trigger' (or legacy 'strum' type fallback), enforce auto-release
+                    const isTriggerMode = v.mode === 'trigger' || v.type === 'strum'; 
+                    
+                    if (isTriggerMode && v.releaseTime === 0) {
                         if (currentTime - v.startTime >= this.strumDuration) {
                             v.release();
                         }

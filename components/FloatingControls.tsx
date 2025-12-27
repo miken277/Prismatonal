@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDivision, ArpeggioStep } from '../types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH, DEFAULT_COLORS } from '../constants';
@@ -15,15 +16,20 @@ interface Props {
   
   onPanic: () => void;
   onOff: () => void;
-  onLatch: () => void;
-  latchMode: 0 | 1 | 2;
+  onLatch: () => void; // Used for Drone
+  onSust?: () => void; // Used for Strings
+  onPluck?: () => void; // Used for Plucked
+  latchMode: 0 | 1 | 2 | 3;
   onBend: () => void;
   isBendEnabled: boolean;
+  onSustainToggle?: () => void;
+  isSustainEnabled?: boolean;
   onCenter: () => void;
   onIncreaseDepth: () => void;
   onDecreaseDepth: () => void;
   onAddChord: () => void;
   toggleChord: (id: string) => void;
+  onRemoveChord?: (id: string) => void;
   activeChordIds: string[];
   savedChords: ChordDefinition[];
   chordShortcutSizeScale: number;
@@ -47,18 +53,22 @@ interface Props {
   onPlayAll?: () => void;
   onStopAll?: () => void;
   
-  maxArpWidth?: number; // New prop for responsive width constraint
+  maxArpWidth?: number; 
+  activeSustainedModes?: number[];
+  onClearSustain?: (mode: number) => void;
 }
 
 const FloatingControls: React.FC<Props> = ({ 
   volume, setVolume, spatialScale, setSpatialScale, brightness, setBrightness, viewZoom, setViewZoom,
-  onPanic, onOff, onLatch, latchMode, onBend, isBendEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord,
+  onPanic, onOff, onLatch, onSust, onPluck, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
   draggingId, setDraggingId, uiScale = 1.0,
   arpeggios = [], arpBpm = 120, onArpToggle, onArpBpmChange, onArpRowConfigChange, onArpPatternUpdate, recordingArpId, currentArpStep, recordingFlash = 0,
   onPlayAll, onStopAll,
-  maxArpWidth
+  maxArpWidth,
+  activeSustainedModes = [],
+  onClearSustain
 }) => {
   
   const [showSequencer, setShowSequencer] = useState(false);
@@ -112,12 +122,13 @@ const FloatingControls: React.FC<Props> = ({
     window.addEventListener('pointercancel', onUp);
   };
 
-  const handleButtonPress = (e: React.PointerEvent, key: keyof AppSettings['uiPositions'], action: () => void) => {
+  const handleButtonPress = (e: React.PointerEvent, key: keyof AppSettings['uiPositions'], action?: () => void) => {
       e.stopPropagation();
       if (uiUnlocked) {
           handleDrag(e, key);
       } else {
-          action();
+          // Locked mode: Only allow Left Click (button 0) to trigger action
+          if (e.button === 0 && action) action();
       }
   };
 
@@ -126,29 +137,20 @@ const FloatingControls: React.FC<Props> = ({
   const baseSize = largeBtnSize; 
   const chordSize = baseSize * chordShortcutSizeScale;
   
-  // Dimensions
   const volumeBarWidth = 600 * uiScale; 
   const defaultArpBarWidth = 760 * uiScale;
   
-  // Responsive width calculation for Arp Bar
-  // If maxArpWidth is provided, we constrain. Otherwise use default.
-  // We also ensure it doesn't shrink below a usable minimum (e.g., 300px)
   const effectiveArpWidth = maxArpWidth ? Math.max(300 * uiScale, Math.min(defaultArpBarWidth, maxArpWidth)) : defaultArpBarWidth;
   const isConstrained = effectiveArpWidth < defaultArpBarWidth * 0.95;
   
+  // Instrument Panel Sizing (Matches LimitLayerControls logic roughly)
+  const instrButtonSize = 75 * uiScale; 
+  
   const draggableStyle = (key: string) => ({
-      left: uiPositions[key as keyof typeof uiPositions].x,
-      top: uiPositions[key as keyof typeof uiPositions].y,
+      left: uiPositions[key as keyof typeof uiPositions]?.x || 0,
+      top: uiPositions[key as keyof typeof uiPositions]?.y || 0,
       touchAction: 'none' as React.CSSProperties['touchAction'],
   });
-
-  const getLatchStyle = () => {
-      const base = "absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none shadow-lg";
-      const unlocked = uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : '';
-      if (latchMode === 1) return `${base} ${unlocked} bg-green-500 text-white border-2 border-green-300 shadow-[0_0_20px_rgba(34,197,94,0.8)]`;
-      else if (latchMode === 2) return `${base} ${unlocked} bg-green-900/60 text-green-400 border-2 border-green-400 ring-4 ring-green-500/30 animate-pulse shadow-[0_0_15px_rgba(34,197,94,0.4)]`;
-      else return `${base} ${unlocked} bg-green-900/40 border-2 border-green-500/50 text-green-500 hover:bg-green-800/60 active:bg-green-600 active:text-white shadow-[0_0_15px_rgba(34,197,94,0.2)]`;
-  };
 
   const isAnyArpPlaying = arpeggios.some(a => a.isPlaying);
   
@@ -192,7 +194,13 @@ const FloatingControls: React.FC<Props> = ({
       }
   };
 
-  const isBendLocked = latchMode === 1;
+  // If Plucked Mode is active, disable Sustain and Bend controls
+  const isPluckedActive = latchMode === 3;
+  
+  // If Sustain is on, Bend is effectively locked/disabled due to mutual exclusivity
+  // Also locked if Plucked is active
+  const isBendLocked = isSustainEnabled || isPluckedActive;
+  const isSustainLocked = isPluckedActive;
 
   const labelStyle = { 
       fontSize: 20 * uiScale, 
@@ -200,6 +208,12 @@ const FloatingControls: React.FC<Props> = ({
   };
 
   const sliderTrackHeight = 3 * uiScale;
+
+  // Aura Logic: Show if mode is sustained BUT not currently selected
+  const hasDroneAura = activeSustainedModes.includes(1) && latchMode !== 1;
+  const hasStringsAura = activeSustainedModes.includes(2) && latchMode !== 2;
+
+  const auraClass = "ring-4 ring-offset-2 ring-offset-slate-900 ring-yellow-400/60 animate-pulse";
 
   return (
     <>
@@ -269,7 +283,7 @@ const FloatingControls: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* ARPEGGIATOR BAR - Responsive Width & Wrapping */}
+      {/* ARPEGGIATOR BAR */}
       <div 
         className={`absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl overflow-visible ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={{ 
@@ -518,14 +532,78 @@ const FloatingControls: React.FC<Props> = ({
         )}
       </div>
 
+      {/* NEW LEFT INSTRUMENTS CLUSTER */}
+      <div 
+        className={`absolute flex flex-col gap-1 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={{ ...draggableStyle('instruments') }}
+        onPointerDown={(e) => handleDrag(e, 'instruments')}
+      >
+          {/* Drone Button */}
+          <button 
+            className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 1 ? 'bg-green-600 border-green-400 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${hasDroneAura ? auraClass : ''}`}
+            style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 10 * uiScale }}
+            onPointerDown={(e) => !uiUnlocked && handleButtonPress(e, 'instruments', onLatch)}
+            onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(1); }}
+          >
+            Drone
+          </button>
+
+          {/* Strings Button */}
+          <button 
+            className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 2 ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${hasStringsAura ? auraClass : ''}`}
+            style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 10 * uiScale }}
+            onPointerDown={(e) => onSust && !uiUnlocked && handleButtonPress(e, 'instruments', onSust)}
+            onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(2); }}
+          >
+            Strings
+          </button>
+
+          {/* Plucked Button - REMOVED WRONG AURA CLASS */}
+          <button 
+            className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 3 ? 'bg-orange-600 border-orange-400 text-white shadow-[0_0_10px_rgba(249,115,22,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'}`}
+            style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 10 * uiScale }}
+            onPointerDown={(e) => onPluck && !uiUnlocked && handleButtonPress(e, 'instruments', onPluck)}
+            onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(3); }}
+          >
+            Plucked
+          </button>
+
+          {/* Empty Placeholders - Adjusted count */}
+          {[1,2].map(i => (
+              <button 
+                key={i}
+                disabled
+                className="rounded-lg border-2 border-slate-800 bg-slate-900/30 text-slate-700 flex items-center justify-center pointer-events-none"
+                style={{ width: instrButtonSize, height: instrButtonSize }}
+              >
+                  <div className="w-2 h-2 rounded-full bg-slate-800"></div>
+              </button>
+          ))}
+      </div>
+
+      {/* BOTTOM RIGHT CLUSTER - Modified */}
+      
+      {/* Bend - LOCKED IF PLUCKED OR SUSTAIN ON */}
       <button 
+        disabled={isBendLocked}
         className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isBendEnabled ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''} ${isBendLocked ? 'opacity-40 cursor-not-allowed grayscale' : ''}`} 
         style={{ ...draggableStyle('bend'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} 
         onPointerDown={(e) => !isBendLocked && handleButtonPress(e, 'bend', onBend)}
       >
         BEND
       </button>
-      <button className={getLatchStyle()} style={{ ...draggableStyle('latch'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'latch', onLatch)}>LATCH</button>
+
+      {/* Sust - LOCKED IF PLUCKED */}
+      <button 
+        disabled={isSustainLocked}
+        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isSustainEnabled ? 'bg-blue-600 text-white border-blue-300 shadow-[0_0_15px_rgba(37,99,235,0.6)]' : 'bg-blue-900/40 text-blue-400 border-blue-500/50 hover:bg-blue-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''} ${isSustainLocked ? 'opacity-40 cursor-not-allowed grayscale' : ''}`} 
+        style={{ ...draggableStyle('sust'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} 
+        onPointerDown={(e) => !isSustainLocked && handleButtonPress(e, 'sust', onSustainToggle)} 
+        title="Sustain Notes"
+      >
+        SUST
+      </button>
+
       <button className={`absolute rounded-full bg-yellow-900/40 border-2 border-yellow-500/50 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-yellow-800/60 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('off'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'off', onOff)}>OFF</button>
       <button className={`absolute rounded-full bg-red-900/40 border-2 border-red-500/50 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-800/60 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('panic'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)}>PANIC</button>
 
@@ -539,7 +617,40 @@ const FloatingControls: React.FC<Props> = ({
           <button className={`rounded border-2 border-slate-500 border-dashed flex items-center justify-center text-slate-500 font-bold backdrop-blur hover:bg-slate-700/40 hover:text-white hover:border-white transition-all select-none ${uiUnlocked ? 'pointer-events-none' : ''}`} style={{ width: baseSize, height: baseSize }} onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} onClick={!uiUnlocked ? onAddChord : undefined} title="Store currently latched notes as a Chord"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-1/2 h-1/2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
           {savedChords.filter(c => c.visible).map((chord) => {
               const isActive = activeChordIds.includes(chord.id);
-              return (<button key={chord.id} className={`rounded flex items-center justify-center font-bold backdrop-blur transition-all shadow-lg select-none ${uiUnlocked ? 'pointer-events-none' : ''}`} style={{ width: chordSize, height: chordSize, fontSize: 12 * uiScale, backgroundColor: isActive ? chord.color : `${chord.color}33`, borderColor: chord.color, borderWidth: 2, color: isActive ? '#fff' : chord.color, boxShadow: isActive ? `0 0 10px ${chord.color}` : 'none' }} onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} onClick={() => !uiUnlocked && toggleChord(chord.id)} title={`Chord ${chord.id}: ${chord.label}`}>{chord.id}</button>);
+              return (
+                  <div key={chord.id} className="group flex flex-col items-center">
+                      <button 
+                          className={`rounded flex items-center justify-center font-bold backdrop-blur transition-all shadow-lg select-none ${uiUnlocked ? 'pointer-events-none' : ''}`} 
+                          style={{ 
+                              width: chordSize, 
+                              height: chordSize, 
+                              fontSize: 12 * uiScale, 
+                              backgroundColor: isActive ? chord.color : `${chord.color}33`, 
+                              borderColor: chord.color, 
+                              borderWidth: 2, 
+                              color: isActive ? '#fff' : chord.color, 
+                              boxShadow: isActive ? `0 0 10px ${chord.color}` : 'none' 
+                          }} 
+                          onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
+                          onClick={() => !uiUnlocked && toggleChord(chord.id)} 
+                          title={`Chord ${chord.id}: ${chord.label}`}
+                      >
+                          {chord.id}
+                      </button>
+                      {!uiUnlocked && (
+                          <button
+                              className="mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-slate-500 hover:text-red-500 flex items-center justify-center"
+                              style={{ width: chordSize, height: 20 * uiScale }}
+                              onClick={(e) => { e.stopPropagation(); onRemoveChord && onRemoveChord(chord.id); }}
+                              title="Clear Chord"
+                          >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-full h-full" viewBox="0 0 20 20" fill="currentColor" style={{ transform: 'scale(0.8)' }}>
+                                  <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                          </button>
+                      )}
+                  </div>
+              );
           })}
       </div>
     </>

@@ -1,12 +1,13 @@
+
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { AppSettings, LatticeNode, LatticeLine, ButtonShape } from '../types';
+import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode } from '../types';
 import { generateLattice } from '../services/LatticeService';
 import { getPitchRatioFromScreenDelta, getRainbowPeriod } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
 
 export interface TonalityDiamondHandle {
-  clearLatches: () => void;
+  clearLatches: (mode?: number) => void;
   centerView: () => void;
   increaseDepth: () => void;
   decreaseDepth: () => void;
@@ -20,10 +21,12 @@ interface Props {
   onLimitInteraction: (limit: number) => void;
   activeChordIds: string[];
   uiUnlocked: boolean;
-  latchMode: 0 | 1 | 2; // 0=Off, 1=LatchAll, 2=Sustain
+  latchMode: 0 | 1 | 2 | 3; // 0=Off, 1=Drone, 2=Strings, 3=Plucked
+  isCurrentSustainEnabled: boolean; // Explicit prop for current instrument's sustain state
   globalScale?: number; 
   viewZoom?: number;
   onNodeTrigger?: (nodeId: string, ratio: number, n?: number, d?: number, limit?: number) => void;
+  onSustainStatusChange?: (activeModes: number[]) => void; // Notify parent which modes have sustained notes
 }
 
 interface ActiveCursor {
@@ -38,7 +41,7 @@ interface ActiveCursor {
 const GRID_CELL_SIZE = 100; 
 
 const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) => {
-  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, globalScale = 1.0, viewZoom = 1.0, onNodeTrigger } = props;
+  const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, isCurrentSustainEnabled, globalScale = 1.0, viewZoom = 1.0, onNodeTrigger, onSustainStatusChange } = props;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bgLineCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -79,7 +82,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   }, [data.nodes, settings.buttonSpacingScale, dynamicSize, globalScale, viewZoom]);
 
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
-  const [persistentLatches, setPersistentLatches] = useState<Map<string, string>>(new Map());
+  
+  // Map<NodeId, ModeNumber> - Stores which instrument mode is sustaining the note
+  const [persistentLatches, setPersistentLatches] = useState<Map<string, number>>(new Map());
+
+  // Notify parent of active modes whenever latches change
+  useEffect(() => {
+      if (onSustainStatusChange) {
+          const modes = new Set(persistentLatches.values());
+          onSustainStatusChange(Array.from(modes));
+      }
+  }, [persistentLatches, onSustainStatusChange]);
 
   // Listen for voice stealing from AudioEngine to update persistent latches visually
   useEffect(() => {
@@ -100,37 +113,50 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   }, [audioEngine]);
 
   const audioLatchedNodes = useMemo(() => {
-      const effective = new Map<string, string>(persistentLatches);
+      // Map<NodeId, ModeNumber>
+      const effective = new Map<string, number>(persistentLatches);
+      
+      // Chords always use the current latch mode logic
+      // If Drone (1) -> Sustain as 1
+      // If Strings (2) -> Sustain as 2
+      // Default to 1 if neither
+      const chordMode = (latchMode === 2) ? 2 : 1; 
+
       activeChordIds.forEach(chordId => {
         const chordDef = settings.savedChords.find(c => c.id === chordId);
         if (chordDef) {
             chordDef.nodes.forEach(n => {
-                if (!effective.has(n.id)) effective.set(n.id, n.id);
+                if (!effective.has(n.id)) effective.set(n.id, chordMode);
             });
         }
       });
       return effective;
-  }, [persistentLatches, activeChordIds, settings.savedChords]);
+  }, [persistentLatches, activeChordIds, settings.savedChords, latchMode]);
 
   const visualLatchedNodes = useMemo(() => {
-      const visual = new Map(audioLatchedNodes);
+      // For visual Map, we just need existence, but storing Mode helps if we want color coding later
+      const visual = new Map<string, number>(audioLatchedNodes);
       const isDiamond = settings.layoutApproach === 'diamond';
 
       activeCursors.forEach(cursor => {
-          const isBending = settings.isPitchBendEnabled && !!cursor.originNodeId && latchMode !== 1;
+          // Visuals for active cursors
+          // Determine if we are in a Sustaining Instrument Mode (Drone or Strings) AND Sustain is enabled
+          const isSustainingInstrument = latchMode === 1 || latchMode === 2;
+          const isMelodic = !isSustainingInstrument || !isCurrentSustainEnabled;
+          const isBending = settings.isPitchBendEnabled && !!cursor.originNodeId && isMelodic;
 
           if (isBending && isDiamond) {
               if (cursor.originNodeId) {
-                  visual.set(cursor.originNodeId, cursor.originNodeId);
+                  visual.set(cursor.originNodeId, latchMode);
               }
           } else {
               if (cursor.hoverNodeId) {
-                  visual.set(cursor.hoverNodeId, cursor.hoverNodeId);
+                  visual.set(cursor.hoverNodeId, latchMode);
               }
           }
       });
       return visual;
-  }, [audioLatchedNodes, activeCursors, settings.layoutApproach, settings.isPitchBendEnabled, latchMode]);
+  }, [audioLatchedNodes, activeCursors, settings.layoutApproach, settings.isPitchBendEnabled, latchMode, isCurrentSustainEnabled]);
 
   const activeLines = useMemo(() => {
     const latched = visualLatchedNodes;
@@ -273,7 +299,19 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   }, []);
 
   useImperativeHandle(ref, () => ({
-    clearLatches: () => setPersistentLatches(new Map()),
+    clearLatches: (mode?: number) => {
+        if (mode === undefined) {
+            setPersistentLatches(new Map());
+        } else {
+            setPersistentLatches(prev => {
+                const next = new Map();
+                prev.forEach((val, key) => {
+                    if (val !== mode) next.set(key, val);
+                });
+                return next;
+            });
+        }
+    },
     centerView: () => { centerScroll(); },
     increaseDepth: () => {
         const limit = lastTouchedLimitRef.current;
@@ -378,7 +416,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const calculatedSize = (maxExtent * spacing * 2) + padding;
         const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
 
-        const MAX_CANVAS_SIZE = 5000; // Increased for linear layout
+        const MAX_CANVAS_SIZE = 5000; 
         const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
 
         if (Math.abs(clampedSize - dynamicSizeRef.current) > 50) {
@@ -475,7 +513,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               ctx.moveTo(coords[i], coords[i+1]);
               ctx.lineTo(coords[i+2], coords[i+3]);
           }
-          // Make Limit 1 (Identity) lines significantly thicker than base width to standout
           ctx.lineWidth = (limit === 1 ? Math.max(2.5, baseWidth * 2.5) : baseWidth) * effectiveScale; 
           ctx.strokeStyle = color;
           ctx.globalAlpha = (isJIOverride ? 0.15 : 0.3); 
@@ -521,7 +558,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               ctx.fill();
           }
 
-          const combinedScale = settings.buttonSizeScale * viewZoom; // Use viewZoom to scale text readability
+          const combinedScale = settings.buttonSizeScale * viewZoom; 
           if (combinedScale > 0.4) {
               ctx.fillStyle = isJIOverride ? '#fff' : 'white';
               ctx.textAlign = 'center';
@@ -555,7 +592,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                      chordDef.nodes.forEach(n => {
                         const fullNode = nodes.get(n.id);
                         if (fullNode) {
-                            audioEngine.startVoice(`node-${n.id}`, fullNode.ratio, settings.baseFrequency, 'latch');
+                            // Chords use persistent 'latch' mode preset if in Drone mode, or 'normal' if in Strings
+                            const preset = latchMode === 2 ? 'normal' : 'latch';
+                            audioEngine.startVoice(`node-${n.id}`, fullNode.ratio, settings.baseFrequency, preset, 'latch'); 
                             if (settings.midiEnabled) midiService.noteOn(`node-${n.id}`, fullNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                         }
                      });
@@ -564,23 +603,30 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
          }
     }
     prevActiveChordIds.current = activeChordIds;
-  }, [activeChordIds, settings.savedChords, settings.chordsAlwaysRelatch, nodeMap]);
+  }, [activeChordIds, settings.savedChords, settings.chordsAlwaysRelatch, nodeMap, latchMode]);
 
-  const prevAudioLatchedRef = useRef<Map<string, string>>(new Map());
+  // --- AUDIO SYNC EFFECT ---
+  // Uses persistentLatches to manage voice lifecycles
+  const prevAudioLatchedRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
       const current = audioLatchedNodes;
       const prev = prevAudioLatchedRef.current;
       const nodes = nodeMap;
       
-      current.forEach((originId, nodeId) => {
+      // Start new notes
+      current.forEach((mode, nodeId) => {
           if (!prev.has(nodeId)) {
                const node = nodes.get(nodeId); 
                if (node) {
-                   audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency, 'latch');
+                   // Determine preset based on the MODE stored in latch map
+                   // Mode 2 (Strings) -> Normal, else (Drone) -> Latch
+                   const preset = mode === 2 ? 'normal' : 'latch';
+                   audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency, preset, 'latch');
                    if (settings.midiEnabled) midiService.noteOn(`node-${nodeId}`, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                }
           }
       });
+      // Stop removed notes
       prev.forEach((_, nodeId) => {
           if (!current.has(nodeId)) {
               audioEngine.stopVoice(`node-${nodeId}`);
@@ -642,6 +688,19 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       return null;
   };
 
+  const getVoiceParams = (mode: number, isStrumEnabled: boolean): { preset: PresetSlot, playback: PlaybackMode } => {
+      switch(mode) {
+          case 1: // Drone
+              return { preset: 'latch', playback: isStrumEnabled ? 'trigger' : 'gate' };
+          case 2: // Strings
+              return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
+          case 3: // Plucked
+              return { preset: 'strum', playback: 'trigger' };
+          default: // Off / Normal
+              return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
+      }
+  };
+
   const handlePointerDown = (e: React.PointerEvent) => {
       if (audioEngine) audioEngine.resume();
 
@@ -682,30 +741,35 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             onNodeTrigger(hitNode.id, hitNode.ratio, hitNode.n, hitNode.d, hitNode.maxPrime);
         }
 
-        const isPersistentlyLatched = persistentLatches.has(hitNode.id);
-        const isAudioLatched = audioLatchedNodes.has(hitNode.id);
+        const isSustainingInstrument = latchMode === 1 || latchMode === 2;
+        // Check local prop for current sustain state, not global settings
+        const isSustainActive = isCurrentSustainEnabled;
 
-        if (latchMode === 1) {
+        if (isSustainingInstrument && isSustainActive) {
+             // SUSTAIN BEHAVIOR (Drone or Sustained Strings): Toggle Persistent Latch
+             // Store the mode that initiated the latch
+             const existingMode = persistentLatches.get(hitNode.id);
+             
              setPersistentLatches(prev => {
                  const next = new Map(prev);
-                 if (isPersistentlyLatched) next.delete(hitNode.id);
-                 else next.set(hitNode.id, hitNode.id);
+                 if (existingMode === latchMode) {
+                     // Toggle OFF if same mode
+                     next.delete(hitNode.id);
+                 } else {
+                     // Add OR Steal (overwrite) with current mode
+                     next.set(hitNode.id, latchMode);
+                 }
                  return next;
              });
         }
         else {
-            if (isPersistentlyLatched) {
-                setPersistentLatches(prev => {
-                    const next = new Map(prev);
-                    next.delete(hitNode.id);
-                    return next;
-                });
-            } else if (!isAudioLatched) {
-                const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
-                const voiceType = 'normal'; 
-                audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, voiceType);
-                if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
-            }
+            // MOMENTARY BEHAVIOR (Plucked OR Non-Sustained Instruments)
+            const { preset, playback } = getVoiceParams(latchMode, settings.isStrumEnabled);
+            const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
+            
+            // Allow playing new notes even if they are currently persistently latched
+            audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, preset, playback);
+            if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
         }
       }
   };
@@ -732,15 +796,24 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         hasMoved = true;
     }
 
+    const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
+    
+    // Check for Sustain Mode (Drone or Strings with Sustain ON)
+    const isSustainingInstrument = latchMode === 1 || latchMode === 2;
+    const isSustainActive = isCurrentSustainEnabled;
+    const isSustainingMode = isSustainingInstrument && isSustainActive;
+    
+    // Melodic Logic applies if not in Sustaining Mode
+    const isMelodic = !isSustainingMode;
+
     // Determine if bending is active for THIS cursor
     const isBendEnabled = settingsRef.current.isPitchBendEnabled;
     const isOriginActive = !!cursor.originNodeId;
-    const isBending = isBendEnabled && isOriginActive && latchMode !== 1;
+    const isBending = isBendEnabled && isOriginActive && isMelodic;
 
     // --- BEND AUDIO LOGIC ---
     if (isBending && cursor.originNodeId && dynamicCanvasRef.current) {
          const centerOffset = dynamicSizeRef.current / 2;
-         // Optimization: Use cached rect if available, fallback to getBoundingClientRect
          const rect = canvasRectRef.current || dynamicCanvasRef.current.getBoundingClientRect();
          
          const originNode = nodeMapRef.current.get(cursor.originNodeId);
@@ -762,51 +835,49 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     if (cursor.hoverNodeId !== hitId) {
         
         // Logic: Stop the old note UNLESS we are bending from origin
-        // If bending, the voice (originNodeId) must persist even if we hover null or another node
-        
         const isLeavingOrigin = cursor.hoverNodeId === cursor.originNodeId;
         const shouldSustainBend = isBending && isLeavingOrigin;
 
-        if (latchMode === 0) {
+        if (isMelodic) {
              if (shouldSustainBend) {
                  // Do not stop voice. It is sustaining for the bend.
              } else if (cursor.hoverNodeId) {
-                 // Stop the previous note if we are simply moving between nodes (strum) or leaving without bend
-                 const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
-                 audioEngine.stopVoice(oldVoiceId);
-                 if (settingsRef.current.midiEnabled) midiService.noteOff(oldVoiceId);
+                 // Stop logic depends on Playback Mode
+                 if (playback === 'gate') {
+                     const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+                     audioEngine.stopVoice(oldVoiceId);
+                     if (settingsRef.current.midiEnabled) midiService.noteOff(oldVoiceId);
+                 }
              }
         }
 
         // Logic: Trigger NEW note if we hit a node
-        // BUT if bending, we generally DON'T trigger new notes (monophonic bend gesture)
-        // Unless user wants to slide over notes? Usually bend implies holding the origin.
-        
         if (hitNode) {
              const topLayer = settingsRef.current.layerOrder[settingsRef.current.layerOrder.length - 1];
              if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
              
-             if (latchMode === 1) {
-                // Full Latch Logic (Toggle)
-                const isAlreadyLatched = persistentLatchesRef.current.has(hitNode.id);
-                if (!isAlreadyLatched) {
-                    setPersistentLatches(prev => {
-                        if (prev.has(hitNode.id)) return prev;
-                        const next = new Map(prev);
-                        next.set(hitNode.id, hitNode.id);
-                        return next;
-                    });
+             if (isSustainingMode) {
+                // "Paint" Latches: Add to persistent latches on enter
+                const isDifferentNode = hitNode.id !== cursor.originNodeId;
+                if (hasMoved || isDifferentNode) {
+                    const existingMode = persistentLatchesRef.current.get(hitNode.id);
+                    // Only paint if not already latched by *this* mode
+                    if (existingMode !== latchMode) {
+                        setPersistentLatches(prev => {
+                            const next = new Map(prev);
+                            next.set(hitNode.id, latchMode);
+                            return next;
+                        });
+                    }
                 }
              } 
              else {
-                 // Normal/Partial Mode
-                 const isAlreadyLatched = audioLatchedNodes.has(hitNode.id);
-                 
-                 // Don't retrigger if already playing via latch
-                 // Don't trigger new notes if we are currently performing a bend on the origin
-                 if (!isAlreadyLatched && !isBending) {
+                 // Melodic Mode
+                 if (!isBending) {
+                     const { preset, playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
                      const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
-                     audioEngine.startVoice(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, 'strum');
+                     
+                     audioEngine.startVoice(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, preset, playback);
                      if (settingsRef.current.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
                  }
              }
@@ -823,10 +894,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         });
 
     } else if (hasMoved !== cursor.hasMoved) {
-        // Just update movement status if nothing else changed
         const updatedCursor = { ...cursor, hasMoved: true };
         activeCursorsRef.current.set(e.pointerId, updatedCursor);
-        
         setActiveCursors(prev => {
             const next = new Map(prev);
             next.set(e.pointerId, updatedCursor);
@@ -838,13 +907,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const handlePointerUp = (e: React.PointerEvent) => {
     if (activeCursorsRef.current.has(e.pointerId)) {
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
-        const isBending = settingsRef.current.isPitchBendEnabled && cursor.originNodeId && latchMode !== 1;
         
-        if (latchMode === 1) {
-            // Full Latch: notes persist
-        } else {
-            // Stop logic for Normal/Partial
-            
+        const isSustainingInstrument = latchMode === 1 || latchMode === 2;
+        const isSustainActive = isCurrentSustainEnabled;
+        const isSustainingMode = isSustainingInstrument && isSustainActive;
+        const isMelodic = !isSustainingMode;
+        
+        const isBending = settingsRef.current.isPitchBendEnabled && cursor.originNodeId && isMelodic;
+        const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
+        
+        if (isMelodic) {
+            // Stop logic for Melodic Modes
             if (isBending && cursor.originNodeId) {
                 // If we were bending, stop the origin voice
                 const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
@@ -852,12 +925,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 if (settingsRef.current.midiEnabled) midiService.noteOff(voiceId);
             } 
             else if (cursor.hoverNodeId) {
-                 // Otherwise stop the last hovered note
-                 const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
-                 audioEngine.stopVoice(voiceId);
-                 if (settingsRef.current.midiEnabled) midiService.noteOff(voiceId);
+                 // For Gate (Strings/Drone), stop voice on release.
+                 // For Trigger (Plucked), let it ring out naturally (do not stop).
+                 if (playback === 'gate') {
+                     const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
+                     audioEngine.stopVoice(voiceId);
+                     if (settingsRef.current.midiEnabled) midiService.noteOff(voiceId);
+                 }
             }
         }
+        // If Sustain Enabled (Drone Mode), notes persist, so no stopVoice call here.
         
         cursorPositionsRef.current.delete(e.pointerId);
         
