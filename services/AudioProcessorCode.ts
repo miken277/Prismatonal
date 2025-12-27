@@ -255,121 +255,186 @@ class Voice {
     return Math.max(this.envs[0].value, this.envs[1].value, this.envs[2].value);
   }
 
-  process(presetData, dt) {
-    if (!this.active || !presetData) return 0.0;
-    
+  // Optimized block processing to reduce per-sample overhead and GC
+  renderBlock(preset, dt, bufL, bufR, len, panSpeed, panDepth, startPanPhase) {
+    if (!this.active) return;
+
+    // --- FREQ GLIDE ---
     const diff = this.targetFreq - this.baseFreq;
     if (Math.abs(diff) > 0.001) {
-      this.baseFreq += diff * 0.005; 
+      this.baseFreq += diff * 0.005; // Simple exponential slide per block
     } else {
       this.baseFreq = this.targetFreq;
     }
 
-    const oscConfigs = [
-        presetData.osc1 || DUMMY_OSC_CONFIG,
-        presetData.osc2 || DUMMY_OSC_CONFIG,
-        presetData.osc3 || DUMMY_OSC_CONFIG
-    ];
-    const matrix = presetData.modMatrix || [];
+    // --- CACHED CONFIGS ---
+    const osc1 = preset.osc1 || DUMMY_OSC_CONFIG;
+    const osc2 = preset.osc2 || DUMMY_OSC_CONFIG;
+    const osc3 = preset.osc3 || DUMMY_OSC_CONFIG;
+    const matrix = preset.modMatrix || [];
+    const spreadAmount = preset.spread || 0;
+    const voiceGain = preset.gain || 0.5;
+    const hasMatrix = matrix.length > 0;
 
     let anyEnvActive = false;
+    let panPhase = startPanPhase;
 
-    for (let i = 0; i < 3; i++) {
-        const config = oscConfigs[i];
-        const envVal = this.envs[i].process(config, dt);
-        this.envVals[i] = envVal;
-        if (this.envs[i].stage !== 'idle') anyEnvActive = true;
+    // Pre-calculate LFO rates to avoid dictionary lookup in tight loop
+    const lfoRate1 = osc1.lfoRate || 0;
+    const lfoRate2 = osc2.lfoRate || 0;
+    const lfoRate3 = osc3.lfoRate || 0;
 
-        const rate = (config.lfoRate !== undefined) ? config.lfoRate : 0.0;
-        this.lfoPhases[i] += rate * dt;
-        if (this.lfoPhases[i] >= 1.0) this.lfoPhases[i] -= 1.0;
-        this.lfoVals[i] = Math.sin(TWO_PI * this.lfoPhases[i]);
-    }
+    for (let s = 0; s < len; s++) {
+        // --- 1. MODULATORS ---
+        anyEnvActive = false;
+        
+        // Unrolled Envelope & LFO processing
+        // OSC 1
+        const env1 = this.envs[0].process(osc1, dt);
+        this.envVals[0] = env1;
+        if (this.envs[0].stage !== 'idle') anyEnvActive = true;
+        this.lfoPhases[0] += lfoRate1 * dt;
+        if (this.lfoPhases[0] >= 1.0) this.lfoPhases[0] -= 1.0;
+        this.lfoVals[0] = Math.sin(TWO_PI * this.lfoPhases[0]);
 
-    if (!anyEnvActive) {
-      this.active = false;
-      return 0.0;
-    }
+        // OSC 2
+        const env2 = this.envs[1].process(osc2, dt);
+        this.envVals[1] = env2;
+        if (this.envs[1].stage !== 'idle') anyEnvActive = true;
+        this.lfoPhases[1] += lfoRate2 * dt;
+        if (this.lfoPhases[1] >= 1.0) this.lfoPhases[1] -= 1.0;
+        this.lfoVals[1] = Math.sin(TWO_PI * this.lfoPhases[1]);
 
-    let modP1=0, modP2=0, modP3=0;
-    let modC1=0, modC2=0, modC3=0;
-    let modG1=0, modG2=0, modG3=0;
-    let modR1=0, modR2=0, modR3=0;
+        // OSC 3
+        const env3 = this.envs[2].process(osc3, dt);
+        this.envVals[2] = env3;
+        if (this.envs[2].stage !== 'idle') anyEnvActive = true;
+        this.lfoPhases[2] += lfoRate3 * dt;
+        if (this.lfoPhases[2] >= 1.0) this.lfoPhases[2] -= 1.0;
+        this.lfoVals[2] = Math.sin(TWO_PI * this.lfoPhases[2]);
 
-    const mLen = matrix.length;
-    for(let i=0; i<mLen; i++) {
-        const row = matrix[i];
-        if (!row.enabled) continue;
-
-        let srcVal = 0;
-        switch(row.source) {
-            case 'lfo1': srcVal = this.lfoVals[0]; break;
-            case 'lfo2': srcVal = this.lfoVals[1]; break;
-            case 'lfo3': srcVal = this.lfoVals[2]; break;
-            case 'env1': srcVal = this.envVals[0]; break;
-            case 'env2': srcVal = this.envVals[1]; break;
-            case 'env3': srcVal = this.envVals[2]; break;
+        if (!anyEnvActive && s === len - 1) {
+            this.active = false;
         }
-        
-        const amt = srcVal * (Number.isFinite(row.amount) ? row.amount : 0);
 
-        switch(row.target) {
-            case 'osc1_pitch': modP1 += amt; break;
-            case 'osc1_cutoff': modC1 += amt; break;
-            case 'osc1_gain': modG1 += amt; break;
-            case 'osc1_res': modR1 += amt; break;
-            case 'osc2_pitch': modP2 += amt; break;
-            case 'osc2_cutoff': modC2 += amt; break;
-            case 'osc2_gain': modG2 += amt; break;
-            case 'osc2_res': modR2 += amt; break;
-            case 'osc3_pitch': modP3 += amt; break;
-            case 'osc3_cutoff': modC3 += amt; break;
-            case 'osc3_gain': modG3 += amt; break;
-            case 'osc3_res': modR3 += amt; break;
+        // --- 2. MOD MATRIX ---
+        let modP1=0, modC1=0, modG1=0, modR1=0;
+        let modP2=0, modC2=0, modG2=0, modR2=0;
+        let modP3=0, modC3=0, modG3=0, modR3=0;
+
+        if (hasMatrix) {
+            for(let m = 0; m < matrix.length; m++) {
+                const row = matrix[m];
+                if (!row.enabled) continue;
+                
+                let srcVal = 0;
+                // Hardcoded source lookup for speed
+                if (row.source === 'env1') srcVal = this.envVals[0];
+                else if (row.source === 'env2') srcVal = this.envVals[1];
+                else if (row.source === 'env3') srcVal = this.envVals[2];
+                else if (row.source === 'lfo1') srcVal = this.lfoVals[0];
+                else if (row.source === 'lfo2') srcVal = this.lfoVals[1];
+                else if (row.source === 'lfo3') srcVal = this.lfoVals[2];
+
+                const amt = srcVal * row.amount;
+
+                // Hardcoded target lookup
+                switch(row.target) {
+                    case 'osc1_pitch': modP1 += amt; break;
+                    case 'osc1_cutoff': modC1 += amt; break;
+                    case 'osc1_gain': modG1 += amt; break;
+                    case 'osc1_res': modR1 += amt; break;
+                    case 'osc2_pitch': modP2 += amt; break;
+                    case 'osc2_cutoff': modC2 += amt; break;
+                    case 'osc2_gain': modG2 += amt; break;
+                    case 'osc2_res': modR2 += amt; break;
+                    case 'osc3_pitch': modP3 += amt; break;
+                    case 'osc3_cutoff': modC3 += amt; break;
+                    case 'osc3_gain': modG3 += amt; break;
+                    case 'osc3_res': modR3 += amt; break;
+                }
+            }
         }
+
+        // --- 3. VOICE GENERATION ---
+        let voiceMix = 0.0;
+
+        // --- OSC 1 ---
+        if (osc1.enabled && this.envVals[0] > 0.0001) {
+            let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
+            const d = osc1.lfoDepth || 0;
+            const v = this.lfoVals[0];
+            if (osc1.lfoTarget === 'pitch') hardPitch = v * d;
+            else if (osc1.lfoTarget === 'filter') hardFilter = v * d * 20;
+            else if (osc1.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
+
+            const cents = osc1.coarseDetune + osc1.fineDetune + hardPitch + (modP1 * 1200);
+            const freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            let sig = this.oscs[0].process(freq, osc1.waveform, dt);
+            
+            const cut = osc1.filterCutoff + hardFilter + (modC1 * 5000);
+            const res = Math.max(0, osc1.filterResonance + (modR1 * 10));
+            sig = this.filters[0].process(sig, cut, res, this.sampleRate);
+            
+            voiceMix += sig * osc1.gain * this.envVals[0] * hardAmp * Math.max(0, 1.0 + modG1);
+        }
+
+        // --- OSC 2 ---
+        if (osc2.enabled && this.envVals[1] > 0.0001) {
+            let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
+            const d = osc2.lfoDepth || 0;
+            const v = this.lfoVals[1];
+            if (osc2.lfoTarget === 'pitch') hardPitch = v * d;
+            else if (osc2.lfoTarget === 'filter') hardFilter = v * d * 20;
+            else if (osc2.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
+
+            const cents = osc2.coarseDetune + osc2.fineDetune + hardPitch + (modP2 * 1200);
+            const freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            let sig = this.oscs[1].process(freq, osc2.waveform, dt);
+            
+            const cut = osc2.filterCutoff + hardFilter + (modC2 * 5000);
+            const res = Math.max(0, osc2.filterResonance + (modR2 * 10));
+            sig = this.filters[1].process(sig, cut, res, this.sampleRate);
+            
+            voiceMix += sig * osc2.gain * this.envVals[1] * hardAmp * Math.max(0, 1.0 + modG2);
+        }
+
+        // --- OSC 3 ---
+        if (osc3.enabled && this.envVals[2] > 0.0001) {
+            let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
+            const d = osc3.lfoDepth || 0;
+            const v = this.lfoVals[2];
+            if (osc3.lfoTarget === 'pitch') hardPitch = v * d;
+            else if (osc3.lfoTarget === 'filter') hardFilter = v * d * 20;
+            else if (osc3.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
+
+            const cents = osc3.coarseDetune + osc3.fineDetune + hardPitch + (modP3 * 1200);
+            const freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            let sig = this.oscs[2].process(freq, osc3.waveform, dt);
+            
+            const cut = osc3.filterCutoff + hardFilter + (modC3 * 5000);
+            const res = Math.max(0, osc3.filterResonance + (modR3 * 10));
+            sig = this.filters[2].process(sig, cut, res, this.sampleRate);
+            
+            voiceMix += sig * osc3.gain * this.envVals[2] * hardAmp * Math.max(0, 1.0 + modG3);
+        }
+
+        // --- 4. PANNING & OUTPUT ---
+        panPhase += dt * panSpeed;
+        if (panPhase > 1.0) panPhase -= 1.0;
+        
+        const autoPan = Math.sin(panPhase * TWO_PI) * panDepth;
+        let p = this.panPos * spreadAmount;
+        p += autoPan;
+        p = Math.max(-1.0, Math.min(1.0, p));
+        
+        // Equal power pan approx
+        const gainL = 0.5 * (1.0 - p);
+        const gainR = 0.5 * (1.0 + p);
+
+        bufL[s] += voiceMix * gainL * voiceGain;
+        bufR[s] += voiceMix * gainR * voiceGain;
     }
-
-    let voiceMix = 0.0;
-
-    for (let i = 0; i < 3; i++) {
-        const config = oscConfigs[i];
-        if (!config.enabled) continue;
-
-        const envVal = this.envVals[i];
-        if (envVal < 0.0001) continue;
-
-        let lfoVal = this.lfoVals[i];
-        const lfoDepth = config.lfoDepth || 0;
-        let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
-        
-        if (config.lfoTarget === 'pitch') hardPitch = lfoVal * lfoDepth;
-        else if (config.lfoTarget === 'filter') hardFilter = lfoVal * lfoDepth * 20;
-        else if (config.lfoTarget === 'tremolo') hardAmp = 1.0 - (lfoVal * (lfoDepth * 0.005));
-
-        let modPitch=0, modCutoff=0, modGain=0, modRes=0;
-        if (i===0) { modPitch=modP1; modCutoff=modC1; modGain=modG1; modRes=modR1; }
-        else if (i===1) { modPitch=modP2; modCutoff=modC2; modGain=modG2; modRes=modR2; }
-        else { modPitch=modP3; modCutoff=modC3; modGain=modG3; modRes=modR3; }
-
-        const cents = config.coarseDetune + config.fineDetune + hardPitch + (modPitch * 1200);
-        const detuneMult = Math.pow(2, cents / 1200.0);
-        const oscFreq = this.baseFreq * detuneMult;
-
-        let signal = this.oscs[i].process(oscFreq, config.waveform, dt);
-
-        let cutoff = config.filterCutoff + hardFilter + (modCutoff * 5000);
-        let res = config.filterResonance + (modRes * 10);
-        if (res < 0) res = 0;
-        
-        signal = this.filters[i].process(signal, cutoff, res, this.sampleRate);
-        
-        const gainMod = Math.max(0, 1.0 + modGain); 
-        const finalGain = config.gain * envVal * hardAmp * gainMod;
-        
-        voiceMix += signal * finalGain;
-    }
-    
-    return voiceMix;
   }
 }
 `;
@@ -403,7 +468,13 @@ class PrismaProcessor extends AudioWorkletProcessor {
     
     this.xm1L = 0; this.ym1L = 0;
     this.xm1R = 0; this.ym1R = 0;
+    
+    // Global Pan Phase tracker
     this.panPhase = 0;
+    
+    // Mix Buffers
+    this.mixBufferL = null;
+    this.mixBufferR = null;
 
     this.port.onmessage = (e) => {
       const msg = e.data;
@@ -416,7 +487,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
          if (msg.polyphony) this.maxPolyphony = msg.polyphony;
          if (msg.strumDuration) this.strumDuration = msg.strumDuration;
       } else if (msg.type === 'note_on') {
-        // Trigger with optional playbackMode (gate vs trigger)
         this.triggerVoice(msg.id, msg.freq, msg.voiceType, msg.mode);
       } else if (msg.type === 'note_off') {
         this.releaseVoice(msg.id);
@@ -445,7 +515,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
   }
 
   triggerVoice(id, freq, type, mode) {
-    // 1. If voice ID already active (re-trigger), use it
     for (let i = 0; i < this.voices.length; i++) {
         if (this.voices[i].active && this.voices[i].id === id) {
             this.voices[i].trigger(id, freq, type, mode);
@@ -465,13 +534,11 @@ class PrismaProcessor extends AudioWorkletProcessor {
         if (v.active) {
             activeCount++;
             if (v.releaseTime > 0) {
-                // Releasing voice
                 if (v.releaseTime < oldestReleaseTime) {
                     oldestReleaseTime = v.releaseTime;
                     oldestReleased = v;
                 }
             } else {
-                // Held voice - FIFO
                 if (v.startTime < oldestStartTime) {
                     oldestStartTime = v.startTime;
                     oldestHeld = v;
@@ -482,14 +549,11 @@ class PrismaProcessor extends AudioWorkletProcessor {
         }
     }
 
-    // 2. Use free voice if under polyphony limit
     if (activeCount < this.maxPolyphony && freeVoice) {
         freeVoice.trigger(id, freq, type, mode);
         return;
     }
 
-    // 3. Steal Priority: Oldest Released -> Oldest Held (FIFO)
-    
     const victim = oldestReleased || oldestHeld || freeVoice || this.voices[0];
     if (victim) {
         if (victim.active && victim.id !== id) {
@@ -510,8 +574,6 @@ class PrismaProcessor extends AudioWorkletProcessor {
   glideVoice(id, freq) {
     for (let i = 0; i < this.voices.length; i++) {
         if (this.voices[i].active && this.voices[i].id === id) {
-             // Glide only applies if note is sustaining (not already released/decaying triggers)
-             // But for 'trigger' mode voices, we allow bending while they decay
              this.voices[i].targetFreq = freq;
         }
     }
@@ -524,79 +586,86 @@ class PrismaProcessor extends AudioWorkletProcessor {
     if (!channelL) return true;
     const len = channelL.length;
     
-    // Oversampling Constants
+    // Performance Budget Config
+    // Standard block is 128 samples (~2.9ms @ 44.1k). We aim to stay under 80%.
+    const startTime = globalThis.performance ? globalThis.performance.now() : 0;
+    const MAX_BUDGET_MS = 2.0; 
+
+    // Oversampling setup
     const OVERSAMPLE = this.oversample;
-    const workingRate = sampleRate * OVERSAMPLE;
-    const dt = 1.0 / workingRate;
+    const workingLen = len * OVERSAMPLE;
+    const dt = 1.0 / (sampleRate * OVERSAMPLE);
+    
+    if (!this.mixBufferL || this.mixBufferL.length !== workingLen) {
+        this.mixBufferL = new Float32Array(workingLen);
+        this.mixBufferR = new Float32Array(workingLen);
+    }
+    
+    this.mixBufferL.fill(0);
+    this.mixBufferR.fill(0);
     
     const masterPreset = this.presets.normal;
     const panSpeed = (masterPreset.stereoPanSpeed !== undefined) ? masterPreset.stereoPanSpeed : 0.0;
     const panDepth = (masterPreset.stereoPanDepth !== undefined) ? masterPreset.stereoPanDepth : 0.0;
+    const initialPanPhase = this.panPhase;
 
-    for (let s = 0; s < len; s++) {
-        let accL = 0.0;
-        let accR = 0.0;
+    // --- RENDER VOICES ---
+    let voicesProcessed = 0;
+    
+    for (let i = 0; i < this.voices.length; i++) {
+        const v = this.voices[i];
+        if (v.active) {
+            // Auto-Release Check for Trigger mode
+            if ((v.mode === 'trigger' || v.type === 'strum') && v.releaseTime === 0) {
+                if (currentTime - v.startTime >= this.strumDuration) v.release();
+            }
 
-        // --- OVERSAMPLED LOOP ---
-        for (let os = 0; os < OVERSAMPLE; os++) {
-            let mixL = 0.0;
-            let mixR = 0.0;
+            const presetToUse = this.presets[v.type] || this.presets.normal;
+            
+            // Pass the global pan parameters to synchronization
+            v.renderBlock(presetToUse, dt, this.mixBufferL, this.mixBufferR, workingLen, panSpeed, panDepth, initialPanPhase);
+            voicesProcessed++;
 
-            this.panPhase += dt * panSpeed;
-            if(this.panPhase > 1.0) this.panPhase -= 1.0;
-            const autoPanVal = Math.sin(this.panPhase * TWO_PI) * panDepth;
-
-            for (let i = 0; i < this.voices.length; i++) {
-                const v = this.voices[i];
-                if (v.active) {
-                    // AUTO-RELEASE logic for Trigger Mode (e.g. Strumming)
-                    // If mode is 'trigger' (or legacy 'strum' type fallback), enforce auto-release
-                    const isTriggerMode = v.mode === 'trigger' || v.type === 'strum'; 
-                    
-                    if (isTriggerMode && v.releaseTime === 0) {
-                        if (currentTime - v.startTime >= this.strumDuration) {
-                            v.release();
-                        }
-                    }
-
-                    const presetToUse = this.presets[v.type] || this.presets.normal;
-                    const val = v.process(presetToUse, dt);
-                    
-                    if (Number.isFinite(val)) {
-                        const spreadAmount = presetToUse.spread || 0;
-                        let p = v.panPos * spreadAmount;
-                        p += autoPanVal;
-                        p = Math.max(-1.0, Math.min(1.0, p));
-                        
-                        const gainL = 0.5 * (1.0 - p);
-                        const gainR = 0.5 * (1.0 + p);
-                        const voiceGain = presetToUse.gain || 0.5;
-
-                        mixL += val * gainL * voiceGain;
-                        mixR += val * gainR * voiceGain;
-                    } else {
-                        v.hardStop();
-                    }
+            // CPU GOVERNOR: Check budget every 4 voices to minimize overhead
+            if (startTime > 0 && voicesProcessed % 4 === 0) {
+                if (globalThis.performance.now() - startTime > MAX_BUDGET_MS) {
+                    // Emergency Dropout: Stop processing remaining voices this block to prevent glitching
+                    break;
                 }
             }
-            
-            // --- NON-LINEARITIES (Apply at 2x rate to reduce aliasing) ---
-            mixL *= 0.05; // Headroom
-            mixR *= 0.05;
-            
-            // Soft Clipper
-            mixL = Math.tanh(mixL * 0.8);
-            mixR = Math.tanh(mixR * 0.8);
-
-            accL += mixL;
-            accR += mixR;
         }
+    }
+    
+    // Update global pan phase for next block
+    this.panPhase += (workingLen * dt * panSpeed);
+    while (this.panPhase > 1.0) this.panPhase -= 1.0;
 
-        // --- DOWNSAMPLE (Decimation) ---
+    // --- DOWNSAMPLE & OUTPUT ---
+    // Simple Decimation + Linear DC Blocker
+    for (let s = 0; s < len; s++) {
+        let accL = 0;
+        let accR = 0;
+        const osIdx = s * OVERSAMPLE;
+
+        for (let k = 0; k < OVERSAMPLE; k++) {
+            // Hard clip for safety before downsample
+            let sl = this.mixBufferL[osIdx + k];
+            let sr = this.mixBufferR[osIdx + k];
+            if (sl > 1.5) sl = 1.5; else if (sl < -1.5) sl = -1.5;
+            if (sr > 1.5) sr = 1.5; else if (sr < -1.5) sr = -1.5;
+            
+            // Soft Clip
+            sl = Math.tanh(sl * 0.8);
+            sr = Math.tanh(sr * 0.8);
+            
+            accL += sl;
+            accR += sr;
+        }
+        
         const outL = accL / OVERSAMPLE;
         const outR = accR / OVERSAMPLE;
 
-        // --- DC BLOCKER (Linear, safe at 1x) ---
+        // DC Blocker
         const yL = outL - this.xm1L + 0.995 * this.ym1L;
         this.xm1L = outL;
         this.ym1L = yL;
