@@ -3,6 +3,15 @@
 const DSP_UTILS = `
 const TWO_PI = 2 * Math.PI;
 
+// Increased from 4096 to 65536 to eliminate linear interpolation artifacts
+const WAVETABLE_SIZE = 65536; 
+const SINE_TABLE = new Float32Array(WAVETABLE_SIZE + 1); // +1 for simple interpolation guard
+
+// Precompute Sine Table
+for (let i = 0; i <= WAVETABLE_SIZE; i++) {
+    SINE_TABLE[i] = Math.sin((i / WAVETABLE_SIZE) * TWO_PI);
+}
+
 const DUMMY_OSC_CONFIG = {
     enabled: false,
     waveform: 'sine',
@@ -169,17 +178,28 @@ class Oscillator {
     
     switch (type) {
       case 'sine':
-        sample = Math.sin(TWO_PI * this.phase);
+        // High-performance LUT lookup
+        {
+            const index = this.phase * WAVETABLE_SIZE;
+            const i = Math.floor(index);
+            const f = index - i;
+            // Linear Interpolation from pre-computed table
+            sample = SINE_TABLE[i] + f * (SINE_TABLE[i + 1] - SINE_TABLE[i]);
+        }
         break;
       case 'triangle':
-        let t = -1.0 + (2.0 * this.phase);
-        sample = 2.0 * (Math.abs(t) - 0.5);
+        {
+            let t = -1.0 + (2.0 * this.phase);
+            sample = 2.0 * (Math.abs(t) - 0.5);
+        }
         break;
       case 'sawtooth':
+        // PolyBLEP Saw is efficient and sounds good
         sample = (2.0 * this.phase) - 1.0;
         sample -= this.blep.get(this.phase, dt * freq);
         break;
       case 'square':
+        // PolyBLEP Square
         sample = this.phase < 0.5 ? 1.0 : -1.0;
         sample += this.blep.get(this.phase, dt * freq);
         let phase2 = (this.phase + 0.5) % 1.0;
@@ -221,6 +241,13 @@ class Voice {
     this.lfoVals = new Float32Array(3);
   }
 
+  // Allow dynamic updates to sample rate when oversampling changes
+  updateSampleRate(newRate) {
+      if (this.sampleRate === newRate) return;
+      this.sampleRate = newRate;
+      this.oscs.forEach(osc => { osc.sampleRate = newRate; osc.blep.sampleRate = newRate; });
+  }
+
   trigger(id, freq, type, mode) {
     this.id = id;
     this.type = type || 'normal';
@@ -255,7 +282,7 @@ class Voice {
     return Math.max(this.envs[0].value, this.envs[1].value, this.envs[2].value);
   }
 
-  // Optimized block processing to reduce per-sample overhead and GC
+  // Optimized block processing
   renderBlock(preset, dt, bufL, bufR, len, panSpeed, panDepth, startPanPhase) {
     if (!this.active) return;
 
@@ -283,6 +310,41 @@ class Voice {
     const lfoRate1 = osc1.lfoRate || 0;
     const lfoRate2 = osc2.lfoRate || 0;
     const lfoRate3 = osc3.lfoRate || 0;
+
+    // OPTIMIZATION: Pre-calculate static frequencies if no modulation
+    let osc1StaticFreq = 0, osc2StaticFreq = 0, osc3StaticFreq = 0;
+    let osc1ModPitch = false, osc2ModPitch = false, osc3ModPitch = false;
+
+    // Check for pitch mod in Matrix or LFO
+    if (osc1.enabled) {
+        if (osc1.lfoTarget === 'pitch') osc1ModPitch = true;
+        if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc1_pitch')) osc1ModPitch = true;
+        
+        if (!osc1ModPitch) {
+            const cents = osc1.coarseDetune + osc1.fineDetune;
+            osc1StaticFreq = this.baseFreq * Math.pow(2, cents / 1200.0);
+        }
+    }
+    
+    if (osc2.enabled) {
+        if (osc2.lfoTarget === 'pitch') osc2ModPitch = true;
+        if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc2_pitch')) osc2ModPitch = true;
+        
+        if (!osc2ModPitch) {
+            const cents = osc2.coarseDetune + osc2.fineDetune;
+            osc2StaticFreq = this.baseFreq * Math.pow(2, cents / 1200.0);
+        }
+    }
+
+    if (osc3.enabled) {
+        if (osc3.lfoTarget === 'pitch') osc3ModPitch = true;
+        if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc3_pitch')) osc3ModPitch = true;
+        
+        if (!osc3ModPitch) {
+            const cents = osc3.coarseDetune + osc3.fineDetune;
+            osc3StaticFreq = this.baseFreq * Math.pow(2, cents / 1200.0);
+        }
+    }
 
     for (let s = 0; s < len; s++) {
         // --- 1. MODULATORS ---
@@ -368,8 +430,14 @@ class Voice {
             else if (osc1.lfoTarget === 'filter') hardFilter = v * d * 20;
             else if (osc1.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
 
-            const cents = osc1.coarseDetune + osc1.fineDetune + hardPitch + (modP1 * 1200);
-            const freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            let freq;
+            if (osc1ModPitch) {
+                const cents = osc1.coarseDetune + osc1.fineDetune + hardPitch + (modP1 * 1200);
+                freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            } else {
+                freq = osc1StaticFreq;
+            }
+
             let sig = this.oscs[0].process(freq, osc1.waveform, dt);
             
             const cut = osc1.filterCutoff + hardFilter + (modC1 * 5000);
@@ -388,8 +456,14 @@ class Voice {
             else if (osc2.lfoTarget === 'filter') hardFilter = v * d * 20;
             else if (osc2.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
 
-            const cents = osc2.coarseDetune + osc2.fineDetune + hardPitch + (modP2 * 1200);
-            const freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            let freq;
+            if (osc2ModPitch) {
+                const cents = osc2.coarseDetune + osc2.fineDetune + hardPitch + (modP2 * 1200);
+                freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            } else {
+                freq = osc2StaticFreq;
+            }
+
             let sig = this.oscs[1].process(freq, osc2.waveform, dt);
             
             const cut = osc2.filterCutoff + hardFilter + (modC2 * 5000);
@@ -408,8 +482,14 @@ class Voice {
             else if (osc3.lfoTarget === 'filter') hardFilter = v * d * 20;
             else if (osc3.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
 
-            const cents = osc3.coarseDetune + osc3.fineDetune + hardPitch + (modP3 * 1200);
-            const freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            let freq;
+            if (osc3ModPitch) {
+                const cents = osc3.coarseDetune + osc3.fineDetune + hardPitch + (modP3 * 1200);
+                freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            } else {
+                freq = osc3StaticFreq;
+            }
+
             let sig = this.oscs[2].process(freq, osc3.waveform, dt);
             
             const cut = osc3.filterCutoff + hardFilter + (modC3 * 5000);
@@ -444,9 +524,11 @@ const PROCESSOR_LOGIC = `
 class PrismaProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    // 2x Oversampling setup
+    // Default to enabled (Store controls this)
+    this.isOversamplingEnabled = true;
+    
+    // Initial setup
     const OVERSAMPLE = 2;
-    this.oversample = OVERSAMPLE;
     const workingRate = sampleRate * OVERSAMPLE;
 
     this.voices = [];
@@ -486,6 +568,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
       } else if (msg.type === 'config') {
          if (msg.polyphony) this.maxPolyphony = msg.polyphony;
          if (msg.strumDuration) this.strumDuration = msg.strumDuration;
+         if (msg.enableOversampling !== undefined) this.isOversamplingEnabled = msg.enableOversampling;
       } else if (msg.type === 'note_on') {
         this.triggerVoice(msg.id, msg.freq, msg.voiceType, msg.mode);
       } else if (msg.type === 'note_off') {
@@ -586,19 +669,22 @@ class PrismaProcessor extends AudioWorkletProcessor {
     if (!channelL) return true;
     const len = channelL.length;
     
-    // Performance Budget Config
-    // Standard block is 128 samples (~2.9ms @ 44.1k). We aim to stay under 80%.
-    const startTime = globalThis.performance ? globalThis.performance.now() : 0;
-    const MAX_BUDGET_MS = 2.0; 
-
-    // Oversampling setup
-    const OVERSAMPLE = this.oversample;
+    // Config based on Oversampling setting
+    const OVERSAMPLE = this.isOversamplingEnabled ? 2 : 1;
+    const workingRate = sampleRate * OVERSAMPLE;
     const workingLen = len * OVERSAMPLE;
-    const dt = 1.0 / (sampleRate * OVERSAMPLE);
+    const dt = 1.0 / workingRate;
+
+    // Performance Budget
+    const startTime = globalThis.performance ? globalThis.performance.now() : 0;
+    const MAX_BUDGET_MS = 1.5; 
     
+    // Resize buffer if needed
     if (!this.mixBufferL || this.mixBufferL.length !== workingLen) {
         this.mixBufferL = new Float32Array(workingLen);
         this.mixBufferR = new Float32Array(workingLen);
+        // Inform voices of new sample rate for filter/osc calculations
+        this.voices.forEach(v => v.updateSampleRate(workingRate));
     }
     
     this.mixBufferL.fill(0);
@@ -626,10 +712,9 @@ class PrismaProcessor extends AudioWorkletProcessor {
             v.renderBlock(presetToUse, dt, this.mixBufferL, this.mixBufferR, workingLen, panSpeed, panDepth, initialPanPhase);
             voicesProcessed++;
 
-            // CPU GOVERNOR: Check budget every 4 voices to minimize overhead
-            if (startTime > 0 && voicesProcessed % 4 === 0) {
+            // CPU GOVERNOR
+            if (startTime > 0 && voicesProcessed % 2 === 0) {
                 if (globalThis.performance.now() - startTime > MAX_BUDGET_MS) {
-                    // Emergency Dropout: Stop processing remaining voices this block to prevent glitching
                     break;
                 }
             }
@@ -640,42 +725,54 @@ class PrismaProcessor extends AudioWorkletProcessor {
     this.panPhase += (workingLen * dt * panSpeed);
     while (this.panPhase > 1.0) this.panPhase -= 1.0;
 
-    // --- DOWNSAMPLE & OUTPUT ---
-    // Simple Decimation + Linear DC Blocker
-    for (let s = 0; s < len; s++) {
-        let accL = 0;
-        let accR = 0;
-        const osIdx = s * OVERSAMPLE;
+    // --- OUTPUT ---
+    if (OVERSAMPLE === 2) {
+        // Simple Decimation + Linear DC Blocker
+        for (let s = 0; s < len; s++) {
+            let accL = 0;
+            let accR = 0;
+            const osIdx = s * 2;
 
-        for (let k = 0; k < OVERSAMPLE; k++) {
-            // Hard clip for safety before downsample
-            let sl = this.mixBufferL[osIdx + k];
-            let sr = this.mixBufferR[osIdx + k];
-            if (sl > 1.5) sl = 1.5; else if (sl < -1.5) sl = -1.5;
-            if (sr > 1.5) sr = 1.5; else if (sr < -1.5) sr = -1.5;
+            // Soft Clip before downsample
+            let sl1 = Math.tanh(this.mixBufferL[osIdx] * 0.8);
+            let sr1 = Math.tanh(this.mixBufferR[osIdx] * 0.8);
+            let sl2 = Math.tanh(this.mixBufferL[osIdx+1] * 0.8);
+            let sr2 = Math.tanh(this.mixBufferR[osIdx+1] * 0.8);
             
-            // Soft Clip
-            sl = Math.tanh(sl * 0.8);
-            sr = Math.tanh(sr * 0.8);
+            const outL = (sl1 + sl2) * 0.5;
+            const outR = (sr1 + sr2) * 0.5;
+
+            // DC Blocker
+            const yL = outL - this.xm1L + 0.995 * this.ym1L;
+            this.xm1L = outL;
+            this.ym1L = yL;
             
-            accL += sl;
-            accR += sr;
+            const yR = outR - this.xm1R + 0.995 * this.ym1R;
+            this.xm1R = outR;
+            this.ym1R = yR;
+
+            channelL[s] = yL;
+            if (channelR) channelR[s] = yR;
         }
-        
-        const outL = accL / OVERSAMPLE;
-        const outR = accR / OVERSAMPLE;
+    } else {
+        // 1x Passthrough
+        for (let s = 0; s < len; s++) {
+            // Soft Clip
+            const sl = Math.tanh(this.mixBufferL[s] * 0.8);
+            const sr = Math.tanh(this.mixBufferR[s] * 0.8);
 
-        // DC Blocker
-        const yL = outL - this.xm1L + 0.995 * this.ym1L;
-        this.xm1L = outL;
-        this.ym1L = yL;
-        
-        const yR = outR - this.xm1R + 0.995 * this.ym1R;
-        this.xm1R = outR;
-        this.ym1R = yR;
+            // DC Blocker
+            const yL = sl - this.xm1L + 0.995 * this.ym1L;
+            this.xm1L = sl;
+            this.ym1L = yL;
+            
+            const yR = sr - this.xm1R + 0.995 * this.ym1R;
+            this.xm1R = sr;
+            this.ym1R = yR;
 
-        channelL[s] = yL;
-        if (channelR) channelR[s] = yR;
+            channelL[s] = yL;
+            if (channelR) channelR[s] = yR;
+        }
     }
     
     return true;

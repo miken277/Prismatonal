@@ -1,3 +1,4 @@
+
 import { useSyncExternalStore } from 'react';
 import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState } from '../types';
 import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_ARP_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS } from '../constants';
@@ -12,9 +13,23 @@ class PrismaStore {
   private listeners: Set<() => void> = new Set();
 
   constructor() {
+    // Hardware-aware Smart Default Polyphony & Quality
+    const cores = navigator.hardwareConcurrency || 4;
+    let safePolyphony = 8;
+    let safeOversampling = true;
+
+    if (cores <= 4) {
+        safePolyphony = 6;
+        safeOversampling = false; // Disable 2x Oversampling on dual/quad core devices
+    }
+    else if (cores >= 8) {
+        safePolyphony = 12;
+        safeOversampling = true;
+    }
+
     // Load Settings with Robust Deep Merge
     const savedSettings = localStorage.getItem(SETTINGS_KEY);
-    let loadedSettings: AppSettings = DEFAULT_SETTINGS;
+    let loadedSettings: AppSettings = { ...DEFAULT_SETTINGS, polyphony: safePolyphony, enableOversampling: safeOversampling };
 
     if (savedSettings) {
         try {
@@ -22,6 +37,9 @@ class PrismaStore {
             loadedSettings = {
                 ...DEFAULT_SETTINGS,
                 ...parsed,
+                // Ensure polyphony is not ridiculously high if loading old settings on a weak device
+                polyphony: (parsed.polyphony && parsed.polyphony > 16 && cores <= 4) ? 8 : (parsed.polyphony || safePolyphony),
+                enableOversampling: (parsed.enableOversampling !== undefined) ? parsed.enableOversampling : safeOversampling,
                 layoutApproach: parsed.layoutApproach || DEFAULT_SETTINGS.layoutApproach,
                 limitDepths: { ...DEFAULT_SETTINGS.limitDepths, ...(parsed.limitDepths || {}) },
                 limitComplexities: { ...DEFAULT_SETTINGS.limitComplexities, ...(parsed.limitComplexities || {}) },
@@ -32,7 +50,7 @@ class PrismaStore {
             };
         } catch (e) {
             console.error("Failed to parse settings, reverting to defaults", e);
-            loadedSettings = DEFAULT_SETTINGS;
+            loadedSettings = { ...DEFAULT_SETTINGS, polyphony: safePolyphony, enableOversampling: safeOversampling };
         }
     }
 

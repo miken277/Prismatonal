@@ -151,6 +151,7 @@ export interface AppSettings {
   // Audio Settings
   baseFrequency: number; // Hz for 1/1
   audioLatencyHint: 'interactive' | 'balanced' | 'playback'; // Buffer size control
+  enableOversampling: boolean; // New: Performance vs Quality toggle
 
   // Voice Leading / Focus Mode
   isVoiceLeadingEnabled: boolean;

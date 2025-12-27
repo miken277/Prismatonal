@@ -127,6 +127,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   layerOrder: [15, 13, 11, 9, 7, 5, 3, 1], 
   baseFrequency: 196.00, // G3
   audioLatencyHint: 'playback',
+  enableOversampling: true, // Default to true, Store will override for weak devices
   isVoiceLeadingEnabled: true, 
   voiceLeadingStrength: 0.3, 
   isVoiceLeadingAnimationEnabled: true,
@@ -152,7 +153,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   isSustainEnabled: false, // Set to false so Strings starts Normal; Drone logic overrides this when selected
   isStrumEnabled: false, // Default to false so String behaves like a normal Gate instrument
   isPitchSnapEnabled: true,
-  polyphony: 16, 
+  polyphony: 8, // Reduced from 16 to 8 for better mobile stability by default
   pitchOffLocked: false,
   volumeLocked: false,
   backgroundMode: 'rainbow',

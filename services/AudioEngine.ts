@@ -89,7 +89,8 @@ class AudioEngine {
           this.workletNode.port.postMessage({ 
               type: 'config', 
               polyphony: settings.polyphony,
-              strumDuration: settings.strumDuration
+              strumDuration: settings.strumDuration,
+              enableOversampling: settings.enableOversampling
           });
       }
   }
@@ -197,7 +198,8 @@ class AudioEngine {
                 this.workletNode.port.postMessage({ 
                     type: 'config', 
                     polyphony: store.getSnapshot().settings.polyphony,
-                    strumDuration: store.getSnapshot().settings.strumDuration
+                    strumDuration: store.getSnapshot().settings.strumDuration,
+                    enableOversampling: store.getSnapshot().settings.enableOversampling
                 });
 
                 this.setupFX();
