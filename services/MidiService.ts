@@ -4,6 +4,9 @@ import { createHostAdapter, IHostAdapter, MidiDevice, TransportCallback } from '
 // Re-export for consumers (SettingsModal, etc.)
 export type { MidiDevice };
 
+type SustainListener = (active: boolean) => void;
+type GlobalBendListener = (semitones: number) => void;
+
 class MidiService {
     private adapter: IHostAdapter | null = null;
     private initialized = false;
@@ -11,6 +14,9 @@ class MidiService {
     // Channel Management for Polyphonic Pitch Bend (MPE-style)
     private activeNotes: Map<string, { channel: number, note: number }> = new Map(); 
     private nextChannel = 0; // 0-15 (corresponding to Ch 1-16)
+
+    private sustainListeners: Set<SustainListener> = new Set();
+    private globalBendListeners: Set<GlobalBendListener> = new Set();
 
     constructor() {}
 
@@ -22,11 +28,65 @@ class MidiService {
         if (this.adapter) {
             console.log(`Initializing MIDI: ${this.adapter.type.toUpperCase()} Backend Detected`);
             this.initialized = true;
+            
+            // Set up input listening
+            this.adapter.setInputCallback((status, d1, d2) => {
+                this.handleIncomingMidi(status, d1, d2);
+            });
+
             return true;
         } else {
             console.warn("MIDI not supported in this environment");
             return false;
         }
+    }
+
+    private handleIncomingMidi(status: number, d1: number, d2: number) {
+        const channel = status & 0x0F; // 0-15
+        const type = status & 0xF0;
+
+        // Control Change (0xB0)
+        if (type === 0xB0) {
+            // CC 64: Sustain Pedal
+            if (d1 === 64) {
+                const isActive = d2 >= 64;
+                this.notifySustainListeners(isActive);
+            }
+        }
+        // Pitch Bend (0xE0)
+        // Listen strictly on Channel 1 (index 0) for Global/Master Bend
+        else if (type === 0xE0 && channel === 0) {
+            const lsb = d1;
+            const msb = d2;
+            const value = (msb << 7) + lsb; // 0 to 16383, center 8192
+            
+            // Normalize to -1.0 to 1.0
+            const normalized = (value - 8192) / 8192;
+            
+            // Default Master Bend Range is +/- 2 semitones
+            const range = 2; 
+            const semitones = normalized * range;
+            
+            this.notifyGlobalBendListeners(semitones);
+        }
+    }
+
+    public onSustain(cb: SustainListener) {
+        this.sustainListeners.add(cb);
+        return () => { this.sustainListeners.delete(cb); };
+    }
+
+    public onGlobalBend(cb: GlobalBendListener) {
+        this.globalBendListeners.add(cb);
+        return () => { this.globalBendListeners.delete(cb); };
+    }
+
+    private notifySustainListeners(active: boolean) {
+        this.sustainListeners.forEach(cb => cb(active));
+    }
+
+    private notifyGlobalBendListeners(semitones: number) {
+        this.globalBendListeners.forEach(cb => cb(semitones));
     }
 
     public async getOutputs(): Promise<MidiDevice[]> {
@@ -51,6 +111,20 @@ class MidiService {
     private sendBytes(bytes: number[]) {
         if (this.adapter) {
             this.adapter.sendMidi(bytes);
+        }
+    }
+
+    public sendControlChange(cc: number, value: number, channel: number = 0) {
+        this.sendBytes([0xB0 | channel, cc, value]);
+    }
+
+    public sendSustain(active: boolean) {
+        const val = active ? 127 : 0;
+        // In MPE mode, it's safest to send Sustain to ALL channels to ensure voices on rotated channels hold.
+        // Some synths only listen to Ch 1, but MPE specs usually treat CCs on Ch 1 as "Common" 
+        // or require per-channel redundancy. We'll do redundancy to be safe.
+        for (let ch = 0; ch < 16; ch++) {
+            this.sendControlChange(64, val, ch);
         }
     }
 
@@ -120,6 +194,8 @@ class MidiService {
             this.sendBytes([0xB0 | ch, 120, 0]);
             // Reset Pitch Bend
             this.sendBytes([0xE0 | ch, 0, 64]);
+            // Reset Sustain
+            this.sendBytes([0xB0 | ch, 64, 0]);
         }
     }
 }

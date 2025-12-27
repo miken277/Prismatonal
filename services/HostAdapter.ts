@@ -11,6 +11,7 @@ export interface TransportData {
 }
 
 export type TransportCallback = (data: TransportData) => void;
+export type MidiMessageCallback = (status: number, data1: number, data2: number) => void;
 
 // Global augmentations for bridge detection
 declare global {
@@ -32,6 +33,7 @@ export interface IHostAdapter {
     setOutput(id: string | null): void;
     sendMidi(bytes: number[]): void;
     setTransportCallback(cb: TransportCallback | null): void;
+    setInputCallback(cb: MidiMessageCallback | null): void;
 }
 
 /**
@@ -41,11 +43,20 @@ export class WebHostAdapter implements IHostAdapter {
     type = 'web' as const;
     private access: any = null;
     private output: any = null;
+    private inputCallback: MidiMessageCallback | null = null;
 
     async init(): Promise<boolean> {
         if ((navigator as any).requestMIDIAccess) {
             try {
                 this.access = await (navigator as any).requestMIDIAccess();
+                this.setupInputs();
+                
+                // Handle hot-plugging
+                this.access.onstatechange = (e: any) => {
+                    if (e.port.type === 'input' && e.port.state === 'connected') {
+                        this.setupInputs();
+                    }
+                };
                 return true;
             } catch (e) {
                 console.error("Web MIDI Access Refused", e);
@@ -53,6 +64,20 @@ export class WebHostAdapter implements IHostAdapter {
             }
         }
         return false;
+    }
+
+    private setupInputs() {
+        if (!this.access) return;
+        this.access.inputs.forEach((input: any) => {
+            // Avoid re-binding if already bound (though simple reassignment is safe)
+            input.onmidimessage = (e: any) => {
+                if (this.inputCallback && e.data.length >= 2) {
+                    // Normalize data: Status, Data1, Data2 (0 if not present)
+                    const d2 = e.data.length > 2 ? e.data[2] : 0;
+                    this.inputCallback(e.data[0], e.data[1], d2);
+                }
+            };
+        });
     }
 
     async getOutputs(): Promise<MidiDevice[]> {
@@ -81,6 +106,12 @@ export class WebHostAdapter implements IHostAdapter {
     setTransportCallback(cb: TransportCallback | null) {
         // Web MIDI doesn't strictly have a transport standard without WebMIDI Clock parsing.
         // Future implementation could parse MIDI Clock messages here.
+    }
+
+    setInputCallback(cb: MidiMessageCallback | null) {
+        this.inputCallback = cb;
+        // Re-bind existing inputs to the new callback
+        this.setupInputs();
     }
 }
 
@@ -115,6 +146,17 @@ export class ElectronHostAdapter implements IHostAdapter {
             });
         }
     }
+
+    setInputCallback(cb: MidiMessageCallback | null) {
+        if (window.electronMidi && window.electronMidi.receive && cb) {
+            window.electronMidi.receive('midi-input', (_: any, bytes: number[]) => {
+               if (bytes.length >= 2) {
+                   const d2 = bytes.length > 2 ? bytes[2] : 0;
+                   cb(bytes[0], bytes[1], d2);
+               }
+            });
+        }
+    }
 }
 
 /**
@@ -142,8 +184,12 @@ export class VSTHostAdapter implements IHostAdapter {
     }
 
     setTransportCallback(cb: TransportCallback | null) {
-        // VST Bridge would inject JS to call a global function on frame updates
-        // This is a placeholder for that integration
+        // VST Bridge placeholder
+    }
+
+    setInputCallback(cb: MidiMessageCallback | null) {
+        // VST Bridge placeholder for inbound MIDI
+        // e.g. window.onMidiMessage = ...
     }
 }
 

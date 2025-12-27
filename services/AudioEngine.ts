@@ -450,6 +450,14 @@ class AudioEngine {
       this.updateFX();
   }
 
+  // New method for global pitch bend
+  public setGlobalBend(semitones: number) {
+      if (this.workletNode) {
+          const ratio = Math.pow(2, semitones / 12.0);
+          this.workletNode.port.postMessage({ type: 'config', globalBend: ratio });
+      }
+  }
+
   public async startVoice(id: string, ratio: number, baseFrequency: number, presetSlot: PlayMode = 'normal', playbackMode: PlaybackMode = 'gate') {
     if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
         this.ctx.resume();

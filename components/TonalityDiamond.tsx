@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode } from '../types';
 import { generateLattice } from '../services/LatticeService';
-import { getPitchRatioFromScreenDelta, getRainbowPeriod } from '../services/ProjectionService';
+import { getPitchRatioFromScreenDelta, getRainbowPeriod, PITCH_SCALE } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
 
@@ -51,8 +51,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   // Cache the bounding rect to avoid reflows on every pointer move
   const canvasRectRef = useRef<DOMRect | null>(null);
 
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
   const animationFrameRef = useRef<number>(0);
   
+  // Global Bend Ref to avoid re-renders. 0 = No Bend.
+  const globalBendRef = useRef<number>(0);
+
   const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -111,6 +116,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       });
       return unsubscribe;
   }, [audioEngine]);
+
+  // Listen for Global Bend from MidiService
+  useEffect(() => {
+      const unsubscribe = midiService.onGlobalBend((semitones) => {
+          globalBendRef.current = semitones;
+      });
+      return unsubscribe;
+  }, []);
 
   const audioLatchedNodes = useMemo(() => {
       // Map<NodeId, ModeNumber>
@@ -648,8 +661,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           canvasRectRef.current = rect;
       }
       
+      const bend = globalBendRef.current;
+      const currentGlobalScale = globalScaleRef.current * viewZoomRef.current;
+      const pixelOffset = -bend * (PITCH_SCALE / 12) * currentGlobalScale;
+
       const x = clientX - rect.left;
-      const y = clientY - rect.top;
+      const y = clientY - (rect.top + pixelOffset); // Adjust Y for Floating Grid
 
       const centerOffset = dynamicSizeRef.current / 2;
       const effectiveScale = globalScaleRef.current * viewZoomRef.current;
@@ -742,11 +759,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
 
         // 2. Performance Logic (Cursor Voice / Bend)
-        // Trigger a temporary voice if:
-        // - Bend is enabled (creates the "bent" voice on top of sustain)
-        // - OR Sustain is disabled (standard momentary play)
-        // - OR Mode is Plucked (always momentary)
-        
         if (isBendEnabled || !isSustainActive || latchMode === 3) {
              const newCursor: ActiveCursor = {
                 pointerId: e.pointerId,
@@ -767,9 +779,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 return next;
             });
 
-            // Start the cursor voice
-            // Determine preset: if Sustain is on, this is the "bending voice", likely 'normal' preset works best
-            // If Sustain is off, use standard preset logic
             const { preset, playback } = getVoiceParams(latchMode, settings.isStrumEnabled);
             const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
             
@@ -797,11 +806,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (uiUnlocked) return;
-    
-    // Safety check: verify this cursor exists in REF
     if (!activeCursorsRef.current.has(e.pointerId)) return;
 
-    // Direct ref usage prevents stale closure state
     const cursor = activeCursorsRef.current.get(e.pointerId)!;
     
     cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -819,13 +825,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
     const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
     
-    // Check for Sustain Mode (Drone or Strings with Sustain ON)
     const isSustainingInstrument = latchMode === 1 || latchMode === 2;
     const isSustainActive = isCurrentSustainEnabled;
     const isBendEnabled = settingsRef.current.isPitchBendEnabled;
-    
-    // If Bend is enabled, we prioritize bending the cursor voice.
-    // If Bend is disabled AND Sustain is on, we do "Paint Mode" (latch neighbors).
     
     const isBending = isBendEnabled && !!cursor.originNodeId;
 
@@ -834,11 +836,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
          const centerOffset = dynamicSizeRef.current / 2;
          const rect = canvasRectRef.current || dynamicCanvasRef.current.getBoundingClientRect();
          
+         const bend = globalBendRef.current;
+         const effectiveScale = globalScaleRef.current * viewZoomRef.current;
+         const pixelOffset = -bend * (PITCH_SCALE / 12) * effectiveScale;
+
          const originNode = nodeMapRef.current.get(cursor.originNodeId!);
          if (originNode) {
-             const effectiveScale = globalScaleRef.current * viewZoomRef.current;
              const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
-             const originScreenY = rect.top + (originNode.y * spacing) + centerOffset;
+             
+             // Origin Y adjusted for float
+             const originScreenY = (rect.top + pixelOffset) + (originNode.y * spacing) + centerOffset;
              
              const currentDeltaY = e.clientY - originScreenY;
              
@@ -847,7 +854,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              
              const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
              
-             // Simple Glide
              audioEngine.glideVoice(voiceId, finalRatio, settingsRef.current.baseFrequency);
              if (settingsRef.current.midiEnabled) midiService.pitchBend(voiceId, finalRatio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
          }
@@ -855,28 +861,22 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
     // --- TRIGGER / STOP LOGIC ---
     if (hitNode) {
-         // CROSSING LOGIC FOR HYBRID MODE (Bend + Sustain)
-         // Allow triggering "as if clicked" (toggle) when crossing the center of a node while dragging
          if (isSustainingInstrument && isSustainActive && isBendEnabled) {
              const centerOffset = dynamicSizeRef.current / 2;
              const rect = canvasRectRef.current || dynamicCanvasRef.current!.getBoundingClientRect();
              const effectiveScale = globalScaleRef.current * viewZoomRef.current;
              const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
              
-             // Calculate Hit Node Center Y on screen
-             const hitNodeScreenY = rect.top + (hitNode.y * spacing) + centerOffset;
+             const bend = globalBendRef.current;
+             const pixelOffset = -bend * (PITCH_SCALE / 12) * effectiveScale;
+
+             // Hit Node Y adjusted for float
+             const hitNodeScreenY = (rect.top + pixelOffset) + (hitNode.y * spacing) + centerOffset;
              
-             // Relative positions (Previous vs Current frame)
              const prevRelY = cursor.currentY - hitNodeScreenY;
              const currRelY = e.clientY - hitNodeScreenY;
              
-             // Band Entry Logic: More forgiving than zero-crossing.
-             // Trigger if we enter a "sweet spot" band around the center from outside.
-             const threshold = 12 * effectiveScale; // Scaled tolerance (e.g. 12px base)
-             
-             // Check if we entered the band from above (prev > T, curr <= T)
-             // Or from below (prev < -T, curr >= -T)
-             // Or jumped entirely across the band (prev > T && curr < -T) or vice versa
+             const threshold = 12 * effectiveScale; 
              
              const enteredFromTop = prevRelY > threshold && currRelY <= threshold;
              const enteredFromBottom = prevRelY < -threshold && currRelY >= -threshold;
@@ -901,11 +901,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
     if (cursor.hoverNodeId !== hitId) {
         
-        // Stop old voice if leaving, UNLESS bending from origin
         const isLeavingOrigin = cursor.hoverNodeId === cursor.originNodeId;
         const shouldSustainBend = isBending && isLeavingOrigin;
 
-        // If momentary/melodic voice exists (cursor based)
         if (!shouldSustainBend && cursor.hoverNodeId) {
              if (playback === 'gate') {
                  const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
@@ -914,12 +912,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              }
         }
 
-        // Trigger NEW note (Non-Hybrid Scenarios)
         if (hitNode) {
              const topLayer = settingsRef.current.layerOrder[settingsRef.current.layerOrder.length - 1];
              if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
              
-             // Standard Paint Logic: Only if Sustain ON and Bend OFF
              if (isSustainingInstrument && isSustainActive && !isBendEnabled) {
                 const isDifferentNode = hitNode.id !== cursor.originNodeId;
                 if (hasMoved || isDifferentNode) {
@@ -933,7 +929,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     }
                 }
              } 
-             // Momentary Logic
              else if (!isBending) {
                  const { preset, playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
                  const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
@@ -967,7 +962,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
         const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
         
-        // Stop cursor voice
         if (cursor.originNodeId && settingsRef.current.isPitchBendEnabled) {
             const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
             audioEngine.stopVoice(voiceId);
@@ -997,7 +991,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const render = (time: number) => {
       const bgCanvas = bgLineCanvasRef.current;
+      const staticCanvas = staticCanvasRef.current;
       const activeCanvas = dynamicCanvasRef.current;
+      const wrapper = wrapperRef.current;
+      
+      if (wrapper) {
+          const bend = globalBendRef.current;
+          const currentGlobalScale = globalScaleRef.current * viewZoomRef.current;
+          const pixelOffset = -bend * (PITCH_SCALE / 12) * currentGlobalScale;
+          const transform = `translate3d(0px, ${pixelOffset}px, 0px)`;
+          wrapper.style.transform = transform;
+      }
+
       if (!bgCanvas || !activeCanvas) {
            animationFrameRef.current = requestAnimationFrame(render);
            return;
@@ -1007,16 +1012,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const activeCtx = activeCanvas.getContext('2d', { alpha: true });
       if (!bgCtx || !activeCtx) return; 
       
-      const currentSettings = settingsRef.current;
-      const currentVisualLatched = visualLatchedRef.current; 
-      const currentActiveLines = activeLinesRef.current;
-      const currentBrightenedLines = brightenedLinesRef.current;
       const size = dynamicSizeRef.current;
-      const cursors = activeCursorsRef.current;
-      const currentGlobalScale = globalScaleRef.current * viewZoomRef.current; // Multiply global scale by zoom
-
-      const isJIOverride = currentSettings.tuningSystem === 'ji' && currentSettings.layoutApproach !== 'lattice' && currentSettings.layoutApproach !== 'diamond';
-      
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
 
@@ -1037,14 +1033,31 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           viewH = scrollContainerRef.current.clientHeight;
       }
       
-      bgCtx.clearRect(viewX, viewY, viewW, viewH);
-      activeCtx.clearRect(viewX, viewY, viewW, viewH);
+      const bend = globalBendRef.current;
+      const currentGlobalScale = globalScaleRef.current * viewZoomRef.current;
+      const pixelOffset = -bend * (PITCH_SCALE / 12) * currentGlobalScale;
+      
+      const viewPad = 300; 
+      const leftBound = viewX - viewPad;
+      const rightBound = viewX + viewW + viewPad;
+      const topBound = viewY - viewPad - pixelOffset; 
+      const bottomBound = viewY + viewH + viewPad - pixelOffset;
+      
+      bgCtx.clearRect(leftBound, topBound, rightBound - leftBound, bottomBound - topBound);
+      activeCtx.clearRect(leftBound, topBound, rightBound - leftBound, bottomBound - topBound);
+
+      const currentSettings = settingsRef.current;
+      const currentVisualLatched = visualLatchedRef.current; 
+      const currentActiveLines = activeLinesRef.current;
+      const currentBrightenedLines = brightenedLinesRef.current;
+      const cursors = activeCursorsRef.current;
 
       const centerOffset = size / 2;
       const spacing = currentSettings.buttonSpacingScale * currentGlobalScale;
       const baseRadius = (60 * currentSettings.buttonSizeScale * currentGlobalScale) / 2;
       const isDiamond = currentSettings.buttonShape === ButtonShape.DIAMOND;
       const colorCache = currentSettings.colors;
+      const isJIOverride = currentSettings.tuningSystem === 'ji' && currentSettings.layoutApproach !== 'lattice' && currentSettings.layoutApproach !== 'diamond';
 
       const animationSpeed = (currentSettings.voiceLeadingAnimationSpeed || 2.0) * 0.33;
       const rawPhase = (time * 0.001 * animationSpeed);
@@ -1052,12 +1065,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       
       bgCtx.lineCap = 'round';
       activeCtx.lineCap = 'round';
-
-      const viewPad = 100;
-      const leftBound = viewX - viewPad;
-      const rightBound = viewX + viewW + viewPad;
-      const topBound = viewY - viewPad;
-      const bottomBound = viewY + viewH + viewPad;
       
       if (currentBrightenedLines.length > 0) {
             bgCtx.setLineDash([]);
@@ -1137,7 +1144,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              activeCtx.closePath();
              
              if (isJIOverride) {
-                 activeCtx.fillStyle = '#fff'; // Latched nodes glow pure white in alternate layouts
+                 activeCtx.fillStyle = '#fff';
              } else {
                  const grad = activeCtx.createLinearGradient(x, y - radius, x, y + radius);
                  grad.addColorStop(0.45, cTop);
@@ -1197,8 +1204,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                          let cx = 0, cy = 0;
                          if (scrollContainerRef.current) {
                              const r = scrollContainerRef.current.getBoundingClientRect();
+                             // Compensate for CSS Transform when mapping mouse pos to canvas space
                              cx = (pos.x - r.left) + scrollContainerRef.current.scrollLeft;
-                             cy = (pos.y - r.top) + scrollContainerRef.current.scrollTop;
+                             cy = (pos.y - r.top) + scrollContainerRef.current.scrollTop - pixelOffset;
                          }
                          activeCtx.beginPath();
                          activeCtx.moveTo(nx, ny);
@@ -1263,7 +1271,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   return (
     <div ref={scrollContainerRef} className="w-full h-full overflow-auto bg-slate-950 relative" style={{ touchAction: 'none' }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} onPointerCancel={handlePointerUp}>
-        <div className="relative" style={getBackgroundStyle()}>
+        <div ref={wrapperRef} className="relative" style={getBackgroundStyle()}>
            <canvas ref={bgLineCanvasRef} className="absolute top-0 left-0 z-[5] pointer-events-none" style={{ width: '100%', height: '100%' }} />
            <canvas ref={staticCanvasRef} className="absolute top-0 left-0 z-[10] pointer-events-none" style={{ width: '100%', height: '100%' }} />
            <canvas ref={dynamicCanvasRef} className="absolute top-0 left-0 z-[20] pointer-events-none" style={{ width: '100%', height: '100%' }} />

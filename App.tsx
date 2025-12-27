@@ -56,11 +56,33 @@ const App: React.FC = () => {
   useEffect(() => {
       audioEngine.updateSettings(settings);
   }, [settings]);
-  // -------------------------
+  
+  // --- MIDI INPUT SYNC (SUSTAIN & BEND) ---
+  useEffect(() => {
+      // Subscribe to external MIDI sustain events
+      const unsubscribeSustain = midiService.onSustain((isActive) => {
+          setSustainStates(prev => ({ ...prev, [latchMode]: isActive }));
+          updateSettings(prev => ({ ...prev, isSustainEnabled: isActive }));
+      });
+
+      // Subscribe to external MIDI Pitch Bend (Global)
+      // Direct call to AudioEngine to avoid React Render Cycle for high-frequency events
+      const unsubscribeBend = midiService.onGlobalBend((semitones) => {
+          audioEngine.setGlobalBend(semitones);
+      });
+
+      return () => {
+          unsubscribeSustain();
+          unsubscribeBend();
+      };
+  }, [latchMode, updateSettings]);
 
   useEffect(() => {
     const warmup = (e: Event) => {
         audioEngine.resume().then(() => {});
+        // Initialize MIDI on first interaction if enabled, or just to ensure listeners are ready
+        if (settings.midiEnabled) midiService.init(); 
+        
         window.removeEventListener('pointerdown', warmup);
         window.removeEventListener('keydown', warmup);
         window.removeEventListener('touchstart', warmup);
@@ -81,7 +103,7 @@ const App: React.FC = () => {
         window.removeEventListener('touchend', warmup);
         window.removeEventListener('click', warmup);
     };
-  }, []);
+  }, [settings.midiEnabled]);
 
   useEffect(() => {
       document.documentElement.style.setProperty('--ui-scale', effectiveScale.toString());
@@ -308,6 +330,11 @@ const App: React.FC = () => {
           isSustainEnabled: willEnable,
           // DECOUPLED: Do NOT disable Bend when Sustain is toggled
       }));
+
+      // Send MIDI Sustain (CC 64) if enabled
+      if (settings.midiEnabled) {
+          midiService.sendSustain(willEnable);
+      }
   };
 
   const handleBendToggle = () => {

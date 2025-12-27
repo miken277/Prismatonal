@@ -283,7 +283,7 @@ class Voice {
   }
 
   // Optimized block processing
-  renderBlock(preset, dt, bufL, bufR, len, panSpeed, panDepth, startPanPhase) {
+  renderBlock(preset, dt, bufL, bufR, len, panSpeed, panDepth, startPanPhase, globalBend) {
     if (!this.active) return;
 
     // --- FREQ GLIDE ---
@@ -312,6 +312,7 @@ class Voice {
     const lfoRate3 = osc3.lfoRate || 0;
 
     // OPTIMIZATION: Pre-calculate static frequencies if no modulation
+    // Apply globalBend to the base frequency here
     let osc1StaticFreq = 0, osc2StaticFreq = 0, osc3StaticFreq = 0;
     let osc1ModPitch = false, osc2ModPitch = false, osc3ModPitch = false;
 
@@ -322,7 +323,7 @@ class Voice {
         
         if (!osc1ModPitch) {
             const cents = osc1.coarseDetune + osc1.fineDetune;
-            osc1StaticFreq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            osc1StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
         }
     }
     
@@ -332,7 +333,7 @@ class Voice {
         
         if (!osc2ModPitch) {
             const cents = osc2.coarseDetune + osc2.fineDetune;
-            osc2StaticFreq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            osc2StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
         }
     }
 
@@ -342,7 +343,7 @@ class Voice {
         
         if (!osc3ModPitch) {
             const cents = osc3.coarseDetune + osc3.fineDetune;
-            osc3StaticFreq = this.baseFreq * Math.pow(2, cents / 1200.0);
+            osc3StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
         }
     }
 
@@ -433,7 +434,7 @@ class Voice {
             let freq;
             if (osc1ModPitch) {
                 const cents = osc1.coarseDetune + osc1.fineDetune + hardPitch + (modP1 * 1200);
-                freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+                freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
             } else {
                 freq = osc1StaticFreq;
             }
@@ -459,7 +460,7 @@ class Voice {
             let freq;
             if (osc2ModPitch) {
                 const cents = osc2.coarseDetune + osc2.fineDetune + hardPitch + (modP2 * 1200);
-                freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+                freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
             } else {
                 freq = osc2StaticFreq;
             }
@@ -485,7 +486,7 @@ class Voice {
             let freq;
             if (osc3ModPitch) {
                 const cents = osc3.coarseDetune + osc3.fineDetune + hardPitch + (modP3 * 1200);
-                freq = this.baseFreq * Math.pow(2, cents / 1200.0);
+                freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
             } else {
                 freq = osc3StaticFreq;
             }
@@ -526,6 +527,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
     super();
     // Default to enabled (Store controls this)
     this.isOversamplingEnabled = true;
+    this.globalBendMultiplier = 1.0; // Master pitch bend ratio
     
     // Initial setup
     const OVERSAMPLE = 2;
@@ -569,6 +571,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
          if (msg.polyphony) this.maxPolyphony = msg.polyphony;
          if (msg.strumDuration) this.strumDuration = msg.strumDuration;
          if (msg.enableOversampling !== undefined) this.isOversamplingEnabled = msg.enableOversampling;
+         if (msg.globalBend !== undefined) this.globalBendMultiplier = msg.globalBend;
       } else if (msg.type === 'note_on') {
         this.triggerVoice(msg.id, msg.freq, msg.voiceType, msg.mode);
       } else if (msg.type === 'note_off') {
@@ -709,7 +712,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
             const presetToUse = this.presets[v.type] || this.presets.normal;
             
             // Pass the global pan parameters to synchronization
-            v.renderBlock(presetToUse, dt, this.mixBufferL, this.mixBufferR, workingLen, panSpeed, panDepth, initialPanPhase);
+            v.renderBlock(presetToUse, dt, this.mixBufferL, this.mixBufferR, workingLen, panSpeed, panDepth, initialPanPhase, this.globalBendMultiplier);
             voicesProcessed++;
 
             // CPU GOVERNOR
