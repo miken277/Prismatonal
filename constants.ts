@@ -149,10 +149,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   nodeTextSizeScale: 1.0,
   showFractionBar: false,
   isPitchBendEnabled: false, 
-  isSustainEnabled: true, // Default to true so Drone behaves as legacy Drone initially
+  isSustainEnabled: false, // Set to false so Strings starts Normal; Drone logic overrides this when selected
   isStrumEnabled: false, // Default to false so String behaves like a normal Gate instrument
   isPitchSnapEnabled: true,
-  polyphony: 4, 
+  polyphony: 16, 
   pitchOffLocked: false,
   volumeLocked: false,
   backgroundMode: 'rainbow',

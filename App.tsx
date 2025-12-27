@@ -276,11 +276,16 @@ const App: React.FC = () => {
       setLatchMode(newMode);
       
       // 3. Restore new mode's sustain state
-      const nextSustainState = sustainStates[newMode] ?? false;
+      // FORCE RESET for Strings (Mode 2) to ensure it starts Clean/Normal
+      // But preserve logic for Drone (Mode 1) which likely wants to remember
+      let nextSustainState = sustainStates[newMode] ?? false;
+      if (newMode === 2) nextSustainState = false; // Always default Strings to Normal
+
       updateSettings(prev => ({
           ...prev,
           isSustainEnabled: nextSustainState,
-          isPitchBendEnabled: nextSustainState ? false : prev.isPitchBendEnabled // Auto-disable bend if sustain is on
+          // DECOUPLED: Do NOT force Bend off when switching instruments or toggling sustain
+          // We respect the current global bend setting unless explicitly changed
       }));
   };
 
@@ -291,19 +296,17 @@ const App: React.FC = () => {
   const handleSustainToggle = () => {
       const willEnable = !settings.isSustainEnabled;
       
-      if (!willEnable) {
-          // If turning Sustain OFF, clear latches ONLY for the current mode
-          diamondRef.current?.clearLatches(latchMode);
-      }
-
+      // DECOUPLED: We NO LONGER clear latches here. 
+      // Toggling sustain off just stops new notes from latching.
+      // Existing latches persist until right-click/clear.
+      
       // Update Local Map immediately
       setSustainStates(prev => ({ ...prev, [latchMode]: willEnable }));
 
       updateSettings(prev => ({
           ...prev,
           isSustainEnabled: willEnable,
-          // Exclusivity: Turning Sustain ON turns Bend OFF
-          isPitchBendEnabled: willEnable ? false : prev.isPitchBendEnabled
+          // DECOUPLED: Do NOT disable Bend when Sustain is toggled
       }));
   };
 
@@ -311,15 +314,11 @@ const App: React.FC = () => {
       updateSettings(prev => ({ 
           ...prev, 
           isPitchBendEnabled: !prev.isPitchBendEnabled,
-          // Exclusivity: Turning Bend ON turns Sustain OFF
-          isSustainEnabled: !prev.isPitchBendEnabled ? false : prev.isSustainEnabled
+          // DECOUPLED: Do NOT disable Sustain when Bend is toggled
       }));
       
-      // If turning Bend ON, implicit Sustain OFF
-      if (!settings.isPitchBendEnabled) {
-           setSustainStates(prev => ({ ...prev, [latchMode]: false }));
-           diamondRef.current?.clearLatches(latchMode);
-      }
+      // If turning Bend ON, we no longer force Sustain OFF or clear latches
+      // This allows the Hybrid Bend+Sustain mode
   };
 
   const handleSustainStatusChange = (modes: number[]) => {
