@@ -149,6 +149,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   baseFrequency: 196.00, // G3
   audioLatencyHint: 'playback',
   enableOversampling: true, // Default to true, Store will override for weak devices
+  wavetableSize: 8192,
+  interpolationType: 'cubic',
   isVoiceLeadingEnabled: true, 
   voiceLeadingStrength: 0.3, 
   isVoiceLeadingAnimationEnabled: true,
@@ -257,6 +259,31 @@ const p = (name: string, cat: string, osc1: Partial<OscillatorConfig>, osc2: Par
     }
     return { ...base, ...extra };
 };
+
+// --- DIAGNOSTIC PATCHES ---
+const DIAGNOSTIC_PATCHES = [
+    p("FM Stress Test", "Diagnostics", 
+        // Osc 1: Carrier (Sine)
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.8, attack: 0.1, decay: 0.5, sustain: 1.0, release: 0.5 }, 
+        // Osc 2: Disabled
+        { enabled: false }, 
+        // Osc 3: Disabled
+        { enabled: false }, 
+        { 
+            gain: 0.8, 
+            spread: 0, 
+            reverbMix: 0, 
+            delayMix: 0,
+            // Modulate Osc 1 Pitch with LFO 1 at Audio Rate (150Hz) for Deep FM
+            // This creates sidebands that will alias/hiss if interpolation is poor
+            modMatrix: [
+                { id: 'diag-fm', enabled: true, source: 'lfo1', target: 'osc1_pitch', amount: 80 }
+            ],
+            // Pre-configure LFO 1 to run fast
+            osc1: { ...defaultDisabledOsc, enabled: true, waveform: WaveformType.SINE, lfoRate: 150, lfoDepth: 0, lfoTarget: 'none' }
+        }
+    )
+];
 
 // --- PRESERVED PATCHES (With Categories) ---
 const preservedDeepOcean = p("Deep Ocean", "Atmosphere",
@@ -391,6 +418,7 @@ export const PRESETS: SynthPreset[] = [
     preservedNoiseWash, // Default
     preservedDeepOcean,
     preservedAnalogStrings,
+    ...DIAGNOSTIC_PATCHES,
     ...PLUCKED_PATCHES,
     ...STRINGS_PATCHES,
     ...ATMOSPHERE_PATCHES,

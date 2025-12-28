@@ -46,7 +46,9 @@ class PrismaStore {
                 colors: { ...DEFAULT_COLORS, ...(parsed.colors || {}) }, 
                 uiPositions: { ...DEFAULT_SETTINGS.uiPositions, ...(parsed.uiPositions || {}) },
                 arpeggios: parsed.arpeggios || DEFAULT_SETTINGS.arpeggios,
-                arpBpm: parsed.arpBpm || DEFAULT_SETTINGS.arpBpm
+                arpBpm: parsed.arpBpm || DEFAULT_SETTINGS.arpBpm,
+                wavetableSize: parsed.wavetableSize || DEFAULT_SETTINGS.wavetableSize,
+                interpolationType: parsed.interpolationType || DEFAULT_SETTINGS.interpolationType
             };
             
             // Migrate stored chords to ensure soundConfig (if present) is valid

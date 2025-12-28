@@ -1,4 +1,3 @@
-
 import { StoreState } from '../types';
 
 export class XmlService {
@@ -7,13 +6,14 @@ export class XmlService {
         const { settings, presets, userBank } = state;
         
         // Wrap large data structures in CDATA for safe XML inclusion of JSON
+        // Ensure all critical data (Settings including Chords/Arps, Presets, UserBank) is captured.
         const settingsJson = JSON.stringify(settings);
         const presetsJson = JSON.stringify(presets);
         const userBankJson = JSON.stringify(userBank);
 
         const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<PrismaTonalData version="1.0">
-    <Description>PrismaTonal Configuration Snapshot</Description>
+<PrismaTonalData version="1.1">
+    <Description>PrismaTonal Configuration Snapshot - Full State</Description>
     <Settings><![CDATA[${settingsJson}]]></Settings>
     <ActivePresets><![CDATA[${presetsJson}]]></ActivePresets>
     <UserBank><![CDATA[${userBankJson}]]></UserBank>
@@ -65,12 +65,20 @@ export class XmlService {
         });
     }
 
-    static downloadFile(xmlContent: string, filename: string = "prismatonal-backup.xml") {
+    static generateFilename(): string {
+        const now = new Date();
+        const dateStr = now.toISOString().split('T')[0];
+        const timeStr = now.toTimeString().split(' ')[0].replace(/:/g, '-').slice(0, 5);
+        return `PrismaTonal_Backup_${dateStr}_${timeStr}.xml`;
+    }
+
+    static downloadFile(xmlContent: string, filename?: string) {
+        const name = filename || this.generateFilename();
         const blob = new Blob([xmlContent], { type: 'text/xml' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename;
+        a.download = name;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

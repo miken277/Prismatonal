@@ -118,7 +118,16 @@ const OscillatorPanel: React.FC<Props> = ({ label, config, isPrimary = false, on
                         ))}
                     </div>
                     <div className="space-y-2">
-                        <div><label className="flex justify-between text-xs mb-1 text-slate-300"><span>Rate</span> <span>{config.lfoRate} Hz</span></label><input type="range" min="0.1" max="20" step="0.1" value={config.lfoRate} onChange={(e) => onUpdate('lfoRate', parseFloat(e.target.value))} className="w-full h-1 bg-pink-500 rounded appearance-none cursor-pointer" /></div>
+                        <div>
+                            <label className="flex justify-between text-xs mb-1 text-slate-300">
+                                <span>Rate</span> 
+                                <span className={config.lfoRate > 20 ? 'text-pink-400 font-bold' : ''}>
+                                    {config.lfoRate > 100 ? config.lfoRate.toFixed(0) : config.lfoRate} Hz
+                                </span>
+                            </label>
+                            {/* Extended range to 200Hz for FM effects */}
+                            <input type="range" min="0.1" max="200" step="0.1" value={config.lfoRate} onChange={(e) => onUpdate('lfoRate', parseFloat(e.target.value))} className="w-full h-1 bg-pink-500 rounded appearance-none cursor-pointer" />
+                        </div>
                         <div><label className="flex justify-between text-xs mb-1 text-slate-300"><span>Depth</span> <span>{config.lfoDepth}</span></label><input type="range" min="0" max="100" step="1" value={config.lfoDepth} onChange={(e) => onUpdate('lfoDepth', parseFloat(e.target.value))} className="w-full h-1 bg-pink-500 rounded appearance-none cursor-pointer" /></div>
                     </div>
                 </div>

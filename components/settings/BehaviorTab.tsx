@@ -47,11 +47,37 @@ const BehaviorTab: React.FC<Props> = ({ settings, updateSettings }) => {
                 
                 <label className="flex items-center justify-between cursor-pointer bg-slate-900/40 p-3 rounded border border-slate-700/50">
                     <div className="space-y-1">
-                        <span className="text-sm font-semibold text-white">High Quality Audio</span>
-                        <p className="text-[10px] text-slate-500">Enable 2x Oversampling. Disable for better performance.</p>
+                        <span className="text-sm font-semibold text-white">High Quality Oversampling</span>
+                        <p className="text-[10px] text-slate-500">Enable 2x Oversampling. Disable to reduce CPU usage.</p>
                     </div>
                     <input type="checkbox" checked={settings.enableOversampling} onChange={(e) => handleChange('enableOversampling', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
                 </label>
+
+                <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-4">
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-300 mb-2">Wavetable Fidelity</label>
+                        <div className="flex gap-2">
+                            {[2048, 8192, 65536].map(size => (
+                                <button key={size} onClick={() => handleChange('wavetableSize', size)} className={`flex-1 py-2 text-xs font-bold rounded border ${settings.wavetableSize === size ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>
+                                    {size === 2048 ? 'Low (2K)' : size === 8192 ? 'Med (8K)' : 'HiFi (64K)'}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-300 mb-2">Interpolation</label>
+                        <div className="flex gap-2">
+                            <button onClick={() => handleChange('interpolationType', 'linear')} className={`flex-1 py-2 text-xs font-bold rounded border ${settings.interpolationType === 'linear' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>
+                                Linear
+                            </button>
+                            <button onClick={() => handleChange('interpolationType', 'cubic')} className={`flex-1 py-2 text-xs font-bold rounded border ${settings.interpolationType === 'cubic' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>
+                                Cubic (Smooth)
+                            </button>
+                        </div>
+                        <p className="text-[9px] text-slate-500 italic mt-2">Cubic removes grit for deep FM synthesis but uses slightly more CPU.</p>
+                    </div>
+                </div>
 
                 <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
                     <label className="block text-sm font-semibold text-slate-300">Audio Latency Mode</label>

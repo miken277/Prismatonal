@@ -39,6 +39,7 @@ export interface ChordNode {
   id: string; // Coordinate key
   n: number;
   d: number;
+  voiceMode?: PlayMode; // The mode/patch used when this note was saved
 }
 
 export interface ChordDefinition {
@@ -48,7 +49,8 @@ export interface ChordDefinition {
   nodes: ChordNode[];
   visible: boolean; // Is shortcut on screen?
   position: { x: number; y: number }; // Relative position or legacy absolute
-  soundConfig?: SynthPreset; // The captured patch
+  soundConfig?: SynthPreset; // Legacy single patch
+  soundConfigs?: Partial<Record<PlayMode, SynthPreset>>; // New multi-patch storage
 }
 
 export interface ArpeggioStep {
@@ -174,6 +176,8 @@ export interface AppSettings {
   baseFrequency: number; // Hz for 1/1
   audioLatencyHint: 'interactive' | 'balanced' | 'playback'; // Buffer size control
   enableOversampling: boolean; // New: Performance vs Quality toggle
+  wavetableSize: 2048 | 8192 | 65536; // Wavetable resolution
+  interpolationType: 'linear' | 'cubic'; // Wavetable interpolation method
 
   // Voice Leading / Focus Mode
   isVoiceLeadingEnabled: boolean;

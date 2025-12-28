@@ -3,12 +3,33 @@ export const AUDIO_PROCESSOR_CODE = `
 // --- 1. DSP UTILS & CONSTANTS ---
 
 const TWO_PI = 2 * Math.PI;
-const WAVETABLE_SIZE = 65536; 
-const SINE_TABLE = new Float32Array(WAVETABLE_SIZE + 1);
 
-for (let i = 0; i <= WAVETABLE_SIZE; i++) {
-    SINE_TABLE[i] = Math.sin((i / WAVETABLE_SIZE) * TWO_PI);
+// Global synthesis state
+let wavetableSize = 8192;
+let wavetableMask = 8191;
+let wavetable = new Float32Array(wavetableSize + 4); // Padding for safety
+let interpolationType = 'linear'; // 'linear' | 'cubic'
+
+function generateWavetable(size) {
+    wavetableSize = size;
+    wavetableMask = size - 1;
+    wavetable = new Float32Array(wavetableSize + 4); 
+    
+    // Generate Sine
+    for (let i = 0; i < wavetableSize; i++) {
+        wavetable[i] = Math.sin((i / wavetableSize) * TWO_PI);
+    }
+    
+    // Pad for Linear/Cubic without expensive modulo in loop
+    // Copy first few samples to the end
+    wavetable[wavetableSize] = wavetable[0];
+    wavetable[wavetableSize + 1] = wavetable[1];
+    wavetable[wavetableSize + 2] = wavetable[2];
+    wavetable[wavetableSize + 3] = wavetable[3];
 }
+
+// Initial Generation
+generateWavetable(8192);
 
 const DUMMY_OSC_CONFIG = {
     enabled: false,
@@ -161,6 +182,10 @@ class Oscillator {
     this.sampleRate = sampleRate;
   }
 
+  reset() {
+      // Free-running oscillators
+  }
+
   process(freq, type, dt) {
     if (!Number.isFinite(freq) || freq <= 0 || freq > 24000) return 0.0;
 
@@ -172,10 +197,45 @@ class Oscillator {
     switch (type) {
       case 'sine':
         {
-            const index = this.phase * WAVETABLE_SIZE;
-            const i = Math.floor(index);
-            const f = index - i;
-            sample = SINE_TABLE[i] + f * (SINE_TABLE[i + 1] - SINE_TABLE[i]);
+            // Use the global wavetable
+            const ptr = this.phase * wavetableSize;
+            const i = Math.floor(ptr);
+            const f = ptr - i;
+            
+            if (interpolationType === 'cubic') {
+                // 4-point Cubic Hermite Interpolation
+                // Indices. Note: i is 0..size-1.
+                // We need indices: i-1, i, i+1, i+2
+                
+                // For i-1, we need to wrap if i=0.
+                // Because we pad the end, we can assume i, i+1, i+2 are valid in linear buffer.
+                // But i-1 is tricky at index 0.
+                
+                let y0, y1, y2, y3;
+                
+                if (i === 0) {
+                    y0 = wavetable[wavetableSize - 1]; // Wrap around for -1
+                    y1 = wavetable[0];
+                    y2 = wavetable[1];
+                    y3 = wavetable[2];
+                } else {
+                    y0 = wavetable[i - 1];
+                    y1 = wavetable[i];
+                    y2 = wavetable[i + 1]; // Safe due to padding
+                    y3 = wavetable[i + 2]; // Safe due to padding
+                }
+
+                const c0 = y1;
+                const c1 = 0.5 * (y2 - y0);
+                const c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+                const c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
+                
+                sample = ((c3 * f + c2) * f + c1) * f + c0;
+            } else {
+                // Linear Interpolation
+                // Safe access due to padding at end
+                sample = wavetable[i] + f * (wavetable[i + 1] - wavetable[i]);
+            }
         }
         break;
       case 'triangle':
@@ -214,8 +274,7 @@ class Voice {
     this.baseFreq = 440;
     this.targetFreq = 440;
     this.startTime = 0; 
-    this.releaseTime = 0;
-    this.pendingRelease = false;
+    this.releaseTime = 0; 
     
     this.oscs = [
         new Oscillator(sampleRate),
@@ -244,46 +303,29 @@ class Voice {
     this.targetFreq = freq;
     this.active = true;
     this.startTime = currentTime; 
-    this.releaseTime = 0;
-    this.pendingRelease = false;
+    this.releaseTime = 0; 
     
-    this.envs.forEach(env => env.trigger());
+    this.envs.forEach(env => {
+        env.trigger();
+    });
+    
     this.filters.forEach(f => f.reset());
     this.lfoPhases.fill(0.0);
   }
 
   release() {
-    // Prevent dead notes: if release is called too quickly after trigger (e.g. init flush or fast tap),
-    // queue the release to ensure the attack phase has time to produce audible sound.
-    if (currentTime - this.startTime < 0.01) {
-        this.pendingRelease = true;
-    } else {
-        this.doRelease();
-    }
-  }
-  
-  doRelease() {
     this.releaseTime = currentTime;
     this.envs.forEach(env => env.release());
   }
   
   hardStop() {
       this.active = false;
-      this.pendingRelease = false;
       this.envs.forEach(env => env.reset());
       this.filters.forEach(f => f.reset());
   }
 
   renderBlock(preset, dt, bufL, bufR, len, panSpeed, panDepth, startPanPhase, globalBend) {
     if (!this.active) return;
-
-    // Check deferred release
-    if (this.pendingRelease) {
-        if (currentTime - this.startTime >= 0.01) {
-            this.pendingRelease = false;
-            this.doRelease();
-        }
-    }
 
     const diff = this.targetFreq - this.baseFreq;
     if (Math.abs(diff) > 0.001) {
@@ -373,6 +415,7 @@ class Voice {
             for(let m = 0; m < matrix.length; m++) {
                 const row = matrix[m];
                 if (!row.enabled) continue;
+                
                 let srcVal = 0;
                 if (row.source === 'env1') srcVal = this.envVals[0];
                 else if (row.source === 'env2') srcVal = this.envVals[1];
@@ -540,6 +583,12 @@ class PrismaProcessor extends AudioWorkletProcessor {
          if (msg.strumDuration) this.strumDuration = msg.strumDuration;
          if (msg.enableOversampling !== undefined) this.isOversamplingEnabled = msg.enableOversampling;
          if (msg.globalBend !== undefined) this.globalBendMultiplier = msg.globalBend;
+         if (msg.wavetableSize !== undefined) {
+             generateWavetable(msg.wavetableSize);
+         }
+         if (msg.interpolationType !== undefined) {
+             interpolationType = msg.interpolationType;
+         }
       } else if (msg.type === 'note_on') {
         this.triggerVoice(msg.id, msg.freq, msg.voiceType, msg.mode);
       } else if (msg.type === 'note_off') {

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
@@ -8,7 +7,7 @@ import LimitLayerControls from './components/LimitLayerControls';
 import { audioEngine } from './services/AudioEngine';
 import { midiService } from './services/MidiService';
 import { useStore } from './services/Store';
-import { AppSettings, ChordDefinition, XYPos, ArpeggioStep, ArpConfig, ArpeggioDefinition } from './types';
+import { AppSettings, ChordDefinition, XYPos, ArpeggioStep, ArpConfig, ArpeggioDefinition, PlayMode, SynthPreset } from './types';
 import { PIXELS_PER_MM, SCROLLBAR_WIDTH } from './constants';
 import { arpeggiatorService } from './services/ArpeggiatorService';
 
@@ -369,27 +368,47 @@ const App: React.FC = () => {
 
   const handleAddChord = () => {
       if (diamondRef.current) {
-          const latchedNodes = diamondRef.current.getLatchedNodes();
-          if (latchedNodes.length === 0) return;
+          const latchedData = diamondRef.current.getLatchedNodes();
+          if (latchedData.length === 0) return;
+          
           let slotIndex = settings.savedChords.findIndex(c => c.nodes.length === 0);
           if (slotIndex === -1) slotIndex = settings.savedChords.findIndex(c => !c.visible);
           
           if (slotIndex !== -1) {
               const newChords = [...settings.savedChords];
-              const simplifiedNodes = latchedNodes.map(n => ({ id: n.id, n: n.n, d: n.d }));
               
-              // Capture the current sound configuration
-              let currentPreset;
-              if (latchMode === 3) currentPreset = presets.strum;
-              else if (latchMode === 2) currentPreset = presets.normal;
-              else currentPreset = presets.latch; // Default for Drone or Normal
+              const soundConfigs: Partial<Record<PlayMode, SynthPreset>> = {};
+              const usedModes = new Set<PlayMode>();
+
+              const simplifiedNodes = latchedData.map(({ node, mode }) => {
+                  let modeStr: PlayMode = 'normal';
+                  if (mode === 1) modeStr = 'latch';
+                  else if (mode === 2) modeStr = 'normal';
+                  else if (mode === 3) modeStr = 'strum';
+                  
+                  usedModes.add(modeStr);
+                  
+                  return { 
+                      id: node.id, 
+                      n: node.n, 
+                      d: node.d,
+                      voiceMode: modeStr 
+                  };
+              });
+
+              // Capture snapshot of presets for all used modes
+              usedModes.forEach(m => {
+                  soundConfigs[m] = JSON.parse(JSON.stringify(presets[m]));
+              });
 
               newChords[slotIndex] = {
                   ...newChords[slotIndex],
                   nodes: simplifiedNodes,
                   visible: true,
                   position: { x: 0, y: 0 },
-                  soundConfig: JSON.parse(JSON.stringify(currentPreset)) // Deep copy
+                  soundConfigs: soundConfigs,
+                  // Clear legacy single config
+                  soundConfig: undefined 
               };
               updateSettings(prev => ({ ...prev, savedChords: newChords }));
           }
@@ -397,13 +416,19 @@ const App: React.FC = () => {
   };
 
   const toggleChord = (id: string) => {
-      setActiveChordIds(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
+      // If sustain is enabled, allow multiple chords (additive).
+      // If sustain is disabled, only allow one chord at a time (exclusive/legato).
+      if (settings.isSustainEnabled) {
+          setActiveChordIds(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
+      } else {
+          setActiveChordIds(prev => prev.includes(id) ? [] : [id]);
+      }
   };
 
   const handleRemoveChord = (id: string) => {
       const newChords = settings.savedChords.map(c => {
           if (c.id === id) {
-              return { ...c, nodes: [], visible: false, soundConfig: undefined };
+              return { ...c, nodes: [], visible: false, soundConfig: undefined, soundConfigs: undefined };
           }
           return c;
       });

@@ -1,4 +1,3 @@
-
 import { LatticeNode, LatticeLine, AppSettings, ButtonShape } from '../types';
 import { getRainbowPeriod, PITCH_SCALE } from './ProjectionService';
 
@@ -19,6 +18,14 @@ export interface RenderState {
 }
 
 export class LatticeRenderer {
+    // Cache keys to prevent unnecessary redraws
+    private lastData: any = null;
+    private lastSettingsSignature: string = '';
+    private lastSize: number = 0;
+    private lastScale: number = 0;
+    
+    // Track if BG lines need update (dependent on brightened/active lines mostly, but brightened lines modify BG appearance)
+    private lastBrightenedLines: LatticeLine[] = [];
     
     public render(
         bgCanvas: HTMLCanvasElement, 
@@ -41,6 +48,8 @@ export class LatticeRenderer {
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
         const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
         
+        let needsFullRedraw = false;
+
         // Sync canvas dimensions
         if (bgCanvas.width !== dynamicSize * dpr || bgCanvas.height !== dynamicSize * dpr) {
             [bgCanvas, staticCanvas, dynamicCanvas].forEach(c => {
@@ -50,11 +59,46 @@ export class LatticeRenderer {
             bgCtx.scale(dpr, dpr);
             staticCtx.scale(dpr, dpr);
             activeCtx.scale(dpr, dpr);
+            needsFullRedraw = true;
         } else {
             // Ensure transform is reset if we don't resize, to prevent drift or accumulation
             bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
             staticCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
             activeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
+        const settingsSig = JSON.stringify({
+            spacing: settings.buttonSpacingScale,
+            size: settings.buttonSizeScale,
+            colors: settings.colors,
+            layout: settings.layoutApproach,
+            vis: settings.limitVisuals,
+            shape: settings.buttonShape,
+            text: settings.nodeTextSizeScale,
+            fraction: settings.showFractionBar,
+            width: settings.baseLineWidth,
+            bright: settings.lineBrighteningWidth
+        });
+
+        // Determine if static layers need update
+        const staticDirty = needsFullRedraw || 
+                            data !== this.lastData || 
+                            settingsSig !== this.lastSettingsSignature ||
+                            effectiveScale !== this.lastScale ||
+                            dynamicSize !== this.lastSize;
+
+        // Determine if background lines need update (e.g. line brightening on hover)
+        const bgDirty = staticDirty || brightenedLines !== this.lastBrightenedLines;
+
+        if (staticDirty) {
+            this.lastData = data;
+            this.lastSettingsSignature = settingsSig;
+            this.lastScale = effectiveScale;
+            this.lastSize = dynamicSize;
+        }
+        
+        if (bgDirty) {
+            this.lastBrightenedLines = brightenedLines;
         }
 
         // View Culling Calculation
@@ -65,17 +109,6 @@ export class LatticeRenderer {
         const topBound = view.y - viewPad - pixelOffset; 
         const bottomBound = view.y + view.h + viewPad - pixelOffset;
 
-        // Clear Viewport (optimization: only clear visible area + padding)
-        const clearX = Math.max(0, leftBound);
-        const clearY = Math.max(0, topBound);
-        const clearW = Math.min(dynamicSize, rightBound) - clearX;
-        const clearH = Math.min(dynamicSize, bottomBound) - clearY;
-
-        bgCtx.clearRect(0, 0, dynamicSize, dynamicSize); // BG lines change rarely, could optimize, but they handle active animations
-        // For static, we might want to redraw everything if it changes, but here we redraw per frame for simplicity in this refactor
-        staticCtx.clearRect(0, 0, dynamicSize, dynamicSize); 
-        activeCtx.clearRect(0, 0, dynamicSize, dynamicSize);
-
         const centerOffset = dynamicSize / 2;
         const spacing = settings.buttonSpacingScale * effectiveScale;
         const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
@@ -83,73 +116,151 @@ export class LatticeRenderer {
         const colorCache = settings.colors;
         const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
 
-        // --- 1. RENDER BACKGROUND LINES (Active & Static) ---
-        bgCtx.lineCap = 'round';
-        
-        // A. Static Grid Lines (Only if not brightened/active)
-        // Optimization: We could skip static lines if we cached them, but drawing lines is cheap.
-        const baseWidth = settings.baseLineWidth || 1.0;
-        const linesByLimit: Record<number, number[]> = {};
-        
-        // Group lines by limit for batch drawing
-        for (const line of data.lines) {
-            // Skip lines that are currently "active" (drawn later)
-            // Note: This check is O(N*M) effectively if arrays are large, but usually small enough.
-            // For max performance, activeLines should be a Set of IDs.
-            // Optimization: Just draw everything, active lines draw ON TOP.
+        // --- 1. RENDER BACKGROUND LINES (Cached) ---
+        if (bgDirty) {
+            bgCtx.clearRect(0, 0, dynamicSize, dynamicSize);
+            bgCtx.lineCap = 'round';
             
-            if (!linesByLimit[line.limit]) linesByLimit[line.limit] = [];
-            const arr = linesByLimit[line.limit];
-            arr.push(line.x1 * spacing + centerOffset, line.y1 * spacing + centerOffset, line.x2 * spacing + centerOffset, line.y2 * spacing + centerOffset);
-        }
-
-        for (const limitStr in linesByLimit) {
-            const limit = parseInt(limitStr);
-            const coords = linesByLimit[limit];
-            const color = isJIOverride ? '#fff' : (colorCache[limit] || '#666');
+            const baseWidth = settings.baseLineWidth || 1.0;
+            const linesByLimit: Record<number, number[]> = {};
             
-            bgCtx.beginPath();
-            for(let i=0; i<coords.length; i+=4) {
-                // Simple culling
-                if (Math.max(coords[i], coords[i+2]) < leftBound || Math.min(coords[i], coords[i+2]) > rightBound || 
-                    Math.max(coords[i+1], coords[i+3]) < topBound || Math.min(coords[i+1], coords[i+3]) > bottomBound) continue;
-                
-                bgCtx.moveTo(coords[i], coords[i+1]);
-                bgCtx.lineTo(coords[i+2], coords[i+3]);
+            // Group lines by limit for batch drawing
+            for (const line of data.lines) {
+                if (!linesByLimit[line.limit]) linesByLimit[line.limit] = [];
+                const arr = linesByLimit[line.limit];
+                arr.push(line.x1 * spacing + centerOffset, line.y1 * spacing + centerOffset, line.x2 * spacing + centerOffset, line.y2 * spacing + centerOffset);
             }
-            bgCtx.lineWidth = (limit === 1 ? Math.max(2.5, baseWidth * 2.5) : baseWidth) * effectiveScale; 
-            bgCtx.strokeStyle = color;
-            bgCtx.globalAlpha = (isJIOverride ? 0.15 : 0.3); 
-            
-            if (limit === 1) bgCtx.setLineDash([5 * effectiveScale, 5 * effectiveScale]);
-            else bgCtx.setLineDash([]);
-            bgCtx.stroke();
-        }
-        bgCtx.setLineDash([]); 
 
-        // B. Brightened Lines (Voice Leading Hints)
-        if (brightenedLines.length > 0) {
-            const brightWidth = settings.lineBrighteningWidth || 1.0;
-            for (const line of brightenedLines) {
-                const x1 = line.x1 * spacing + centerOffset;
-                const y1 = line.y1 * spacing + centerOffset;
-                const x2 = line.x2 * spacing + centerOffset;
-                const y2 = line.y2 * spacing + centerOffset;
+            for (const limitStr in linesByLimit) {
+                const limit = parseInt(limitStr);
+                const coords = linesByLimit[limit];
+                const color = isJIOverride ? '#fff' : (colorCache[limit] || '#666');
                 
-                if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
-                
-                const limitColor = isJIOverride ? '#fff' : (colorCache[line.limit] || '#666');
                 bgCtx.beginPath();
-                bgCtx.moveTo(x1, y1);
-                bgCtx.lineTo(x2, y2);
-                bgCtx.lineWidth = brightWidth * effectiveScale;
-                bgCtx.strokeStyle = limitColor;
-                bgCtx.globalAlpha = isJIOverride ? 0.4 : 0.8; 
+                for(let i=0; i<coords.length; i+=4) {
+                    // Culling for initial draw
+                    if (Math.max(coords[i], coords[i+2]) < 0 || Math.min(coords[i], coords[i+2]) > dynamicSize || 
+                        Math.max(coords[i+1], coords[i+3]) < 0 || Math.min(coords[i+1], coords[i+3]) > dynamicSize) continue;
+                    
+                    bgCtx.moveTo(coords[i], coords[i+1]);
+                    bgCtx.lineTo(coords[i+2], coords[i+3]);
+                }
+                bgCtx.lineWidth = (limit === 1 ? Math.max(2.5, baseWidth * 2.5) : baseWidth) * effectiveScale; 
+                bgCtx.strokeStyle = color;
+                bgCtx.globalAlpha = (isJIOverride ? 0.15 : 0.3); 
+                
+                if (limit === 1) bgCtx.setLineDash([5 * effectiveScale, 5 * effectiveScale]);
+                else bgCtx.setLineDash([]);
                 bgCtx.stroke();
             }
+            bgCtx.setLineDash([]); 
+
+            // Brightened Lines (Voice Leading Hints)
+            if (brightenedLines.length > 0) {
+                const brightWidth = settings.lineBrighteningWidth || 1.0;
+                for (const line of brightenedLines) {
+                    const x1 = line.x1 * spacing + centerOffset;
+                    const y1 = line.y1 * spacing + centerOffset;
+                    const x2 = line.x2 * spacing + centerOffset;
+                    const y2 = line.y2 * spacing + centerOffset;
+                    
+                    const limitColor = isJIOverride ? '#fff' : (colorCache[line.limit] || '#666');
+                    bgCtx.beginPath();
+                    bgCtx.moveTo(x1, y1);
+                    bgCtx.lineTo(x2, y2);
+                    bgCtx.lineWidth = brightWidth * effectiveScale;
+                    bgCtx.strokeStyle = limitColor;
+                    bgCtx.globalAlpha = isJIOverride ? 0.4 : 0.8; 
+                    bgCtx.stroke();
+                }
+            }
         }
 
-        // C. Active Lines (Currently sounding intervals)
+        // --- 2. RENDER STATIC NODES (Cached) ---
+        if (staticDirty) {
+            staticCtx.clearRect(0, 0, dynamicSize, dynamicSize);
+            for (const node of data.nodes) {
+                const x = node.x * spacing + centerOffset;
+                const y = node.y * spacing + centerOffset;
+                
+                // Aggressive culling not needed for static if cached, but good practice
+                // Note: Static canvas needs full content for scrolling if we don't redraw on scroll
+                // But current architecture uses native scroll on container, so we MUST draw everything.
+                
+                const cTop = isJIOverride ? '#fff' : (colorCache[node.limitTop] || '#666');
+                const cBottom = isJIOverride ? '#eee' : (colorCache[node.limitBottom] || '#666');
+                
+                const radius = baseRadius; 
+
+                staticCtx.globalAlpha = 1.0;
+                staticCtx.beginPath();
+                if (isDiamond) {
+                    staticCtx.moveTo(x, y - radius);
+                    staticCtx.lineTo(x + radius, y);
+                    staticCtx.lineTo(x, y + radius);
+                    staticCtx.lineTo(x - radius, y);
+                } else {
+                    staticCtx.arc(x, y, radius, 0, Math.PI * 2);
+                }
+                staticCtx.closePath();
+
+                if (isJIOverride) {
+                    staticCtx.fillStyle = '#111';
+                    staticCtx.fill();
+                    staticCtx.lineWidth = 2 * effectiveScale;
+                    staticCtx.strokeStyle = '#fff';
+                    staticCtx.stroke();
+                } else {
+                    const grad = staticCtx.createLinearGradient(x, y - radius, x, y + radius);
+                    grad.addColorStop(0.45, cTop);
+                    grad.addColorStop(0.55, cBottom);
+                    staticCtx.fillStyle = grad;
+                    staticCtx.fill();
+                }
+
+                const combinedScale = settings.buttonSizeScale; 
+                if (combinedScale > 0.4) {
+                    staticCtx.fillStyle = isJIOverride ? '#fff' : 'white';
+                    staticCtx.textAlign = 'center';
+                    staticCtx.textBaseline = 'middle';
+                    let fontSize = Math.max(10, Math.min(18, 14 * combinedScale)) * settings.nodeTextSizeScale * effectiveScale;
+                    staticCtx.font = `bold ${fontSize}px sans-serif`; 
+                    
+                    const spacingY = settings.showFractionBar ? 0.55 : 0.50;
+                    staticCtx.fillText(node.n.toString(), x, y - (radius * spacingY));
+                    if (settings.showFractionBar) {
+                        staticCtx.beginPath();
+                        staticCtx.moveTo(x - (radius * 0.4), y);
+                        staticCtx.lineTo(x + (radius * 0.4), y);
+                        staticCtx.lineWidth = 1 * effectiveScale;
+                        staticCtx.strokeStyle = isJIOverride ? 'rgba(255,255,255,0.4)' : `rgba(255,255,255,0.8)`;
+                        staticCtx.stroke();
+                    }
+                    staticCtx.fillText(node.d.toString(), x, y + (radius * spacingY));
+                }
+            }
+        }
+
+        // --- 3. RENDER ACTIVE OVERLAYS (Every Frame) ---
+        // Clear Active Canvas (Consider Viewport Optimization)
+        // Optimization: Clearing visible rect is safer for fill-rate, but clearing full canvas handles artifacts.
+        // Given 25MP worst case, let's try to clear mostly what we see + margin
+        // To be safe against fast scrolls, we clear slightly more.
+        const clearX = Math.max(0, leftBound);
+        const clearY = Math.max(0, topBound);
+        const clearW = Math.min(dynamicSize, rightBound) - clearX;
+        const clearH = Math.min(dynamicSize, bottomBound) - clearY;
+        
+        // Due to pitch bend offset, bottomBound might be larger than canvas.
+        // Safe approach for dynamic: clear whole thing if small, or viewport if large.
+        activeCtx.clearRect(0, 0, dynamicSize, dynamicSize);
+
+        activeCtx.lineCap = 'round';
+
+        // A. Active Lines (Currently sounding intervals)
+        // Note: Active Lines animate, so they belong in dynamic loop or separate animated layer
+        // Since we moved BG lines to cached canvas, active lines must be drawn on activeCtx or a separate layer.
+        // Let's draw them on activeCtx for animation smoothness.
         const animationSpeed = (settings.voiceLeadingAnimationSpeed || 2.0) * 0.33;
         const rawPhase = (time * 0.001 * animationSpeed);
         const flowPhase = settings.voiceLeadingReverseDir ? (1.0 - (rawPhase % 1.0)) : (rawPhase % 1.0);
@@ -165,17 +276,17 @@ export class LatticeRenderer {
             const limitColor = isJIOverride ? '#fff' : (colorCache[line.limit] || '#666');
             
             // Solid base
-            bgCtx.beginPath();
-            bgCtx.moveTo(x1, y1);
-            bgCtx.lineTo(x2, y2);
-            bgCtx.lineWidth = (isJIOverride ? 2 : 4) * effectiveScale;
-            bgCtx.strokeStyle = limitColor;
-            bgCtx.globalAlpha = 1.0;
-            bgCtx.stroke();
+            activeCtx.beginPath();
+            activeCtx.moveTo(x1, y1);
+            activeCtx.lineTo(x2, y2);
+            activeCtx.lineWidth = (isJIOverride ? 2 : 4) * effectiveScale;
+            activeCtx.strokeStyle = limitColor;
+            activeCtx.globalAlpha = 1.0;
+            activeCtx.stroke();
 
             // Animated flow
             if (settings.isVoiceLeadingAnimationEnabled) {
-                const grad = bgCtx.createLinearGradient(x1, y1, x2, y2);
+                const grad = activeCtx.createLinearGradient(x1, y1, x2, y2);
                 const p = flowPhase;
                 grad.addColorStop(0, 'rgba(255,255,255,0)');
                 const pulseWidth = 0.2;
@@ -186,93 +297,25 @@ export class LatticeRenderer {
                 if (end < 1) grad.addColorStop(end, 'rgba(255,255,255,0)');
                 grad.addColorStop(1, 'rgba(255,255,255,0)');
                 
-                bgCtx.beginPath();
-                bgCtx.moveTo(x1, y1);
-                bgCtx.lineTo(x2, y2);
+                activeCtx.beginPath();
+                activeCtx.moveTo(x1, y1);
+                activeCtx.lineTo(x2, y2);
                 
                 // Glow
-                bgCtx.strokeStyle = grad;
-                bgCtx.lineWidth = 10 * (0.5 + settings.voiceLeadingGlowAmount) * effectiveScale;
-                bgCtx.globalAlpha = 0.3; 
-                bgCtx.stroke();
+                activeCtx.strokeStyle = grad;
+                activeCtx.lineWidth = 10 * (0.5 + settings.voiceLeadingGlowAmount) * effectiveScale;
+                activeCtx.globalAlpha = 0.3; 
+                activeCtx.stroke();
                 
                 // Core
-                bgCtx.lineWidth = 4 * effectiveScale;
-                bgCtx.globalAlpha = 1.0;
-                bgCtx.stroke();
+                activeCtx.lineWidth = 4 * effectiveScale;
+                activeCtx.globalAlpha = 1.0;
+                activeCtx.stroke();
             }
         }
 
-        // --- 2. RENDER STATIC NODES ---
-        // Iterate all nodes
-        for (const node of data.nodes) {
-            const x = node.x * spacing + centerOffset;
-            const y = node.y * spacing + centerOffset;
-            
-            // Cull
-            if (x < leftBound || x > rightBound || y < topBound || y > bottomBound) continue;
-
-            const cTop = isJIOverride ? '#fff' : (colorCache[node.limitTop] || '#666');
-            const cBottom = isJIOverride ? '#eee' : (colorCache[node.limitBottom] || '#666');
-            
-            const radius = baseRadius; // Static nodes always base size
-
-            staticCtx.globalAlpha = 1.0;
-            staticCtx.beginPath();
-            if (isDiamond) {
-                staticCtx.moveTo(x, y - radius);
-                staticCtx.lineTo(x + radius, y);
-                staticCtx.lineTo(x, y + radius);
-                staticCtx.lineTo(x - radius, y);
-            } else {
-                staticCtx.arc(x, y, radius, 0, Math.PI * 2);
-            }
-            staticCtx.closePath();
-
-            if (isJIOverride) {
-                staticCtx.fillStyle = '#111';
-                staticCtx.fill();
-                staticCtx.lineWidth = 2 * effectiveScale;
-                staticCtx.strokeStyle = '#fff';
-                staticCtx.stroke();
-            } else {
-                const grad = staticCtx.createLinearGradient(x, y - radius, x, y + radius);
-                grad.addColorStop(0.45, cTop);
-                grad.addColorStop(0.55, cBottom);
-                staticCtx.fillStyle = grad;
-                staticCtx.fill();
-            }
-
-            const combinedScale = settings.buttonSizeScale; 
-            if (combinedScale > 0.4) {
-                staticCtx.fillStyle = isJIOverride ? '#fff' : 'white';
-                staticCtx.textAlign = 'center';
-                staticCtx.textBaseline = 'middle';
-                let fontSize = Math.max(10, Math.min(18, 14 * combinedScale)) * settings.nodeTextSizeScale * effectiveScale;
-                staticCtx.font = `bold ${fontSize}px sans-serif`; 
-                
-                const spacingY = settings.showFractionBar ? 0.55 : 0.50;
-                staticCtx.fillText(node.n.toString(), x, y - (radius * spacingY));
-                if (settings.showFractionBar) {
-                    staticCtx.beginPath();
-                    staticCtx.moveTo(x - (radius * 0.4), y);
-                    staticCtx.lineTo(x + (radius * 0.4), y);
-                    staticCtx.lineWidth = 1 * effectiveScale;
-                    staticCtx.strokeStyle = isJIOverride ? 'rgba(255,255,255,0.4)' : `rgba(255,255,255,0.8)`;
-                    staticCtx.stroke();
-                }
-                staticCtx.fillText(node.d.toString(), x, y + (radius * spacingY));
-            }
-        }
-
-        // --- 3. RENDER ACTIVE OVERLAYS (Latched Nodes, Ripples, Cursors) ---
-        activeCtx.lineCap = 'round';
-
-        // A. Latched/Active Nodes
+        // B. Latched/Active Nodes
         for (const id of visualLatchedNodes.keys()) {
-             // Find node data
-             // Optimization: nodeMap should be passed or we assume O(N) lookup. 
-             // Ideally map is passed in state. For now, find is okay for small N active nodes.
              const node = data.nodes.find(n => n.id === id); 
              if (!node) continue;
 
@@ -348,7 +391,7 @@ export class LatticeRenderer {
              }
         }
 
-        // B. Trigger Ripples
+        // C. Trigger Ripples
         const now = Date.now();
         const rippleDuration = 500; 
         activeCtx.lineWidth = 2 * effectiveScale;
@@ -356,7 +399,7 @@ export class LatticeRenderer {
         
         nodeTriggerHistory.forEach((timestamp, nodeId) => {
             const age = now - timestamp;
-            if (age > rippleDuration) return; // Cleanup handled in component usually, but we skip render here
+            if (age > rippleDuration) return;
             
             const node = data.nodes.find(n => n.id === nodeId);
             if (!node) return;
@@ -378,7 +421,7 @@ export class LatticeRenderer {
         });
         activeCtx.globalAlpha = 1.0;
 
-        // C. Pitch Bend Cursors
+        // D. Pitch Bend Cursors
         if (settings.isPitchBendEnabled) {
             activeCursors.forEach(c => {
                 if (c.originNodeId) {
@@ -390,30 +433,8 @@ export class LatticeRenderer {
                          const pos = cursorPositions.get(c.pointerId);
                          if (!pos) return;
                          
-                         // Map screen space back to canvas space using View scroll
-                         const cx = (pos.x - view.x) + view.x; // Wait, view.x is scrollLeft.
-                         // Logic check: component passed us view.x/y as scroll positions.
-                         // The event coordinates `pos.x` are clientX (screen relative).
-                         // We need activeCanvas relative coords.
-                         // activeCanvas is absolute size `dynamicSize`.
-                         // But we are drawing inside a transformed container or handled via scroll?
-                         // The component handles scrolling via `overflow: auto` on container.
-                         // The canvases are inside `wrapperRef` which is sized to `dynamicSize`.
-                         // So canvas coords = scrollLeft + clientX - containerLeft.
-                         
-                         // We need the bounding rect of the scroll container to normalize clientX
-                         // NOTE: The `cursorPositions` passed in state should ideally be pre-calculated to CANVAS coordinates
-                         // to keep the renderer pure. However, `TonalityDiamond` logic passes raw clientX/Y currently.
-                         // Let's assume the passed `cursorPositions` are raw clientX/Y and we use `view` to adjust.
-                         // Actually, let's fix this by calculating the canvas-relative coords here.
-                         // But we don't have the container rect.
-                         // Standard fix: The component calculates canvas-relative coords before passing to renderer.
-                         // SEE COMPONENT UPDATE below.
-                         
-                         // For now, assuming cursorPositions are raw clientX/Y, we can't accurately draw without container Rect.
-                         // I will update the Component to pass canvas-relative coordinates in `cursorPositions`.
-                         
-                         const cx_rel = pos.x; // Now assuming this is pre-transformed to Canvas Space
+                         // Pos is already canvas-relative from component logic
+                         const cx_rel = pos.x; 
                          const cy_rel = pos.y;
 
                          activeCtx.beginPath();

@@ -95,6 +95,16 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
 
   const arpConfig = currentPreset.arpConfig || { direction: 'order', division: '1/8', octaves: 1, gate: 0.8, swing: 0, length: 8, probability: 1.0, humanize: 0 };
 
+  const getModeLabel = (mode: PlayMode): string => {
+      switch(mode) {
+          case 'normal': return 'STRINGS';
+          case 'latch': return 'DRONE';
+          case 'strum': return 'PLUCKED';
+          case 'arpeggio': return 'ARP';
+          default: return mode;
+      }
+  };
+
   return (
     <div className="fixed top-0 right-0 h-full w-[450px] bg-slate-800/95 backdrop-blur shadow-2xl z-[200] transform transition-transform p-0 overflow-hidden border-l border-slate-700 flex flex-col">
         {/* Header */}
@@ -105,13 +115,13 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
         
         {/* Mode Selector */}
         <div className="flex border-b border-slate-700 bg-slate-900/80 mx-4 mt-2 rounded-t-lg overflow-hidden">
-            {(['normal', 'latch', 'strum', 'arpeggio'] as PlayMode[]).map(mode => (
+            {(['latch', 'normal', 'strum', 'arpeggio'] as PlayMode[]).map(mode => (
                 <button
                     key={mode}
                     onClick={() => setActiveVoiceMode(mode)}
                     className={`flex-1 py-3 text-xs font-bold uppercase transition border-b-2 ${activeVoiceMode === mode ? 'border-indigo-500 text-indigo-400 bg-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-800/50'}`}
                 >
-                    {mode}
+                    {getModeLabel(mode)}
                 </button>
             ))}
         </div>
@@ -224,7 +234,7 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
 
             {activeTab === 'arp' && (
                 <div className="space-y-6 animate-in fade-in duration-300">
-                    <h3 className="text-sm font-bold text-slate-300 uppercase mb-2">Granular Arp Settings ({activeVoiceMode})</h3>
+                    <h3 className="text-sm font-bold text-slate-300 uppercase mb-2">Granular Arp Settings ({getModeLabel(activeVoiceMode)})</h3>
                     <div className="p-4 bg-slate-900/50 rounded border border-slate-700 space-y-4">
                         
                         <div>

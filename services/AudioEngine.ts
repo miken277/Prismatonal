@@ -21,6 +21,8 @@ interface ConfigMessage extends WorkletMessageBase {
     strumDuration?: number;
     enableOversampling?: boolean;
     globalBend?: number;
+    wavetableSize?: number;
+    interpolationType?: 'linear' | 'cubic';
 }
 
 interface NoteOnMessage extends WorkletMessageBase {
@@ -151,7 +153,9 @@ class AudioEngine {
           type: 'config', 
           polyphony: settings.polyphony,
           strumDuration: settings.strumDuration,
-          enableOversampling: settings.enableOversampling
+          enableOversampling: settings.enableOversampling,
+          wavetableSize: settings.wavetableSize,
+          interpolationType: settings.interpolationType
       });
   }
 
@@ -266,11 +270,14 @@ class AudioEngine {
                     });
                 });
                 
+                const currentSettings = store.getSnapshot().settings;
                 this.workletNode!.port.postMessage({ 
                     type: 'config', 
-                    polyphony: store.getSnapshot().settings.polyphony,
-                    strumDuration: store.getSnapshot().settings.strumDuration,
-                    enableOversampling: store.getSnapshot().settings.enableOversampling
+                    polyphony: currentSettings.polyphony,
+                    strumDuration: currentSettings.strumDuration,
+                    enableOversampling: currentSettings.enableOversampling,
+                    wavetableSize: currentSettings.wavetableSize,
+                    interpolationType: currentSettings.interpolationType
                 });
 
                 this.setupFX();

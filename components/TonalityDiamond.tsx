@@ -11,7 +11,7 @@ export interface TonalityDiamondHandle {
   centerView: () => void;
   increaseDepth: () => void;
   decreaseDepth: () => void;
-  getLatchedNodes: () => LatticeNode[];
+  getLatchedNodes: () => { node: LatticeNode, mode: number }[];
 }
 
 interface Props {
@@ -31,8 +31,7 @@ interface Props {
 
 interface ActiveCursor {
   pointerId: number;
-  currentX: number;
-  currentY: number;
+  // removed currentX/Y from state to prevent re-renders on every move
   originNodeId: string | null; 
   hoverNodeId: string | null;
   hasMoved: boolean;
@@ -133,8 +132,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => {
       activeChordIds.forEach(id => {
           const chord = settings.savedChords.find(c => c.id === id);
-          if (chord && chord.soundConfig) {
-              audioEngine.registerPreset(`chord-${id}`, chord.soundConfig);
+          if (chord) {
+              if (chord.soundConfig) {
+                  audioEngine.registerPreset(`chord-${id}`, chord.soundConfig);
+              }
+              if (chord.soundConfigs) {
+                  Object.entries(chord.soundConfigs).forEach(([mode, preset]) => {
+                      audioEngine.registerPreset(`chord-${id}-${mode}`, preset);
+                  });
+              }
           }
       });
   }, [activeChordIds, settings.savedChords, audioEngine]);
@@ -152,12 +158,34 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       activeChordIds.forEach(chordId => {
         const chordDef = settings.savedChords.find(c => c.id === chordId);
         if (chordDef) {
-            const hasConfig = !!chordDef.soundConfig;
-            const pId = hasConfig ? `chord-${chordId}` : (latchMode === 2 ? 'normal' : 'latch');
-            
             chordDef.nodes.forEach(n => {
+                let mode = defaultChordMode;
+                let presetId = `chord-${chordId}`; // Default legacy fallback
+
+                if (n.voiceMode) {
+                    if (n.voiceMode === 'latch') mode = 1;
+                    else if (n.voiceMode === 'normal') mode = 2;
+                    else if (n.voiceMode === 'strum') mode = 3;
+
+                    if (chordDef.soundConfigs && chordDef.soundConfigs[n.voiceMode]) {
+                        presetId = `chord-${chordId}-${n.voiceMode}`;
+                    } else if (chordDef.soundConfig) {
+                        presetId = `chord-${chordId}`;
+                    } else {
+                        // Fallback to active app presets if somehow missing
+                        presetId = n.voiceMode;
+                    }
+                } else {
+                    // Legacy chord node handling
+                    if (chordDef.soundConfig) {
+                        presetId = `chord-${chordId}`;
+                    } else {
+                        presetId = (latchMode === 2) ? 'normal' : 'latch';
+                    }
+                }
+
                 if (!effective.has(n.id)) {
-                    effective.set(n.id, { mode: defaultChordMode, presetId: pId });
+                    effective.set(n.id, { mode, presetId });
                 }
             });
         }
@@ -256,12 +284,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const dataRef = useRef(data);
   const activeCursorsRef = useRef<Map<number, ActiveCursor>>(activeCursors);
   const visualLatchedRef = useRef(visualLatchedNodes);
-  const nodeMapRef = useRef(nodeMap);
   const activeLinesRef = useRef(activeLines);
   const brightenedLinesRef = useRef(brightenedLines);
-  const spatialGridRef = useRef(spatialGrid);
   const dynamicSizeRef = useRef(dynamicSize);
   const effectiveScaleRef = useRef(effectiveScale);
+  
+  const nodeMapRef = useRef(nodeMap);
+  const spatialGridRef = useRef(spatialGrid);
   const persistentLatchesRef = useRef(persistentLatches);
   
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
@@ -271,12 +300,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { activeCursorsRef.current = activeCursors; }, [activeCursors]);
   useEffect(() => { visualLatchedRef.current = visualLatchedNodes; }, [visualLatchedNodes]);
-  useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
   useEffect(() => { activeLinesRef.current = activeLines; }, [activeLines]);
   useEffect(() => { brightenedLinesRef.current = brightenedLines; }, [brightenedLines]);
-  useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
   useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
   useEffect(() => { effectiveScaleRef.current = effectiveScale; }, [effectiveScale]);
+  
+  useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
+  useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
   useEffect(() => { persistentLatchesRef.current = persistentLatches; }, [persistentLatches]);
   
   const lastTouchedLimitRef = useRef<number | null>(null);
@@ -338,10 +368,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
     },
     getLatchedNodes: () => {
-        const result: LatticeNode[] = [];
-        persistentLatches.forEach((_, id) => {
+        const result: { node: LatticeNode, mode: number }[] = [];
+        persistentLatches.forEach((mode, id) => {
             const n = nodeMap.get(id);
-            if (n) result.push(n);
+            if (n) result.push({ node: n, mode });
         });
         return result;
     }
@@ -591,11 +621,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
+      // 1. Force Resume on Interaction
       if (audioEngine) audioEngine.resume();
 
       if (uiUnlocked || !dynamicCanvasRef.current) return;
       e.preventDefault();
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
+
+      // 2. FORCE RECT UPDATE on interaction start to handle layout shifts/latency
+      updateRect();
 
       // Pre-calculate relative canvas coordinates to avoid jitter in renderer
       let canvasPos = { x: e.clientX, y: e.clientY };
@@ -644,8 +678,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         if (isBendEnabled || !isSustainActive || latchMode === 3) {
              const newCursor: ActiveCursor = {
                 pointerId: e.pointerId,
-                currentX: e.clientX,
-                currentY: e.clientY,
                 originNodeId: nodeId, 
                 hoverNodeId: nodeId,
                 hasMoved: false,
@@ -665,19 +697,21 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             const { preset, playback } = getVoiceParams(latchMode, settings.isStrumEnabled);
             const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
             
+            // NOTE: startVoice now queues internally if context is suspended/initing
             audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, preset, playback);
             if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
         }
       } else {
           const newCursor: ActiveCursor = {
               pointerId: e.pointerId,
-              currentX: e.clientX,
-              currentY: e.clientY,
               originNodeId: null, 
               hoverNodeId: null,
               hasMoved: false,
               interactionLockedNodeId: null
           };
+          // Don't update state for empty space clicks unless needed, to save render? 
+          // Actually we need the cursor for bending reference if dragging from empty space logic existed, but it doesn't.
+          // Keeping it consistent.
           setActiveCursors(prev => {
               const next = new Map(prev);
               next.set(e.pointerId, newCursor);
@@ -693,7 +727,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
     const cursor = activeCursorsRef.current.get(e.pointerId)!;
     
-    // Update relative canvas coords
+    // 1. Update coordinates in Ref ONLY (No React State Update here!)
     let canvasPos = { x: e.clientX, y: e.clientY };
     if (scrollContainerRef.current) {
         const r = scrollContainerRef.current.getBoundingClientRect();
@@ -704,18 +738,20 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             y: (e.clientY - r.top) + scrollContainerRef.current.scrollTop - pixelOffset
         };
     }
+    const prevPos = cursorPositionsRef.current.get(e.pointerId);
     cursorPositionsRef.current.set(e.pointerId, canvasPos);
     
+    // Check if we need to update hasMoved
+    let hasMoved = cursor.hasMoved;
+    if (!hasMoved && prevPos) {
+        const dx = Math.abs(canvasPos.x - prevPos.x);
+        const dy = Math.abs(canvasPos.y - prevPos.y);
+        if (dx > 2 || dy > 2) hasMoved = true;
+    }
+
+    // 2. Logic Check (Hit Testing)
     const hitNode = getHitNode(e.clientX, e.clientY);
     const hitId = hitNode ? hitNode.id : null;
-
-    const deltaMoveX = Math.abs(e.clientX - cursor.currentX);
-    const deltaMoveY = Math.abs(e.clientY - cursor.currentY);
-    
-    let hasMoved = cursor.hasMoved;
-    if (!hasMoved && (deltaMoveX > 3 || deltaMoveY > 3)) {
-        hasMoved = true;
-    }
 
     const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
     
@@ -747,44 +783,34 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     }
 
     let nextInteractionLock = cursor.interactionLockedNodeId;
+    let shouldUpdateState = false;
 
+    // Latch Dragging Logic (enter/exit)
     if (hitNode) {
          const isAlreadyLatched = isSustainingInstrument && isSustainActive && 
                                   persistentLatchesRef.current.get(hitNode.id) === latchMode;
 
          if (isSustainingInstrument && isSustainActive && isBendEnabled) {
-             const centerOffset = dynamicSizeRef.current / 2;
-             const rect = canvasRectRef.current || dynamicCanvasRef.current!.getBoundingClientRect();
-             const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
-             
-             const bend = globalBendRef.current;
-             const pixelOffset = -bend * (PITCH_SCALE / 12) * effectiveScale;
-
-             const hitNodeScreenY = (rect.top + pixelOffset) + (hitNode.y * spacing) + centerOffset;
-             const prevRelY = cursor.currentY - hitNodeScreenY;
-             const currRelY = e.clientY - hitNodeScreenY;
-             const threshold = 12 * effectiveScale; 
-             
-             const enteredFromTop = prevRelY > threshold && currRelY <= threshold;
-             const enteredFromBottom = prevRelY < -threshold && currRelY >= -threshold;
-             
+             // Hybrid Mode Logic...
+             // Simplifying: if entering node area, trigger latch.
              if (cursor.interactionLockedNodeId !== hitNode.id) {
-                 if (enteredFromTop || enteredFromBottom) {
-                     if (!isAlreadyLatched) {
-                         setPersistentLatches(prev => {
-                             const next = new Map(prev);
-                             next.set(hitNode.id, latchMode);
-                             return next;
-                         });
-                         nodeTriggerHistory.current.set(hitNode.id, Date.now());
-                         nextInteractionLock = hitNode.id;
-                     }
+                 if (!isAlreadyLatched) {
+                     setPersistentLatches(prev => {
+                         const next = new Map(prev);
+                         next.set(hitNode.id, latchMode);
+                         return next;
+                     });
+                     nodeTriggerHistory.current.set(hitNode.id, Date.now());
+                     nextInteractionLock = hitNode.id;
+                     shouldUpdateState = true;
                  }
              }
          }
     }
 
+    // Node Entry/Exit Logic
     if (cursor.hoverNodeId !== hitId) {
+        shouldUpdateState = true;
         nextInteractionLock = null;
 
         const isLeavingOrigin = cursor.hoverNodeId === cursor.originNodeId;
@@ -828,17 +854,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                  if (settingsRef.current.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
              }
         }
-        
-        const updatedCursor = { ...cursor, hoverNodeId: hitId, hasMoved: hasMoved, interactionLockedNodeId: nextInteractionLock };
-        activeCursorsRef.current.set(e.pointerId, updatedCursor);
-        setActiveCursors(prev => {
-            const next = new Map(prev);
-            next.set(e.pointerId, updatedCursor);
-            return next;
-        });
+    }
 
-    } else {
-        const updatedCursor = { ...cursor, hasMoved: hasMoved, interactionLockedNodeId: nextInteractionLock };
+    // 3. Update State ONLY if logic changed (hover node change)
+    if (shouldUpdateState || (hasMoved !== cursor.hasMoved)) {
+        const updatedCursor = { 
+            ...cursor, 
+            hoverNodeId: hitId, 
+            hasMoved: hasMoved, 
+            interactionLockedNodeId: nextInteractionLock 
+        };
+        
         activeCursorsRef.current.set(e.pointerId, updatedCursor);
         setActiveCursors(prev => {
             const next = new Map(prev);
