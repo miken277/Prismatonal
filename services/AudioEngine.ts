@@ -4,10 +4,57 @@ import { store } from './Store';
 import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
 import { AUDIO_PROCESSOR_CODE } from './AudioProcessorCode';
 
+// --- Typed Messages for Worklet ---
+interface WorkletMessageBase {
+    type: string;
+}
+
+interface UpdatePresetMessage extends WorkletMessageBase {
+    type: 'update_preset';
+    mode: string;
+    data: any; // Normalized preset
+}
+
+interface ConfigMessage extends WorkletMessageBase {
+    type: 'config';
+    polyphony?: number;
+    strumDuration?: number;
+    enableOversampling?: boolean;
+    globalBend?: number;
+}
+
+interface NoteOnMessage extends WorkletMessageBase {
+    type: 'note_on';
+    id: string;
+    freq: number;
+    voiceType: string;
+    mode: PlaybackMode;
+}
+
+interface NoteOffMessage extends WorkletMessageBase {
+    type: 'note_off';
+    id: string;
+}
+
+interface GlideMessage extends WorkletMessageBase {
+    type: 'glide';
+    id: string;
+    freq: number;
+}
+
+interface StopAllMessage extends WorkletMessageBase {
+    type: 'stop_all';
+}
+
+type AudioWorkletMessage = UpdatePresetMessage | ConfigMessage | NoteOnMessage | NoteOffMessage | GlideMessage | StopAllMessage;
+
 class AudioEngine {
   private ctx: AudioContext | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private initPromise: Promise<void> | null = null;
+  
+  // Message Queue for pre-init commands
+  private messageQueue: AudioWorkletMessage[] = [];
   
   // FX Chain
   private limiter: DynamicsCompressorNode | null = null;
@@ -40,6 +87,9 @@ class AudioEngine {
         strum: this.ensurePresetSafety(rawPresets.strum),
         arpeggio: this.ensurePresetSafety(rawPresets.arpeggio)
     };
+
+    // Auto-init to pre-load audio resources immediately
+    this.init().catch(e => console.warn("Auto-init postponed (will retry on gesture)", e));
 
     store.subscribe(() => {
         const newPresets = store.getSnapshot().presets;
@@ -84,15 +134,25 @@ class AudioEngine {
      return safe;
   }
 
-  public updateSettings(settings: AppSettings) {
+  private postMessage(msg: AudioWorkletMessage) {
       if (this.workletNode) {
-          this.workletNode.port.postMessage({ 
-              type: 'config', 
-              polyphony: settings.polyphony,
-              strumDuration: settings.strumDuration,
-              enableOversampling: settings.enableOversampling
-          });
+          this.workletNode.port.postMessage(msg);
+      } else {
+          this.messageQueue.push(msg);
+          // If we are queuing messages but not initializing, trigger init
+          if (!this.initPromise && !this.ctx) {
+              this.init();
+          }
       }
+  }
+
+  public updateSettings(settings: AppSettings) {
+      this.postMessage({ 
+          type: 'config', 
+          polyphony: settings.polyphony,
+          strumDuration: settings.strumDuration,
+          enableOversampling: settings.enableOversampling
+      });
   }
 
   public updatePresets(newPresets: PresetState) {
@@ -123,15 +183,23 @@ class AudioEngine {
       }
       this.updateFX();
 
-      if (this.workletNode) {
-          modes.forEach(mode => {
-              this.workletNode!.port.postMessage({ 
-                  type: 'update_preset', 
-                  mode: mode, 
-                  data: this.activePresets[mode] 
-              });
+      // If worklet isn't ready, these will be queued by postMessage
+      modes.forEach(mode => {
+          this.postMessage({ 
+              type: 'update_preset', 
+              mode: mode, 
+              data: this.activePresets[mode] 
           });
-      }
+      });
+  }
+
+  // New Method: Register a dynamic preset (like a chord patch) with the audio engine
+  public registerPreset(id: string, preset: SynthPreset) {
+      this.postMessage({
+          type: 'update_preset',
+          mode: id,
+          data: this.ensurePresetSafety(preset)
+      });
   }
 
   public async resume() {
@@ -139,7 +207,12 @@ class AudioEngine {
           await this.init(); 
       }
       if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
-          await this.ctx.resume();
+          try {
+            await this.ctx.resume();
+          } catch (e) {
+            // Harmless warning if called before gesture
+            // console.warn("Context resume pending gesture");
+          }
       }
   }
 
@@ -158,22 +231,18 @@ class AudioEngine {
 
             this.ctx.onstatechange = () => {
                 if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
-                    this.ctx.resume().catch(e => console.warn("Audio auto-resume failed:", e));
+                    // Try to auto-resume if allowed
+                    this.ctx.resume().catch(() => {}); 
                 }
             };
 
             try {
+                // Use Blob URL to load worklet code reliably
                 const blob = new Blob([AUDIO_PROCESSOR_CODE], { type: 'application/javascript' });
-                const workletUrl = URL.createObjectURL(blob);
+                const url = URL.createObjectURL(blob);
                 
-                if (this.ctx.audioWorklet && this.ctx.audioWorklet.addModule) {
-                    await this.ctx.audioWorklet.addModule(workletUrl);
-                } else {
-                    console.error("AudioWorklet not supported");
-                    return;
-                }
-                
-                URL.revokeObjectURL(workletUrl);
+                await this.ctx.audioWorklet.addModule(url);
+                URL.revokeObjectURL(url);
                 
                 this.workletNode = new AudioWorkletNode(this.ctx, 'synth-processor', {
                     numberOfInputs: 0,
@@ -188,6 +257,7 @@ class AudioEngine {
                     }
                 };
                 
+                // Initialize state from store
                 (['normal', 'latch', 'strum', 'arpeggio'] as PlayMode[]).forEach(mode => {
                     this.workletNode!.port.postMessage({ 
                         type: 'update_preset', 
@@ -195,7 +265,8 @@ class AudioEngine {
                         data: this.activePresets[mode] 
                     });
                 });
-                this.workletNode.port.postMessage({ 
+                
+                this.workletNode!.port.postMessage({ 
                     type: 'config', 
                     polyphony: store.getSnapshot().settings.polyphony,
                     strumDuration: store.getSnapshot().settings.strumDuration,
@@ -209,6 +280,14 @@ class AudioEngine {
                      this.workletNode.connect(this.reverbGain);
                      this.workletNode.connect(this.delayOutputGain);
                 }
+                
+                // Flush Queue
+                if (this.messageQueue.length > 0) {
+                    this.messageQueue.forEach(msg => this.workletNode!.port.postMessage(msg));
+                    this.messageQueue = [];
+                }
+
+                console.log("Audio Engine Initialized (Suspended)");
 
             } catch (e) {
                 console.error("Failed to load AudioWorklet", e);
@@ -217,9 +296,7 @@ class AudioEngine {
             }
         }
 
-        if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
-            await this.ctx.resume();
-        }
+        // We do NOT auto-resume here anymore to allow constructor init without gesture
     })();
 
     return this.initPromise;
@@ -279,6 +356,7 @@ class AudioEngine {
     this.delayNode.connect(this.delayFeedbackGain);
     this.delayFeedbackGain.connect(this.delayNode);
     
+    // Reconnect Worklet if it exists
     if (this.workletNode) {
         this.workletNode.disconnect();
         this.workletNode.connect(this.dryGain);
@@ -424,15 +502,11 @@ class AudioEngine {
   }
 
   public setPolyphony(count: number) {
-      if (this.workletNode) {
-          this.workletNode.port.postMessage({ type: 'config', polyphony: count });
-      }
+      this.postMessage({ type: 'config', polyphony: count });
   }
 
   public setStrumDuration(duration: number) {
-      if (this.workletNode) {
-          this.workletNode.port.postMessage({ type: 'config', strumDuration: duration });
-      }
+      this.postMessage({ type: 'config', strumDuration: duration });
   }
 
   public setMasterVolume(val: number) {
@@ -452,21 +526,29 @@ class AudioEngine {
 
   // New method for global pitch bend
   public setGlobalBend(semitones: number) {
-      if (this.workletNode) {
-          const ratio = Math.pow(2, semitones / 12.0);
-          this.workletNode.port.postMessage({ type: 'config', globalBend: ratio });
+      const ratio = Math.pow(2, semitones / 12.0);
+      this.postMessage({ type: 'config', globalBend: ratio });
+  }
+
+  public getContext(): AudioContext | null {
+      return this.ctx;
+  }
+
+  // Allow connecting the master output to an external destination (e.g. MediaStreamDestination for recording)
+  public connectToRecordingDestination(destination: AudioNode) {
+      if (this.finalMasterGain) {
+          // Connect in parallel to the recording destination
+          this.finalMasterGain.connect(destination);
       }
   }
 
-  public async startVoice(id: string, ratio: number, baseFrequency: number, presetSlot: PlayMode = 'normal', playbackMode: PlaybackMode = 'gate') {
-    if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
-        this.ctx.resume();
-    }
-    await this.init();
-    if (!this.workletNode) return;
-
+  // Updated startVoice: No longer awaits init(). Queues message if needed.
+  public startVoice(id: string, ratio: number, baseFrequency: number, presetSlot: string = 'normal', playbackMode: PlaybackMode = 'gate') {
+    // Ensure context is running (resume if suspended)
+    this.resume();
+    
     const freq = baseFrequency * ratio;
-    this.workletNode.port.postMessage({ 
+    this.postMessage({ 
         type: 'note_on', 
         id: id, 
         freq: freq,
@@ -476,17 +558,15 @@ class AudioEngine {
   }
 
   public stopVoice(id: string) {
-    if (!this.workletNode) return;
-    this.workletNode.port.postMessage({ 
+    this.postMessage({ 
         type: 'note_off', 
         id: id 
     });
   }
 
   public glideVoice(id: string, newRatio: number, baseFrequency: number) {
-    if (!this.workletNode) return;
     const freq = baseFrequency * newRatio;
-    this.workletNode.port.postMessage({ 
+    this.postMessage({ 
         type: 'glide', 
         id: id, 
         freq: freq 
@@ -494,9 +574,9 @@ class AudioEngine {
   }
 
   public stopAll() {
-    if (!this.workletNode) return;
-    this.workletNode.port.postMessage({ type: 'stop_all' });
-    this.setupFX();
+    this.postMessage({ type: 'stop_all' });
+    // Resetting FX is safe to do immediately even if audio isn't running
+    if (this.ctx) this.setupFX();
   }
 }
 

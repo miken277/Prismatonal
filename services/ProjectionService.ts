@@ -1,5 +1,4 @@
 
-
 import { AppSettings, LayoutApproach } from '../types';
 
 export const PITCH_SCALE = 200; // Pixels per octave (Base Scale)

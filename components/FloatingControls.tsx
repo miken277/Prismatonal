@@ -1,8 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
-import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDivision, ArpeggioStep } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDivision, ArpeggioStep, PresetState, PlayMode, SynthPreset } from '../types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH, DEFAULT_COLORS } from '../constants';
 import { getMaxPrime } from '../services/LatticeService';
+import VolumeWheel from './VolumeWheel'; 
+import { recordingService } from '../services/RecordingService';
 
 interface Props {
   volume: number;
@@ -56,6 +58,16 @@ interface Props {
   maxArpWidth?: number; 
   activeSustainedModes?: number[];
   onClearSustain?: (mode: number) => void;
+  
+  isShortScreen?: boolean; 
+  
+  isSequencerOpen: boolean;
+  onToggleSequencer: () => void;
+
+  presets?: PresetState;
+  onPresetChange?: (mode: PlayMode, preset: SynthPreset) => void;
+  
+  recordScreenActivity?: boolean;
 }
 
 const FloatingControls: React.FC<Props> = ({ 
@@ -68,12 +80,23 @@ const FloatingControls: React.FC<Props> = ({
   onPlayAll, onStopAll,
   maxArpWidth,
   activeSustainedModes = [],
-  onClearSustain
+  onClearSustain,
+  isShortScreen = false,
+  isSequencerOpen,
+  onToggleSequencer,
+  presets,
+  onPresetChange,
+  recordScreenActivity = false
 }) => {
   
-  const [showSequencer, setShowSequencer] = useState(false);
   const [isArpBarHovered, setIsArpBarHovered] = useState(false);
   const [isFlashingRed, setIsFlashingRed] = useState(false);
+  
+  // Recording State - Sync initial state from service
+  const [isRecording, setIsRecording] = useState(recordingService.isRecording);
+  const [recDuration, setRecDuration] = useState(0);
+  const recTimerRef = useRef<number | null>(null);
+  const recSyncTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
       if (recordingFlash > 0) {
@@ -82,6 +105,55 @@ const FloatingControls: React.FC<Props> = ({
           return () => clearTimeout(t);
       }
   }, [recordingFlash]);
+
+  // Clean up recording timers
+  useEffect(() => {
+      return () => {
+          if (recTimerRef.current) clearInterval(recTimerRef.current);
+          if (recSyncTimerRef.current) clearInterval(recSyncTimerRef.current);
+      };
+  }, []);
+
+  const handleToggleRecord = async () => {
+      if (isRecording) {
+          handleStopRecord();
+      } else {
+          try {
+              const mode = recordScreenActivity ? 'video-audio' : 'audio-only';
+              await recordingService.startRecording(mode);
+              setIsRecording(true);
+              setRecDuration(0);
+              
+              recTimerRef.current = window.setInterval(() => {
+                  setRecDuration(prev => prev + 1);
+              }, 1000);
+
+              // Safety check for external stop (e.g. browser UI)
+              recSyncTimerRef.current = window.setInterval(() => {
+                  if (!recordingService.isRecording) {
+                      handleStopRecord();
+                  }
+              }, 1000);
+
+          } catch (e) {
+              console.error("Failed to start recording", e);
+              alert("Failed to start recording.");
+          }
+      }
+  };
+
+  const handleStopRecord = () => {
+      recordingService.stopRecording();
+      setIsRecording(false);
+      if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
+      if (recSyncTimerRef.current) { clearInterval(recSyncTimerRef.current); recSyncTimerRef.current = null; }
+  };
+
+  const formatRecTime = (secs: number) => {
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   const handleDrag = (e: React.PointerEvent, key: keyof AppSettings['uiPositions']) => {
     if (!uiUnlocked) return;
@@ -143,8 +215,10 @@ const FloatingControls: React.FC<Props> = ({
   const effectiveArpWidth = maxArpWidth ? Math.max(300 * uiScale, Math.min(defaultArpBarWidth, maxArpWidth)) : defaultArpBarWidth;
   const isConstrained = effectiveArpWidth < defaultArpBarWidth * 0.95;
   
-  // Instrument Panel Sizing (Matches LimitLayerControls logic roughly)
-  const instrButtonSize = 75 * uiScale; 
+  // Instrument Panel Sizing
+  // Adjusted to 104 (approx 15% reduction from 122)
+  const instrButtonSize = 104 * uiScale; 
+  const wheelWidth = instrButtonSize * 0.5;
   
   const draggableStyle = (key: string) => ({
       left: uiPositions[key as keyof typeof uiPositions]?.x || 0,
@@ -226,6 +300,14 @@ const FloatingControls: React.FC<Props> = ({
       : (isSustainEnabled 
           ? 'bg-blue-600 text-white border-blue-300 shadow-[0_0_15px_rgba(37,99,235,0.6)]' 
           : 'bg-blue-900/40 text-blue-400 border-blue-500/50 hover:bg-blue-800/60');
+
+  // Dynamics Helpers
+  const updatePatchGain = (mode: PlayMode, val: number) => {
+      if (presets && onPresetChange) {
+          const preset = presets[mode];
+          onPresetChange(mode, { ...preset, gain: val });
+      }
+  };
 
   return (
     <>
@@ -312,6 +394,14 @@ const FloatingControls: React.FC<Props> = ({
              <div className={`flex items-center justify-between px-1 h-6 ${isConstrained ? 'flex-wrap h-auto gap-y-2' : ''}`}>
                  <span className="text-[12px] font-bold text-slate-400 uppercase tracking-widest mr-2">ARPEGGIATOR</span>
                  
+                 {/* REC Indicator when panel closed */}
+                 {isRecording && !isSequencerOpen && (
+                     <div className="flex items-center gap-1 bg-red-900/50 px-2 py-0.5 rounded border border-red-500/50 mr-2 animate-pulse shadow-[0_0_8px_red]">
+                         <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                         <span className="text-[9px] font-bold text-red-200">REC</span>
+                     </div>
+                 )}
+
                  <div className="flex items-center gap-2">
                      <div className="flex items-center bg-slate-800/50 rounded border border-slate-700/50 overflow-hidden h-5">
                         <button 
@@ -342,16 +432,16 @@ const FloatingControls: React.FC<Props> = ({
 
              <div className="flex gap-1.5 justify-center flex-wrap w-full">
                  {arpeggios.map(arp => {
-                     const isRecording = recordingArpId === arp.id;
+                     const isRecordingArp = recordingArpId === arp.id;
                      const isPlaying = arp.isPlaying;
                      const hasData = arp.steps.length > 0;
                      
                      let btnClass = "bg-slate-800/80 border-slate-600 text-slate-400";
-                     if (isRecording) btnClass = "bg-red-900/80 border-red-500 text-white animate-pulse shadow-[0_0_10px_red]";
+                     if (isRecordingArp) btnClass = "bg-red-900/80 border-red-500 text-white animate-pulse shadow-[0_0_10px_red]";
                      else if (isPlaying) btnClass = "bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_blue]";
                      else if (hasData) btnClass = "bg-slate-700 border-blue-500/30 text-blue-200";
 
-                     const showGreenDot = isPlaying && !isArpBarHovered && !isRecording;
+                     const showGreenDot = isPlaying && !isArpBarHovered && !isRecordingArp;
 
                      return (
                          <button 
@@ -373,21 +463,21 @@ const FloatingControls: React.FC<Props> = ({
         
         <button 
             className="w-full h-4 mt-1 bg-slate-800/50 hover:bg-slate-700/50 rounded flex items-center justify-center cursor-pointer transition-colors"
-            onPointerDown={(e) => { e.stopPropagation(); setShowSequencer(!showSequencer); }}
+            onPointerDown={(e) => { e.stopPropagation(); onToggleSequencer(); }}
         >
-             <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 text-slate-400 transition-transform ${showSequencer ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+             <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 text-slate-400 transition-transform ${isSequencerOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
              </svg>
         </button>
         
-        {showSequencer && (
+        {isSequencerOpen && (
             <div 
                 className="absolute left-0 top-full mt-2 bg-slate-950/90 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl p-4 z-[160] flex flex-col gap-3"
                 style={{ 
                     width: '350px', 
-                    height: '320px', 
+                    height: '350px', 
                     minWidth: '350px',
-                    minHeight: '200px',
+                    minHeight: '230px',
                     maxWidth: 'calc(100vw - 40px)',
                     maxHeight: '90vh',
                     resize: 'both',
@@ -410,7 +500,12 @@ const FloatingControls: React.FC<Props> = ({
                         {onStopAll && (
                             <button 
                                 className="text-[10px] font-bold bg-red-900/50 hover:bg-red-700 text-red-400 hover:text-white px-2 py-0.5 rounded border border-red-700 transition-colors"
-                                onPointerDown={(e) => { e.stopPropagation(); onStopAll(); }}
+                                onPointerDown={(e) => { 
+                                    e.stopPropagation(); 
+                                    onStopAll(); 
+                                    // STOP RECORDING IF ACTIVE
+                                    if(isRecording) handleStopRecord();
+                                }}
                             >
                                 STOP ALL
                             </button>
@@ -533,12 +628,22 @@ const FloatingControls: React.FC<Props> = ({
                     })}
                 </div>
 
-                <div className="flex justify-between items-end relative mt-1 flex-shrink-0">
-                     {recordingArpId && (
-                         <span className="text-[10px] text-red-400 animate-pulse">Recording to {recordingArpId}...</span>
-                     )}
-                     <div className="absolute bottom-0 right-0 pointer-events-none text-slate-600 opacity-50">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M22 22H12l10-10v10z"/></svg>
+                <div className="flex justify-between items-center relative mt-1 flex-shrink-0">
+                     <div className="flex items-center gap-2">
+                         {recordingArpId && (
+                             <span className="text-[10px] text-red-400 animate-pulse">Rec: {recordingArpId}</span>
+                         )}
+                     </div>
+                     
+                     <div className="flex items-center gap-2">
+                         {/* Integrated Recording Button */}
+                         <button 
+                            onClick={handleToggleRecord}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${isRecording ? 'bg-red-900/80 border-red-500 text-white animate-pulse' : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-300'}`}
+                         >
+                             <div className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500' : 'bg-red-500/70'}`}></div>
+                             {isRecording ? `REC ${formatRecTime(recDuration)}` : 'Record Audio'}
+                         </button>
                      </div>
                 </div>
             </div>
@@ -547,51 +652,69 @@ const FloatingControls: React.FC<Props> = ({
 
       {/* NEW LEFT INSTRUMENTS CLUSTER */}
       <div 
-        className={`absolute flex flex-col gap-1 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        className={`absolute flex flex-col gap-4 z-[140] bg-slate-900/50 p-3 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
         style={{ ...draggableStyle('instruments') }}
         onPointerDown={(e) => handleDrag(e, 'instruments')}
       >
-          {/* Drone Button */}
-          <button 
-            className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 1 ? 'bg-green-600 border-green-400 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${hasDroneAura ? droneAuraClass : ''}`}
-            style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 10 * uiScale }}
-            onPointerDown={(e) => !uiUnlocked && handleButtonPress(e, 'instruments', onLatch)}
-            onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(1); }}
-          >
-            Drone
-          </button>
-
-          {/* Strings Button */}
-          <button 
-            className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 2 ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${hasStringsAura ? stringsAuraClass : ''}`}
-            style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 10 * uiScale }}
-            onPointerDown={(e) => onSust && !uiUnlocked && handleButtonPress(e, 'instruments', onSust)}
-            onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(2); }}
-          >
-            Strings
-          </button>
-
-          {/* Plucked Button - REMOVED WRONG AURA CLASS */}
-          <button 
-            className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 3 ? 'bg-orange-600 border-orange-400 text-white shadow-[0_0_10px_rgba(249,115,22,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${latchMode === 3 ? '' : ''}`}
-            style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 10 * uiScale }}
-            onPointerDown={(e) => onPluck && !uiUnlocked && handleButtonPress(e, 'instruments', onPluck)}
-            onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(3); }}
-          >
-            Plucked
-          </button>
-
-          {/* Empty Placeholders - Adjusted count */}
-          {[1,2].map(i => (
+          {/* Drone Button + Volume */}
+          <div className="flex items-center gap-3">
+              <VolumeWheel 
+                  value={presets?.latch.gain || 0.5} 
+                  onChange={(v) => updatePatchGain('latch', v)} 
+                  color="#22c55e" 
+                  width={wheelWidth} 
+                  height={instrButtonSize} 
+                  uiScale={uiScale}
+              />
               <button 
-                key={i}
-                disabled
-                className="rounded-lg border-2 border-slate-800 bg-slate-900/30 text-slate-700 flex items-center justify-center pointer-events-none"
-                style={{ width: instrButtonSize, height: instrButtonSize }}
+                className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 1 ? 'bg-green-600 border-green-400 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${hasDroneAura ? droneAuraClass : ''}`}
+                style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 15 * uiScale }}
+                onPointerDown={(e) => !uiUnlocked && handleButtonPress(e, 'instruments', onLatch)}
+                onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(1); }}
               >
-                  <div className="w-2 h-2 rounded-full bg-slate-800"></div>
+                Drone
               </button>
-          ))}
+          </div>
+
+          {/* Strings Button + Volume */}
+          <div className="flex items-center gap-3">
+              <VolumeWheel 
+                  value={presets?.normal.gain || 0.5} 
+                  onChange={(v) => updatePatchGain('normal', v)} 
+                  color="#3b82f6" 
+                  width={wheelWidth} 
+                  height={instrButtonSize} 
+                  uiScale={uiScale}
+              />
+              <button 
+                className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 2 ? 'bg-blue-600 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${hasStringsAura ? stringsAuraClass : ''}`}
+                style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 15 * uiScale }}
+                onPointerDown={(e) => onSust && !uiUnlocked && handleButtonPress(e, 'instruments', onSust)}
+                onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(2); }}
+              >
+                Strings
+              </button>
+          </div>
+
+          {/* Plucked Button + Volume */}
+          <div className="flex items-center gap-3">
+              <VolumeWheel 
+                  value={presets?.strum.gain || 0.5} 
+                  onChange={(v) => updatePatchGain('strum', v)} 
+                  color="#f97316" 
+                  width={wheelWidth} 
+                  height={instrButtonSize} 
+                  uiScale={uiScale}
+              />
+              <button 
+                className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-[10px] uppercase tracking-wider ${latchMode === 3 ? 'bg-orange-600 border-orange-400 text-white shadow-[0_0_10px_rgba(249,115,22,0.5)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${latchMode === 3 ? '' : ''}`}
+                style={{ width: instrButtonSize, height: instrButtonSize, fontSize: 15 * uiScale }}
+                onPointerDown={(e) => onPluck && !uiUnlocked && handleButtonPress(e, 'instruments', onPluck)}
+                onContextMenu={(e) => { e.preventDefault(); if(!uiUnlocked && onClearSustain) onClearSustain(3); }}
+              >
+                Plucked
+              </button>
+          </div>
       </div>
 
       {/* BOTTOM RIGHT CLUSTER - Modified */}

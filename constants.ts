@@ -13,20 +13,42 @@ export const DEFAULT_COLORS: LimitColorMap = {
 };
 
 export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
+    // Navigation
+    center: 'c',
+    increaseDepth: '.',
+    decreaseDepth: ',',
+    settings: 's',
+    
+    // Global & Panic
     volumeUp: 'arrowup',
     volumeDown: 'arrowdown',
+    panic: 'escape',
+    off: 'o',
+    
+    // Patch & Mode Controls (Bottom Right Priority)
+    latch: 'l', // Key binding for mode toggling (Drone/Strings)
+    sustain: ' ', // Spacebar for Sustain (previously latch)
+    bend: 'b',
+    modeDrone: '1',
+    modeStrings: '2',
+    modePlucked: '3',
+    synth: 'm',
+
+    // Chords
+    addChord: 'enter',
+    
+    // Tempo
+    bpmUp: ']',
+    bpmDown: '[',
+
+    // Arpeggiator
+    toggleSequencer: 'q',
+    playAllArps: 'p',
+    stopAllArps: 'x',
+    
+    // Legacy / View (Less prioritized)
     spatialScaleUp: 'arrowright',
     spatialScaleDown: 'arrowleft',
-    latch: ' ',
-    panic: 'escape',
-    center: 'c',
-    settings: 's',
-    synth: 'm',
-    off: 'o',
-    bend: 'b',
-    addChord: 'enter',
-    increaseDepth: '.',
-    decreaseDepth: ','
 };
 
 // Reverb Defaults Helper
@@ -120,7 +142,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   centerResetsDepth: false,
   savedChords: generateChordSlots(),
   chordShortcutSizeScale: 0.6,
-  chordsAlwaysRelatch: false,
   arpeggios: generateArpeggioSlots(),
   arpBpm: 120,
   hiddenLimits: [7, 9, 11, 13, 15],
@@ -152,6 +173,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   isPitchBendEnabled: false, 
   isSustainEnabled: false, // Set to false so Strings starts Normal; Drone logic overrides this when selected
   isStrumEnabled: false, // Default to false so String behaves like a normal Gate instrument
+  chordsAlwaysRelatch: false, // New Default
   isPitchSnapEnabled: true,
   polyphony: 8, // Reduced from 16 to 8 for better mobile stability by default
   pitchOffLocked: false,
@@ -171,6 +193,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableKeyboardShortcuts: false,
   keyMappings: DEFAULT_KEY_MAPPINGS,
   strumDuration: 0.5,
+  recordScreenActivity: false, // Default off
   uiUnlocked: false,
   uiScale: 1.0, 
   uiEdgeMargin: 4, 
@@ -259,9 +282,31 @@ const preservedNoiseWash = p("Noise Wash", "Atmosphere",
 
 // --- NEW PATCH BANKS ---
 const PLUCKED_PATCHES = [
-    p("Classic Harp", "Plucked", { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.6, attack: 0.05, decay: 1.5, sustain: 0, release: 1.5 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3, attack: 0.05, decay: 1.2, sustain: 0 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.1, filterCutoff: 1500, decay: 0.8, sustain: 0 }, { spread: 0.4, reverbType: 'hall', reverbMix: 0.3 }),
+    p("Classic Harp", "Plucked", 
+        // Osc 1: The "String" body - Sawtooth filtered, bright start, warm trail
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.005, decay: 2.5, sustain: 0.0, release: 2.5, filterCutoff: 400, filterResonance: 1.0 }, 
+        // Osc 2: Fundamental reinforcement - Sine, smooth body
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.6, attack: 0.005, decay: 3.0, sustain: 0.0, release: 3.0 }, 
+        // Osc 3: Transient/Harmonic - Short, high pitch, defines the 'pluck' trigger
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, gain: 0.2, attack: 0.005, decay: 0.15, sustain: 0.0, release: 0.15 }, 
+        // FX & Mods: Env3 modulates Osc1 cutoff for a dynamic pluck transient (using the short decay of Osc3's env for the filter of Osc1)
+        { 
+            spread: 0.5, 
+            reverbType: 'room', 
+            reverbMix: 0.25, 
+            delayMix: 0.15,
+            modMatrix: [
+                { id: 'pluck-cut', enabled: true, source: 'env3', target: 'osc1_cutoff', amount: 75 }
+            ] 
+        }
+    ),
     p("Koto Synth", "Plucked", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, decay: 0.4, sustain: 0, filterCutoff: 3000 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.4, decay: 0.5, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.2, decay: 0.3, sustain: 0 }, { spread: 0.3, reverbType: 'room', reverbMix: 0.2 }),
-    p("Guitar Pluck", "Plucked", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, decay: 0.8, sustain: 0, filterCutoff: 2000 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, decay: 0.6, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.1, decay: 0.2, sustain: 0 }, { spread: 0.2, reverbType: 'room', reverbMix: 0.3, delayMix: 0.2 }),
+    p("Guitar Pluck", "Plucked", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.005, decay: 1.2, sustain: 0, release: 1.2, filterCutoff: 600, filterResonance: 0.5 }, 
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, attack: 0.005, decay: 1.0, sustain: 0, release: 1.0, filterCutoff: 800 }, 
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.15, decay: 0.2, sustain: 0 }, 
+        { spread: 0.2, reverbType: 'room', reverbMix: 0.3, delayMix: 0.2, modMatrix: [{ id: 'gtr-cut', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 60 }] }
+    ),
     p("Kalimba Dream", "Plucked", { enabled: true, waveform: WaveformType.SINE, gain: 0.7, decay: 0.6, sustain: 0 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, gain: 0.3, decay: 0.4, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.2, decay: 0.2, sustain: 0 }, { spread: 0.4, reverbType: 'plate', reverbMix: 0.25 })
 ];
 

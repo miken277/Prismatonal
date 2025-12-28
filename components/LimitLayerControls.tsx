@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AppSettings, XYPos } from '../types';
 import { useDragManager } from '../hooks/useDragManager';
@@ -8,11 +9,12 @@ interface Props {
   draggingId: string | null;
   setDraggingId: (id: string | null) => void;
   uiScale?: number;
+  isShortScreen?: boolean;
 }
 
 const LIMITS = [1, 3, 5, 7, 9, 11, 13, 15];
 
-const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggingId, setDraggingId, uiScale = 1.0 }) => {
+const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggingId, setDraggingId, uiScale = 1.0, isShortScreen = false }) => {
   const { uiUnlocked, uiPositions } = settings;
   
   // Size increased by 1/3: 56 * 1.33 = 75, 28 * 1.33 = 37

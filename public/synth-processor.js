@@ -1,11 +1,13 @@
 
-export const AUDIO_PROCESSOR_CODE = `
 // --- 1. DSP UTILS & CONSTANTS ---
 
 const TWO_PI = 2 * Math.PI;
-const WAVETABLE_SIZE = 65536; 
-const SINE_TABLE = new Float32Array(WAVETABLE_SIZE + 1);
 
+// Increased from 4096 to 65536 to eliminate linear interpolation artifacts
+const WAVETABLE_SIZE = 65536; 
+const SINE_TABLE = new Float32Array(WAVETABLE_SIZE + 1); // +1 for simple interpolation guard
+
+// Precompute Sine Table
 for (let i = 0; i <= WAVETABLE_SIZE; i++) {
     SINE_TABLE[i] = Math.sin((i / WAVETABLE_SIZE) * TWO_PI);
 }
@@ -38,7 +40,7 @@ const DUMMY_PRESET_DATA = {
     stereoPanDepth: 0
 };
 
-// --- 2. BASIC DSP CLASSES ---
+// --- 2. BASIC DSP CLASSES (Oscillator, Filter, Envelope) ---
 
 class PolyBLEP {
   constructor(sampleRate) {
@@ -161,6 +163,10 @@ class Oscillator {
     this.sampleRate = sampleRate;
   }
 
+  reset() {
+      // Free-running oscillators
+  }
+
   process(freq, type, dt) {
     if (!Number.isFinite(freq) || freq <= 0 || freq > 24000) return 0.0;
 
@@ -171,10 +177,12 @@ class Oscillator {
     
     switch (type) {
       case 'sine':
+        // High-performance LUT lookup
         {
             const index = this.phase * WAVETABLE_SIZE;
             const i = Math.floor(index);
             const f = index - i;
+            // Linear Interpolation from pre-computed table
             sample = SINE_TABLE[i] + f * (SINE_TABLE[i + 1] - SINE_TABLE[i]);
         }
         break;
@@ -185,10 +193,12 @@ class Oscillator {
         }
         break;
       case 'sawtooth':
+        // PolyBLEP Saw is efficient and sounds good
         sample = (2.0 * this.phase) - 1.0;
         sample -= this.blep.get(this.phase, dt * freq);
         break;
       case 'square':
+        // PolyBLEP Square
         sample = this.phase < 0.5 ? 1.0 : -1.0;
         sample += this.blep.get(this.phase, dt * freq);
         let phase2 = (this.phase + 0.5) % 1.0;
@@ -200,22 +210,21 @@ class Oscillator {
   }
 }
 
-// --- 3. VOICE LOGIC ---
+// --- 3. VOICE LOGIC (Signal Path) ---
 
 class Voice {
   constructor(sampleRate) {
     this.sampleRate = sampleRate;
     this.active = false;
     this.id = '';
-    this.type = 'normal';
-    this.mode = 'gate';
+    this.type = 'normal'; // Preset selection
+    this.mode = 'gate';   // Playback behavior: 'gate', 'trigger', 'latch'
     this.panPos = 0; 
     
     this.baseFreq = 440;
     this.targetFreq = 440;
     this.startTime = 0; 
-    this.releaseTime = 0;
-    this.pendingRelease = false;
+    this.releaseTime = 0; 
     
     this.oscs = [
         new Oscillator(sampleRate),
@@ -230,6 +239,7 @@ class Voice {
     this.lfoVals = new Float32Array(3);
   }
 
+  // Allow dynamic updates to sample rate when oversampling changes
   updateSampleRate(newRate) {
       if (this.sampleRate === newRate) return;
       this.sampleRate = newRate;
@@ -244,54 +254,45 @@ class Voice {
     this.targetFreq = freq;
     this.active = true;
     this.startTime = currentTime; 
-    this.releaseTime = 0;
-    this.pendingRelease = false;
+    this.releaseTime = 0; 
     
-    this.envs.forEach(env => env.trigger());
+    this.envs.forEach(env => {
+        // Soft reset to avoid clicks on retrigger
+        env.trigger();
+    });
+    
     this.filters.forEach(f => f.reset());
     this.lfoPhases.fill(0.0);
   }
 
   release() {
-    // Prevent dead notes: if release is called too quickly after trigger (e.g. init flush or fast tap),
-    // queue the release to ensure the attack phase has time to produce audible sound.
-    if (currentTime - this.startTime < 0.01) {
-        this.pendingRelease = true;
-    } else {
-        this.doRelease();
-    }
-  }
-  
-  doRelease() {
     this.releaseTime = currentTime;
     this.envs.forEach(env => env.release());
   }
   
   hardStop() {
       this.active = false;
-      this.pendingRelease = false;
       this.envs.forEach(env => env.reset());
       this.filters.forEach(f => f.reset());
   }
 
+  getLevel() {
+    return Math.max(this.envs[0].value, this.envs[1].value, this.envs[2].value);
+  }
+
+  // Optimized block processing
   renderBlock(preset, dt, bufL, bufR, len, panSpeed, panDepth, startPanPhase, globalBend) {
     if (!this.active) return;
 
-    // Check deferred release
-    if (this.pendingRelease) {
-        if (currentTime - this.startTime >= 0.01) {
-            this.pendingRelease = false;
-            this.doRelease();
-        }
-    }
-
+    // --- FREQ GLIDE ---
     const diff = this.targetFreq - this.baseFreq;
     if (Math.abs(diff) > 0.001) {
-      this.baseFreq += diff * 0.005; 
+      this.baseFreq += diff * 0.005; // Simple exponential slide per block
     } else {
       this.baseFreq = this.targetFreq;
     }
 
+    // --- CACHED CONFIGS ---
     const osc1 = preset.osc1 || DUMMY_OSC_CONFIG;
     const osc2 = preset.osc2 || DUMMY_OSC_CONFIG;
     const osc3 = preset.osc3 || DUMMY_OSC_CONFIG;
@@ -303,16 +304,21 @@ class Voice {
     let anyEnvActive = false;
     let panPhase = startPanPhase;
 
+    // Pre-calculate LFO rates to avoid dictionary lookup in tight loop
     const lfoRate1 = osc1.lfoRate || 0;
     const lfoRate2 = osc2.lfoRate || 0;
     const lfoRate3 = osc3.lfoRate || 0;
 
+    // OPTIMIZATION: Pre-calculate static frequencies if no modulation
+    // Apply globalBend to the base frequency here
     let osc1StaticFreq = 0, osc2StaticFreq = 0, osc3StaticFreq = 0;
     let osc1ModPitch = false, osc2ModPitch = false, osc3ModPitch = false;
 
+    // Check for pitch mod in Matrix or LFO
     if (osc1.enabled) {
         if (osc1.lfoTarget === 'pitch') osc1ModPitch = true;
         if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc1_pitch')) osc1ModPitch = true;
+        
         if (!osc1ModPitch) {
             const cents = osc1.coarseDetune + osc1.fineDetune;
             osc1StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
@@ -322,6 +328,7 @@ class Voice {
     if (osc2.enabled) {
         if (osc2.lfoTarget === 'pitch') osc2ModPitch = true;
         if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc2_pitch')) osc2ModPitch = true;
+        
         if (!osc2ModPitch) {
             const cents = osc2.coarseDetune + osc2.fineDetune;
             osc2StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
@@ -331,6 +338,7 @@ class Voice {
     if (osc3.enabled) {
         if (osc3.lfoTarget === 'pitch') osc3ModPitch = true;
         if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc3_pitch')) osc3ModPitch = true;
+        
         if (!osc3ModPitch) {
             const cents = osc3.coarseDetune + osc3.fineDetune;
             osc3StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
@@ -338,8 +346,11 @@ class Voice {
     }
 
     for (let s = 0; s < len; s++) {
+        // --- 1. MODULATORS ---
         anyEnvActive = false;
         
+        // Unrolled Envelope & LFO processing
+        // OSC 1
         const env1 = this.envs[0].process(osc1, dt);
         this.envVals[0] = env1;
         if (this.envs[0].stage !== 'idle') anyEnvActive = true;
@@ -347,6 +358,7 @@ class Voice {
         if (this.lfoPhases[0] >= 1.0) this.lfoPhases[0] -= 1.0;
         this.lfoVals[0] = Math.sin(TWO_PI * this.lfoPhases[0]);
 
+        // OSC 2
         const env2 = this.envs[1].process(osc2, dt);
         this.envVals[1] = env2;
         if (this.envs[1].stage !== 'idle') anyEnvActive = true;
@@ -354,6 +366,7 @@ class Voice {
         if (this.lfoPhases[1] >= 1.0) this.lfoPhases[1] -= 1.0;
         this.lfoVals[1] = Math.sin(TWO_PI * this.lfoPhases[1]);
 
+        // OSC 3
         const env3 = this.envs[2].process(osc3, dt);
         this.envVals[2] = env3;
         if (this.envs[2].stage !== 'idle') anyEnvActive = true;
@@ -365,6 +378,7 @@ class Voice {
             this.active = false;
         }
 
+        // --- 2. MOD MATRIX ---
         let modP1=0, modC1=0, modG1=0, modR1=0;
         let modP2=0, modC2=0, modG2=0, modR2=0;
         let modP3=0, modC3=0, modG3=0, modR3=0;
@@ -373,7 +387,9 @@ class Voice {
             for(let m = 0; m < matrix.length; m++) {
                 const row = matrix[m];
                 if (!row.enabled) continue;
+                
                 let srcVal = 0;
+                // Hardcoded source lookup for speed
                 if (row.source === 'env1') srcVal = this.envVals[0];
                 else if (row.source === 'env2') srcVal = this.envVals[1];
                 else if (row.source === 'env3') srcVal = this.envVals[2];
@@ -383,6 +399,7 @@ class Voice {
 
                 const amt = srcVal * row.amount;
 
+                // Hardcoded target lookup
                 switch(row.target) {
                     case 'osc1_pitch': modP1 += amt; break;
                     case 'osc1_cutoff': modC1 += amt; break;
@@ -400,8 +417,10 @@ class Voice {
             }
         }
 
+        // --- 3. VOICE GENERATION ---
         let voiceMix = 0.0;
 
+        // --- OSC 1 ---
         if (osc1.enabled && this.envVals[0] > 0.0001) {
             let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
             const d = osc1.lfoDepth || 0;
@@ -427,6 +446,7 @@ class Voice {
             voiceMix += sig * osc1.gain * this.envVals[0] * hardAmp * Math.max(0, 1.0 + modG1);
         }
 
+        // --- OSC 2 ---
         if (osc2.enabled && this.envVals[1] > 0.0001) {
             let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
             const d = osc2.lfoDepth || 0;
@@ -452,6 +472,7 @@ class Voice {
             voiceMix += sig * osc2.gain * this.envVals[1] * hardAmp * Math.max(0, 1.0 + modG2);
         }
 
+        // --- OSC 3 ---
         if (osc3.enabled && this.envVals[2] > 0.0001) {
             let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
             const d = osc3.lfoDepth || 0;
@@ -477,6 +498,7 @@ class Voice {
             voiceMix += sig * osc3.gain * this.envVals[2] * hardAmp * Math.max(0, 1.0 + modG3);
         }
 
+        // --- 4. PANNING & OUTPUT ---
         panPhase += dt * panSpeed;
         if (panPhase > 1.0) panPhase -= 1.0;
         
@@ -485,6 +507,7 @@ class Voice {
         p += autoPan;
         p = Math.max(-1.0, Math.min(1.0, p));
         
+        // Equal power pan approx
         const gainL = 0.5 * (1.0 - p);
         const gainR = 0.5 * (1.0 + p);
 
@@ -494,18 +517,21 @@ class Voice {
   }
 }
 
-// --- 4. PROCESSOR LOGIC ---
+// --- 4. PROCESSOR LOGIC (Worklet Core) ---
 
 class PrismaProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    // Default to enabled (Store controls this)
     this.isOversamplingEnabled = true;
-    this.globalBendMultiplier = 1.0; 
+    this.globalBendMultiplier = 1.0; // Master pitch bend ratio
     
+    // Initial setup
     const OVERSAMPLE = 2;
     const workingRate = sampleRate * OVERSAMPLE;
 
     this.voices = [];
+    // Increase physical voice limit to 64
     for(let i=0; i<64; i++) {
         const v = new Voice(workingRate);
         v.panPos = Math.sin(i * 123.456); 
@@ -524,7 +550,10 @@ class PrismaProcessor extends AudioWorkletProcessor {
     this.xm1L = 0; this.ym1L = 0;
     this.xm1R = 0; this.ym1R = 0;
     
+    // Global Pan Phase tracker
     this.panPhase = 0;
+    
+    // Mix Buffers
     this.mixBufferL = null;
     this.mixBufferR = null;
 
@@ -640,17 +669,21 @@ class PrismaProcessor extends AudioWorkletProcessor {
     if (!channelL) return true;
     const len = channelL.length;
     
+    // Config based on Oversampling setting
     const OVERSAMPLE = this.isOversamplingEnabled ? 2 : 1;
     const workingRate = sampleRate * OVERSAMPLE;
     const workingLen = len * OVERSAMPLE;
     const dt = 1.0 / workingRate;
 
+    // Performance Budget
     const startTime = globalThis.performance ? globalThis.performance.now() : 0;
     const MAX_BUDGET_MS = 1.5; 
     
+    // Resize buffer if needed
     if (!this.mixBufferL || this.mixBufferL.length !== workingLen) {
         this.mixBufferL = new Float32Array(workingLen);
         this.mixBufferR = new Float32Array(workingLen);
+        // Inform voices of new sample rate for filter/osc calculations
         this.voices.forEach(v => v.updateSampleRate(workingRate));
     }
     
@@ -662,19 +695,24 @@ class PrismaProcessor extends AudioWorkletProcessor {
     const panDepth = (masterPreset.stereoPanDepth !== undefined) ? masterPreset.stereoPanDepth : 0.0;
     const initialPanPhase = this.panPhase;
 
+    // --- RENDER VOICES ---
     let voicesProcessed = 0;
     
     for (let i = 0; i < this.voices.length; i++) {
         const v = this.voices[i];
         if (v.active) {
+            // Auto-Release Check for Trigger mode
             if ((v.mode === 'trigger' || v.type === 'strum') && v.releaseTime === 0) {
                 if (currentTime - v.startTime >= this.strumDuration) v.release();
             }
 
             const presetToUse = this.presets[v.type] || this.presets.normal;
+            
+            // Pass the global pan parameters to synchronization
             v.renderBlock(presetToUse, dt, this.mixBufferL, this.mixBufferR, workingLen, panSpeed, panDepth, initialPanPhase, this.globalBendMultiplier);
             voicesProcessed++;
 
+            // CPU GOVERNOR
             if (startTime > 0 && voicesProcessed % 2 === 0) {
                 if (globalThis.performance.now() - startTime > MAX_BUDGET_MS) {
                     break;
@@ -683,12 +721,19 @@ class PrismaProcessor extends AudioWorkletProcessor {
         }
     }
     
+    // Update global pan phase for next block
     this.panPhase += (workingLen * dt * panSpeed);
     while (this.panPhase > 1.0) this.panPhase -= 1.0;
 
+    // --- OUTPUT ---
     if (OVERSAMPLE === 2) {
+        // Simple Decimation + Linear DC Blocker
         for (let s = 0; s < len; s++) {
+            let accL = 0;
+            let accR = 0;
             const osIdx = s * 2;
+
+            // Soft Clip before downsample
             let sl1 = Math.tanh(this.mixBufferL[osIdx] * 0.8);
             let sr1 = Math.tanh(this.mixBufferR[osIdx] * 0.8);
             let sl2 = Math.tanh(this.mixBufferL[osIdx+1] * 0.8);
@@ -697,6 +742,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
             const outL = (sl1 + sl2) * 0.5;
             const outR = (sr1 + sr2) * 0.5;
 
+            // DC Blocker
             const yL = outL - this.xm1L + 0.995 * this.ym1L;
             this.xm1L = outL;
             this.ym1L = yL;
@@ -709,10 +755,13 @@ class PrismaProcessor extends AudioWorkletProcessor {
             if (channelR) channelR[s] = yR;
         }
     } else {
+        // 1x Passthrough
         for (let s = 0; s < len; s++) {
+            // Soft Clip
             const sl = Math.tanh(this.mixBufferL[s] * 0.8);
             const sr = Math.tanh(this.mixBufferR[s] * 0.8);
 
+            // DC Blocker
             const yL = sl - this.xm1L + 0.995 * this.ym1L;
             this.xm1L = sl;
             this.ym1L = yL;
@@ -731,4 +780,3 @@ class PrismaProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor('synth-processor', PrismaProcessor);
-`;

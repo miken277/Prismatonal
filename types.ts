@@ -48,6 +48,7 @@ export interface ChordDefinition {
   nodes: ChordNode[];
   visible: boolean; // Is shortcut on screen?
   position: { x: number; y: number }; // Relative position or legacy absolute
+  soundConfig?: SynthPreset; // The captured patch
 }
 
 export interface ArpeggioStep {
@@ -86,20 +87,42 @@ export interface XYPos {
 }
 
 export interface KeyMappings {
-    volumeUp: string;
-    volumeDown: string;
-    spatialScaleUp: string;
-    spatialScaleDown: string;
-    latch: string;
-    panic: string;
+    // Navigation & View
     center: string;
-    settings: string;
-    synth: string;
-    off: string;
-    bend: string;
-    addChord: string;
     increaseDepth: string;
     decreaseDepth: string;
+    settings: string;
+    
+    // Global & Panic
+    volumeUp: string;
+    volumeDown: string;
+    panic: string;
+    off: string;
+    
+    // Patch & Mode Controls (Bottom Right Priority)
+    latch: string; // Toggle Drone/Strings mode
+    sustain: string; // Toggles Sustain (SUST)
+    bend: string; // Toggles Pitch Bend
+    modeDrone: string; // Switch to Drone Mode
+    modeStrings: string; // Switch to Strings Mode
+    modePlucked: string; // Switch to Plucked Mode
+    synth: string; // Toggle Synth Panel
+
+    // Chords & Performance
+    addChord: string;
+    
+    // Tempo
+    bpmUp: string;
+    bpmDown: string;
+
+    // Arpeggiator
+    toggleSequencer: string;
+    playAllArps: string;
+    stopAllArps: string;
+    
+    // Legacy / View scaling (kept for compatibility)
+    spatialScaleUp: string;
+    spatialScaleDown: string;
 }
 
 export interface AppSettings {
@@ -137,7 +160,6 @@ export interface AppSettings {
   // Chords
   savedChords: ChordDefinition[];
   chordShortcutSizeScale: number; // 0.33 to 1.0 relative to main buttons
-  chordsAlwaysRelatch: boolean; // If true, activating a chord re-triggers notes even if playing
   
   // Arpeggios
   arpeggios: ArpeggioDefinition[];
@@ -192,6 +214,7 @@ export interface AppSettings {
   isPitchBendEnabled: boolean;
   isSustainEnabled: boolean; // Global Sustain Modifier (Gate vs Latch)
   isStrumEnabled: boolean; // Global Strum Modifier (Trigger vs Gate)
+  chordsAlwaysRelatch: boolean; // New: Whether selecting a chord always retriggers/relatches its notes
   isPitchSnapEnabled: boolean;
   polyphony: number;
   pitchOffLocked: boolean;
@@ -220,6 +243,7 @@ export interface AppSettings {
   enableKeyboardShortcuts: boolean;
   keyMappings: KeyMappings;
   strumDuration: number; // seconds, 0.1 to 2.0
+  recordScreenActivity: boolean; // New Setting: Toggle for video capture
 
   // UI Relocation & Scaling
   uiUnlocked: boolean;

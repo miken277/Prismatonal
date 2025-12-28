@@ -134,18 +134,24 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   const handleColorChange = (limit: number, color: string) => updateSettings({ ...settings, colors: { ...settings.colors, [limit]: color } });
   
   const handleImportClick = () => {
-      const confirmed = window.confirm(
-        "WARNING: Importing will overwrite ALL system settings, keyboard mappings, user bank patches, and currently selected synth sounds. " +
-        "This action cannot be undone. \n\nDo you wish to proceed?"
-      );
-      if (confirmed) {
-          fileInputRef.current?.click();
-      }
+      fileInputRef.current?.click();
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) importXML(file).then(success => { if (success) onClose(); });
+      if (file) {
+          const confirmed = window.confirm(
+            "WARNING: Importing will overwrite ALL system settings, keyboard mappings, user bank patches, and currently selected synth sounds.\n\n" +
+            "This action cannot be undone.\n\n" +
+            "Do you wish to proceed?"
+          );
+          
+          if (confirmed) {
+              importXML(file).then(success => { 
+                  if (success) onClose(); 
+              });
+          }
+      }
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -233,7 +239,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                       let newSpacing = settings.buttonSpacingScale;
                       
                       // Auto-adjust spacing defaults for specific layouts
-                      // 0.756 = 20mm, 1.89 = 50mm
                       if (newLayout === 'diamond') newSpacing = 0.756; 
                       else if (newLayout === 'lattice') newSpacing = 1.89; 
                       
@@ -286,6 +291,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
         <div className="p-6 overflow-y-auto flex-1 min-h-0 bg-slate-800">
             {activeTab === 'tonality' && (
               <div className="space-y-6 animate-in fade-in duration-300">
+                  {/* ... Tonality Section Content ... */}
                   <div className="flex flex-col md:flex-row gap-4 items-center bg-slate-900/40 p-2 rounded-lg border border-slate-700/50 mb-2">
                      {(['ji', 'et', 'indian', 'pythagorean'] as TuningSystem[]).map(sys => (
                          <button 
@@ -339,7 +345,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                           </div>
                       </div>
                   )}
-
+                  {/* ... Rest of Tonality tabs (et, indian, pythagorean) as per existing file ... */}
                   {settings.tuningSystem === 'et' && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-right-2 duration-300">
                           <div className="space-y-6">
@@ -465,10 +471,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         <span className="text-sm font-semibold">Enable Keyboard Shortcuts</span>
                         <input type="checkbox" checked={settings.enableKeyboardShortcuts} onChange={(e) => handleChange('enableKeyboardShortcuts', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
                       </label>
-                      <label className="flex items-center justify-between cursor-pointer">
-                        <span className="text-sm font-semibold">Chords Always Relatch</span>
-                        <input type="checkbox" checked={settings.chordsAlwaysRelatch} onChange={(e) => handleChange('chordsAlwaysRelatch', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
-                      </label>
                       <div className="space-y-2">
                         <label className="block text-sm font-semibold">Strum Duration</label>
                         <div className="flex items-center gap-3">
@@ -477,19 +479,47 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         </div>
                       </div>
                     </div>
+
+                    <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1 mt-6">Recording</h3>
+                    <div className="space-y-4">
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <div className="space-y-1">
+                            <span className="text-sm font-semibold text-white">Record screen activity</span>
+                            <p className="text-[10px] text-slate-500">Include visual capture when recording audio.</p>
+                        </div>
+                        <input type="checkbox" checked={settings.recordScreenActivity} onChange={(e) => handleChange('recordScreenActivity', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
+                      </label>
+                    </div>
                   </div>
                   
                   <div className="space-y-6">
                     <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1">Key Bindings</h3>
                     <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
-                      {renderKeyBinding('Latch All', 'latch')}
-                      {renderKeyBinding('Panic', 'panic')}
-                      {renderKeyBinding('All Notes Off', 'off')}
+                      <div className="text-[10px] font-bold text-slate-500 uppercase mt-2">Modes & Patch</div>
+                      {renderKeyBinding('Drone Mode', 'modeDrone')}
+                      {renderKeyBinding('Strings Mode', 'modeStrings')}
+                      {renderKeyBinding('Plucked Mode', 'modePlucked')}
+                      {renderKeyBinding('Toggle Synth', 'synth')}
+                      
+                      <div className="text-[10px] font-bold text-slate-500 uppercase mt-2">Expression</div>
+                      {renderKeyBinding('Sustain', 'sustain')}
+                      {renderKeyBinding('Pitch Bend', 'bend')}
+                      
+                      <div className="text-[10px] font-bold text-slate-500 uppercase mt-2">Global</div>
+                      {renderKeyBinding('BPM Up', 'bpmUp')}
+                      {renderKeyBinding('BPM Down', 'bpmDown')}
+                      {renderKeyBinding('Add Chord', 'addChord')}
                       {renderKeyBinding('Center View', 'center')}
-                      {renderKeyBinding('Toggle Pitch Bend', 'bend')}
+                      
+                      <div className="text-[10px] font-bold text-slate-500 uppercase mt-2">Arpeggiator</div>
+                      {renderKeyBinding('Toggle Seq', 'toggleSequencer')}
+                      {renderKeyBinding('Play All', 'playAllArps')}
+                      {renderKeyBinding('Stop All', 'stopAllArps')}
+                      
+                      <div className="text-[10px] font-bold text-slate-500 uppercase mt-2">System</div>
+                      {renderKeyBinding('All Notes Off', 'off')}
+                      {renderKeyBinding('Panic', 'panic')}
                       {renderKeyBinding('Open Settings', 'settings')}
-                      {renderKeyBinding('Open Synth', 'synth')}
-                      {renderKeyBinding('Store Chord', 'addChord')}
                       {renderKeyBinding('Volume Up', 'volumeUp')}
                       {renderKeyBinding('Volume Down', 'volumeDown')}
                     </div>
@@ -498,6 +528,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
               </div>
             )}
 
+            {/* ... Visuals, MIDI, Data tabs remain unchanged ... */}
             {activeTab === 'visuals' && (
               <div className="space-y-8 animate-in fade-in duration-300">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -584,8 +615,6 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                     <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Connections & Voice Leading</h3>
                     <div className="space-y-4">
                         <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-4">
-                            
-                            {/* Base Line Width */}
                             <div>
                                 <label className="block text-sm font-semibold mb-1 text-slate-300">Base Line Width</label>
                                 <div className="flex items-center gap-3">
@@ -602,9 +631,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                 </div>
                                 <p className="text-[10px] text-slate-500 italic mt-1">Controls thickness of the static lattice grid.</p>
                             </div>
-
                             <hr className="border-slate-700/50" />
-
                             <label className="flex items-center justify-between cursor-pointer">
                                 <span className="text-sm font-semibold text-slate-300">Enable Line Brightening</span>
                                 <input type="checkbox" checked={settings.lineBrighteningEnabled} onChange={(e) => handleChange('lineBrighteningEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-pink-500" />
@@ -650,11 +677,11 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                             <input type="range" min="0" max="100" value={settings.rainbowSaturation} onChange={(e) => handleChange('rainbowSaturation', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                           </div>
                           <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Brightness</span> <span>{settings.rainbowBrightness}%</span></label>
+                            <label className="flex justify-between text-xs font-bold text-slate-400 uppercase"><span>Brightness</span> <span>{settings.rainbowBrightness}%</span></label>
                             <input type="range" min="0" max="100" value={settings.rainbowBrightness} onChange={(e) => handleChange('rainbowBrightness', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                           </div>
                           <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Offset</span> <span>{settings.rainbowOffset}°</span></label>
+                            <label className="flex justify-between text-xs font-bold text-slate-400 uppercase"><span>Offset</span> <span>{settings.rainbowOffset}°</span></label>
                             <input type="range" min="0" max="360" value={settings.rainbowOffset} onChange={(e) => handleChange('rainbowOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
                           </div>
                           <label className="flex items-center justify-between cursor-pointer">

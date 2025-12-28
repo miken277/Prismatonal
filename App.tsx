@@ -36,8 +36,11 @@ const App: React.FC = () => {
   // Track which modes currently have active voices sustained
   const [activeSustainedModes, setActiveSustainedModes] = useState<number[]>([]);
 
+  const [isShortScreen, setIsShortScreen] = useState(false);
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSynthOpen, setIsSynthOpen] = useState(false);
+  const [isSequencerOpen, setIsSequencerOpen] = useState(false);
 
   // Arpeggio State
   const [recordingArpId, setRecordingArpId] = useState<string | null>(null);
@@ -231,9 +234,13 @@ const App: React.FC = () => {
     const handleResize = () => {
         const w = document.documentElement.clientWidth;
         const h = document.documentElement.clientHeight;
+        
+        setIsShortScreen(h < 800);
+
         const shortEdge = Math.min(w, h);
         const newAutoScale = shortEdge / REFERENCE_SHORT_EDGE;
         setAutoScaleFactor(newAutoScale);
+        
         const newEffectiveScale = newAutoScale * (settings.uiScale || 1.0);
         updateSettings(prev => ({
             ...prev,
@@ -370,11 +377,19 @@ const App: React.FC = () => {
           if (slotIndex !== -1) {
               const newChords = [...settings.savedChords];
               const simplifiedNodes = latchedNodes.map(n => ({ id: n.id, n: n.n, d: n.d }));
+              
+              // Capture the current sound configuration
+              let currentPreset;
+              if (latchMode === 3) currentPreset = presets.strum;
+              else if (latchMode === 2) currentPreset = presets.normal;
+              else currentPreset = presets.latch; // Default for Drone or Normal
+
               newChords[slotIndex] = {
                   ...newChords[slotIndex],
                   nodes: simplifiedNodes,
                   visible: true,
-                  position: { x: 0, y: 0 } 
+                  position: { x: 0, y: 0 },
+                  soundConfig: JSON.parse(JSON.stringify(currentPreset)) // Deep copy
               };
               updateSettings(prev => ({ ...prev, savedChords: newChords }));
           }
@@ -388,7 +403,7 @@ const App: React.FC = () => {
   const handleRemoveChord = (id: string) => {
       const newChords = settings.savedChords.map(c => {
           if (c.id === id) {
-              return { ...c, nodes: [], visible: false };
+              return { ...c, nodes: [], visible: false, soundConfig: undefined };
           }
           return c;
       });
@@ -538,25 +553,38 @@ const App: React.FC = () => {
           if ([map.latch, map.volumeUp, map.volumeDown, map.spatialScaleUp, map.spatialScaleDown].map(k => k.toLowerCase()).includes(key)) e.preventDefault();
 
           if (key === map.latch.toLowerCase()) {
-              if (latchMode === 1) handleStringSelect(); else handleDroneSelect(); // Toggle between modes on keypress
+              if (latchMode === 1) handleStringSelect(); else handleDroneSelect(); 
           }
+          else if (key === map.modeDrone.toLowerCase()) handleDroneSelect();
+          else if (key === map.modeStrings.toLowerCase()) handleStringSelect();
+          else if (key === map.modePlucked.toLowerCase()) handlePluckedSelect();
+          else if (key === map.sustain.toLowerCase()) handleSustainToggle();
+          else if (key === map.bend.toLowerCase()) handleBendToggle();
+          
           else if (key === map.panic.toLowerCase()) handlePanic();
           else if (key === map.center.toLowerCase()) handleCenter();
           else if (key === map.settings.toLowerCase()) { setIsSettingsOpen(prev => !prev); if(isSynthOpen) setIsSettingsOpen(false); }
           else if (key === map.synth.toLowerCase()) { setIsSynthOpen(prev => !prev); if(isSettingsOpen) setIsSettingsOpen(false); }
           else if (key === map.off.toLowerCase()) handleOff();
-          else if (key === map.bend.toLowerCase()) handleBendToggle();
           else if (key === map.addChord.toLowerCase()) handleAddChord();
           else if (key === map.increaseDepth.toLowerCase()) handleIncreaseDepth();
           else if (key === map.decreaseDepth.toLowerCase()) handleDecreaseDepth();
+          
           else if (key === map.volumeUp.toLowerCase()) setMasterVolume(v => Math.min(1.0, v + 0.05));
           else if (key === map.volumeDown.toLowerCase()) setMasterVolume(v => Math.max(0.0, v - 0.05));
           else if (key === map.spatialScaleUp.toLowerCase()) setSpatialScale(s => Math.min(2.0, s + 0.05));
           else if (key === map.spatialScaleDown.toLowerCase()) setSpatialScale(s => Math.max(0.0, s - 0.05));
+          
+          // Arpeggiator & BPM
+          else if (key === map.bpmUp.toLowerCase()) handleArpBpmChange(settings.arpBpm + 1);
+          else if (key === map.bpmDown.toLowerCase()) handleArpBpmChange(settings.arpBpm - 1);
+          else if (key === map.toggleSequencer.toLowerCase()) setIsSequencerOpen(prev => !prev);
+          else if (key === map.playAllArps.toLowerCase()) handlePlayAll();
+          else if (key === map.stopAllArps.toLowerCase()) handleStopAll();
       };
       window.addEventListener('keydown', handleKeyDown);
       return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSettingsOpen, isSynthOpen, settings.enableKeyboardShortcuts, settings.keyMappings, latchMode]);
+  }, [isSettingsOpen, isSynthOpen, settings.enableKeyboardShortcuts, settings.keyMappings, latchMode, settings.arpBpm]);
 
   const marginPx = (settings.uiEdgeMargin || 4) * PIXELS_PER_MM;
   const safeArea = getSafeAreas();
@@ -641,9 +669,27 @@ const App: React.FC = () => {
         activeSustainedModes={activeSustainedModes}
         maxArpWidth={showArpBar ? availableArpWidth : 0}
         onClearSustain={handleClearSustain}
+        
+        isShortScreen={isShortScreen}
+        isSequencerOpen={isSequencerOpen}
+        onToggleSequencer={() => setIsSequencerOpen(p => !p)}
+        
+        // Pass dynamics props
+        presets={presets}
+        onPresetChange={setPreset}
+        
+        // Pass Recording Setting
+        recordScreenActivity={settings.recordScreenActivity}
       />
 
-      <LimitLayerControls settings={settings} updateSettings={updateSettings} draggingId={draggingId} setDraggingId={setDraggingId} uiScale={effectiveScale} />
+      <LimitLayerControls 
+        settings={settings} 
+        updateSettings={updateSettings} 
+        draggingId={draggingId} 
+        setDraggingId={setDraggingId} 
+        uiScale={effectiveScale}
+        isShortScreen={isShortScreen}
+      />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} updateSettings={updateSettings} />
       <SynthControls isOpen={isSynthOpen} onClose={() => setIsSynthOpen(false)} presets={presets} onChange={setPreset} />
     </div>
