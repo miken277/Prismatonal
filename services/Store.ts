@@ -16,15 +16,13 @@ class PrismaStore {
     // Hardware-aware Smart Default Polyphony & Quality
     const cores = navigator.hardwareConcurrency || 4;
     let safePolyphony = 8;
-    let safeOversampling = true;
+    let safeOversampling = false; // Changed to false by default
 
     if (cores <= 4) {
         safePolyphony = 6;
-        safeOversampling = false; // Disable 2x Oversampling on dual/quad core devices
     }
     else if (cores >= 8) {
         safePolyphony = 12;
-        safeOversampling = true;
     }
 
     // Load Settings with Robust Deep Merge

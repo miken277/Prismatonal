@@ -148,7 +148,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   layerOrder: [15, 13, 11, 9, 7, 5, 3, 1], 
   baseFrequency: 196.00, // G3
   audioLatencyHint: 'playback',
-  enableOversampling: true, // Default to true, Store will override for weak devices
+  enableOversampling: false, // Default to OFF for better general performance
   wavetableSize: 8192,
   interpolationType: 'cubic',
   isVoiceLeadingEnabled: true, 

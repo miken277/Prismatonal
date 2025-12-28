@@ -105,15 +105,26 @@ const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
     return (
         <div className="space-y-6 animate-in fade-in duration-300">
             <div className="flex flex-col md:flex-row gap-4 items-center bg-slate-900/40 p-2 rounded-lg border border-slate-700/50 mb-2">
-               {(['ji', 'et', 'indian', 'pythagorean'] as TuningSystem[]).map(sys => (
-                   <button 
-                      key={sys} 
-                      onClick={() => handleChange('tuningSystem', sys)}
-                      className={`flex-1 px-3 py-2 text-[10px] font-bold rounded border transition-all uppercase tracking-widest ${settings.tuningSystem === sys ? 'bg-blue-600 border-blue-400 text-white shadow-lg' : 'bg-slate-700 border-slate-600 text-slate-400 hover:bg-slate-600'}`}
-                   >
-                       {sys === 'ji' ? 'Just Intonation' : sys === 'et' ? 'Equal Temperament' : sys === 'indian' ? 'Indian Classical' : 'Pythagorean'}
-                   </button>
-               ))}
+               {(['ji', 'et', 'indian', 'pythagorean'] as TuningSystem[]).map(sys => {
+                   const isDisabled = sys !== 'ji';
+                   return (
+                       <button 
+                          key={sys} 
+                          onClick={() => !isDisabled && handleChange('tuningSystem', sys)}
+                          disabled={isDisabled}
+                          title={isDisabled ? "Coming Soon" : ""}
+                          className={`flex-1 px-3 py-2 text-[10px] font-bold rounded border transition-all uppercase tracking-widest 
+                            ${settings.tuningSystem === sys 
+                                ? 'bg-blue-600 border-blue-400 text-white shadow-lg' 
+                                : isDisabled
+                                    ? 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed opacity-50'
+                                    : 'bg-slate-700 border-slate-600 text-slate-400 hover:bg-slate-600'
+                            }`}
+                       >
+                           {sys === 'ji' ? 'Just Intonation' : sys === 'et' ? 'Equal Temperament' : sys === 'indian' ? 'Indian Classical' : 'Pythagorean'}
+                       </button>
+                   );
+               })}
             </div>
 
             {settings.tuningSystem === 'ji' && (
@@ -159,7 +170,7 @@ const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
             )}
 
             {settings.tuningSystem === 'et' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-right-2 duration-300">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-right-2 duration-300 opacity-50 pointer-events-none grayscale">
                     <div className="space-y-6">
                         {renderLayoutSelector('et')}
                         {renderBaseFrequency()}
@@ -179,7 +190,7 @@ const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
             )}
 
             {settings.tuningSystem === 'indian' && (
-                <div className="grid grid-cols-1 md:flex md:flex-col gap-6 animate-in slide-in-from-right-2 duration-300">
+                <div className="grid grid-cols-1 md:flex md:flex-col gap-6 animate-in slide-in-from-right-2 duration-300 opacity-50 pointer-events-none grayscale">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                        <div className="space-y-6">
                           {renderLayoutSelector('indian')}
@@ -208,7 +219,7 @@ const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
             )}
 
             {settings.tuningSystem === 'pythagorean' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-right-2 duration-300">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in slide-in-from-right-2 duration-300 opacity-50 pointer-events-none grayscale">
                     <div className="space-y-6">
                         {renderLayoutSelector('pythagorean')}
                         {renderBaseFrequency()}
