@@ -1,4 +1,5 @@
 
+
 import { SynthPreset, AppSettings, ReverbType, PresetState, PlayMode, PlaybackMode } from '../types';
 import { store } from './Store';
 import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
@@ -87,6 +88,7 @@ class AudioEngine {
         normal: this.ensurePresetSafety(rawPresets.normal),
         latch: this.ensurePresetSafety(rawPresets.latch),
         strum: this.ensurePresetSafety(rawPresets.strum),
+        voice: this.ensurePresetSafety(rawPresets.voice),
         arpeggio: this.ensurePresetSafety(rawPresets.arpeggio)
     };
 
@@ -160,7 +162,7 @@ class AudioEngine {
   }
 
   public updatePresets(newPresets: PresetState) {
-      const modes: PlayMode[] = ['normal', 'latch', 'strum', 'arpeggio'];
+      const modes: PlayMode[] = ['normal', 'latch', 'strum', 'voice', 'arpeggio'];
       let recomputeReverb = false;
 
       const oldMaster = this.activePresets.normal;
@@ -179,6 +181,7 @@ class AudioEngine {
           normal: this.ensurePresetSafety(newPresets.normal),
           latch: this.ensurePresetSafety(newPresets.latch),
           strum: this.ensurePresetSafety(newPresets.strum),
+          voice: this.ensurePresetSafety(newPresets.voice),
           arpeggio: this.ensurePresetSafety(newPresets.arpeggio)
       };
 
@@ -262,7 +265,7 @@ class AudioEngine {
                 };
                 
                 // Initialize state from store
-                (['normal', 'latch', 'strum', 'arpeggio'] as PlayMode[]).forEach(mode => {
+                (['normal', 'latch', 'strum', 'voice', 'arpeggio'] as PlayMode[]).forEach(mode => {
                     this.workletNode!.port.postMessage({ 
                         type: 'update_preset', 
                         mode: mode, 

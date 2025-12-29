@@ -1,10 +1,10 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 
 interface Props {
   value: number; // 0.0 to 1.0
   onChange: (val: number) => void;
-  color: string; // CSS color string (hex or rgba)
+  color: string; // CSS color string (hex)
   width: number;
   height: number;
   uiScale?: number;
@@ -12,7 +12,6 @@ interface Props {
 
 const VolumeWheel: React.FC<Props> = ({ value, onChange, color, width, height, uiScale = 1.0 }) => {
   const [isDragging, setIsDragging] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
   
   // Cache the start value to prevent drift during drag
   const dragStartValue = useRef<number>(value);
@@ -48,67 +47,48 @@ const VolumeWheel: React.FC<Props> = ({ value, onChange, color, width, height, u
     setIsDragging(false);
   };
 
-  // Visuals
-  // Generate some "grip lines" based on the value to simulate a wheel rotating
-  const renderGripLines = () => {
-      const lines = [];
-      const numLines = 5;
-      const spacing = height / numLines;
-      // Offset lines based on value to create rolling effect
-      const offset = (value * height) % spacing;
-      
-      for (let i = -1; i <= numLines; i++) {
-          const y = (i * spacing) + offset;
-          if (y >= 0 && y <= height) {
-              lines.push(
-                  <div 
-                    key={i} 
-                    className="absolute w-full h-[1px] bg-black/30 pointer-events-none"
-                    style={{ top: height - y }} // Invert so Up moves lines down (wheel logic) or Up moves lines Up? 
-                                                // Actually, if it's a fader, lines usually stick to the handle. 
-                                                // If it's a wheel, pushing UP rotates top away.
-                  />
-              );
-          }
-      }
-      return lines;
+  // Convert hex color to rgba for gradients
+  const hexToRgb = (hex: string) => {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` : '255, 255, 255';
   };
+  const rgb = hexToRgb(color);
 
   return (
     <div
-      ref={ref}
-      className={`relative rounded-lg overflow-hidden border border-slate-700 bg-slate-900 shadow-inner ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      className={`relative rounded-lg overflow-hidden border border-slate-700 bg-slate-950 shadow-inner group ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
       style={{ width, height, touchAction: 'none' }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      {/* Background Track */}
-      <div className="absolute inset-0 bg-slate-800/50" />
+      {/* Background Track with segmented dashes */}
+      <div className="absolute inset-0 bg-slate-900 flex flex-col justify-between py-1 opacity-30 pointer-events-none">
+          {Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="w-full h-[1px] bg-slate-500/20" />
+          ))}
+      </div>
 
-      {/* Filled Level */}
+      {/* Active Fill (LED Strip style) */}
       <div 
-        className="absolute bottom-0 left-0 w-full transition-all duration-75 ease-linear"
+        className="absolute bottom-0 left-0 w-full transition-all duration-75 ease-linear flex flex-col-reverse gap-[1px] overflow-hidden"
         style={{ 
-            height: `${value * 100}%`, 
-            backgroundColor: color,
-            boxShadow: `0 0 10px ${color}80` // Glow
+            height: `${value * 100}%`,
+            boxShadow: `0 -2px 10px rgba(${rgb}, 0.5)`
         }} 
-      />
+      >
+          <div className="absolute inset-0 w-full h-full opacity-80" style={{ backgroundColor: color }} />
+          {/* Shine effect */}
+          <div className="absolute inset-0 bg-gradient-to-r from-white/20 via-transparent to-black/10" />
+      </div>
 
-      {/* Wheel Texture / Gloss */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/40 via-transparent to-black/40 pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-b from-white/10 via-transparent to-black/20 pointer-events-none" />
+      {/* Glassy Overlay & Border Highlight */}
+      <div className={`absolute inset-0 rounded-lg ring-1 ring-inset ring-white/5 transition-opacity duration-300 ${isDragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-50'}`} />
       
-      {/* Value Indicator (Only show when interacting or hovering) */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-50">
-          {/* Optional: Add iconic lines or texture here */}
-          <div className="flex flex-col gap-1 w-[60%] opacity-30">
-             <div className="h-[2px] bg-white rounded-full w-full" />
-             <div className="h-[2px] bg-white rounded-full w-full" />
-             <div className="h-[2px] bg-white rounded-full w-full" />
-          </div>
+      {/* Value Tooltip (Appears on drag) */}
+      <div className={`absolute top-1 left-1/2 -translate-x-1/2 bg-black/80 px-1 rounded text-[8px] font-mono text-white pointer-events-none transition-opacity duration-200 ${isDragging ? 'opacity-100' : 'opacity-0'}`}>
+          {(value * 100).toFixed(0)}
       </div>
     </div>
   );

@@ -1,5 +1,7 @@
 
+
 export enum LimitType {
+  LIMIT_2 = 2,
   LIMIT_3 = 3,
   LIMIT_5 = 5,
   LIMIT_7 = 7,
@@ -108,6 +110,7 @@ export interface KeyMappings {
     modeDrone: string; // Switch to Drone Mode
     modeStrings: string; // Switch to Strings Mode
     modePlucked: string; // Switch to Plucked Mode
+    modeVoice: string; // Switch to Voice Mode (New)
     synth: string; // Toggle Synth Panel
 
     // Chords & Performance
@@ -352,7 +355,7 @@ export interface SynthPreset {
 }
 
 // Slot Types
-export type PresetSlot = 'normal' | 'latch' | 'strum' | 'arpeggio';
+export type PresetSlot = 'normal' | 'latch' | 'strum' | 'voice' | 'arpeggio';
 export type PlayMode = PresetSlot; // Alias for backward compatibility
 export type PlaybackMode = 'gate' | 'trigger' | 'latch'; // Behavior type
 
@@ -360,6 +363,7 @@ export interface PresetState {
     normal: SynthPreset;
     latch: SynthPreset;
     strum: SynthPreset;
+    voice: SynthPreset;
     arpeggio: SynthPreset;
 }
 

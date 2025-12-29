@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
@@ -25,12 +26,12 @@ const App: React.FC = () => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [autoScaleFactor, setAutoScaleFactor] = useState(1.0);
   
-  // Latch Modes: 0=Off, 1=Drone, 2=Strings, 3=Plucked
-  const [latchMode, setLatchMode] = useState<0 | 1 | 2 | 3>(2);
+  // Latch Modes: 0=Off, 1=Drone, 2=Strings, 3=Plucked, 4=Voice
+  const [latchMode, setLatchMode] = useState<0 | 1 | 2 | 3 | 4>(2);
   
   // Track sustain ON/OFF preference per instrument mode
-  // 1: Drone (Default True), 2: Strings (Default False), 3: Plucked (N/A)
-  const [sustainStates, setSustainStates] = useState<{ [key: number]: boolean }>({ 1: true, 2: false, 3: false });
+  // 1: Drone (Default True), 2: Strings (Default False), 3: Plucked (N/A), 4: Voice (Default False)
+  const [sustainStates, setSustainStates] = useState<{ [key: number]: boolean }>({ 1: true, 2: false, 3: false, 4: false });
 
   // Track which modes currently have active voices sustained
   const [activeSustainedModes, setActiveSustainedModes] = useState<number[]>([]);
@@ -296,7 +297,7 @@ const App: React.FC = () => {
   };
 
   // Helper to switch instruments and restore their sustain state
-  const switchInstrument = (newMode: 0 | 1 | 2 | 3) => {
+  const switchInstrument = (newMode: 0 | 1 | 2 | 3 | 4) => {
       // 1. Save current sustain state
       setSustainStates(prev => ({ ...prev, [latchMode]: settings.isSustainEnabled }));
       
@@ -304,10 +305,12 @@ const App: React.FC = () => {
       setLatchMode(newMode);
       
       // 3. Restore new mode's sustain state
-      // FORCE RESET for Strings (Mode 2) to ensure it starts Clean/Normal
-      // But preserve logic for Drone (Mode 1) which likely wants to remember
       let nextSustainState = sustainStates[newMode] ?? false;
-      if (newMode === 2) nextSustainState = false; // Always default Strings to Normal
+      
+      // FORCE RESETs for specific modes if desired defaults
+      if (newMode === 2) nextSustainState = false; // Strings starts clean
+      if (newMode === 3) nextSustainState = false; // Plucked no sustain
+      if (newMode === 4) nextSustainState = false; // Voice starts clean
 
       updateSettings(prev => ({
           ...prev,
@@ -320,13 +323,10 @@ const App: React.FC = () => {
   const handleDroneSelect = () => switchInstrument(1);
   const handleStringSelect = () => switchInstrument(2);
   const handlePluckedSelect = () => switchInstrument(3);
+  const handleVoiceSelect = () => switchInstrument(4);
 
   const handleSustainToggle = () => {
       const willEnable = !settings.isSustainEnabled;
-      
-      // DECOUPLED: We NO LONGER clear latches here. 
-      // Toggling sustain off just stops new notes from latching.
-      // Existing latches persist until right-click/clear.
       
       // Update Local Map immediately
       setSustainStates(prev => ({ ...prev, [latchMode]: willEnable }));
@@ -334,7 +334,6 @@ const App: React.FC = () => {
       updateSettings(prev => ({
           ...prev,
           isSustainEnabled: willEnable,
-          // DECOUPLED: Do NOT disable Bend when Sustain is toggled
       }));
 
       // Send MIDI Sustain (CC 64) if enabled
@@ -347,11 +346,7 @@ const App: React.FC = () => {
       updateSettings(prev => ({ 
           ...prev, 
           isPitchBendEnabled: !prev.isPitchBendEnabled,
-          // DECOUPLED: Do NOT disable Sustain when Bend is toggled
       }));
-      
-      // If turning Bend ON, we no longer force Sustain OFF or clear latches
-      // This allows the Hybrid Bend+Sustain mode
   };
 
   const handleSustainStatusChange = (modes: number[]) => {
@@ -385,6 +380,7 @@ const App: React.FC = () => {
                   if (mode === 1) modeStr = 'latch';
                   else if (mode === 2) modeStr = 'normal';
                   else if (mode === 3) modeStr = 'strum';
+                  else if (mode === 4) modeStr = 'voice';
                   
                   usedModes.add(modeStr);
                   
@@ -583,6 +579,7 @@ const App: React.FC = () => {
           else if (key === map.modeDrone.toLowerCase()) handleDroneSelect();
           else if (key === map.modeStrings.toLowerCase()) handleStringSelect();
           else if (key === map.modePlucked.toLowerCase()) handlePluckedSelect();
+          else if (key === map.modeVoice.toLowerCase()) handleVoiceSelect(); // New Mapping
           else if (key === map.sustain.toLowerCase()) handleSustainToggle();
           else if (key === map.bend.toLowerCase()) handleBendToggle();
           
@@ -664,7 +661,8 @@ const App: React.FC = () => {
         onLatch={handleDroneSelect} 
         onSust={handleStringSelect} 
         onPluck={handlePluckedSelect}
-        latchMode={latchMode} 
+        onVoice={handleVoiceSelect}
+        latchMode={latchMode}
         onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
         onSustainToggle={handleSustainToggle} isSustainEnabled={settings.isSustainEnabled}
         onCenter={handleCenter}

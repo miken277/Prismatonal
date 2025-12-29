@@ -4,39 +4,13 @@ export const AUDIO_PROCESSOR_CODE = `
 
 const TWO_PI = 2 * Math.PI;
 
-// Global synthesis state
-let wavetableSize = 8192;
-let wavetableMask = 8191;
-let wavetable = new Float32Array(wavetableSize + 4); 
-let interpolationType = 'cubic'; // Default changed to cubic per request
+// Increased from 4096 to 65536 to eliminate linear interpolation artifacts
+const WAVETABLE_SIZE = 65536; 
+const SINE_TABLE = new Float32Array(WAVETABLE_SIZE + 1); // +1 for simple interpolation guard
 
-function generateWavetable(size) {
-    wavetableSize = size;
-    wavetableMask = size - 1;
-    wavetable = new Float32Array(wavetableSize + 4); 
-    
-    // Generate Sine
-    for (let i = 0; i < wavetableSize; i++) {
-        wavetable[i] = Math.sin((i / wavetableSize) * TWO_PI);
-    }
-    
-    // Pad for Cubic without expensive wrap-around logic in loops
-    wavetable[wavetableSize] = wavetable[0];
-    wavetable[wavetableSize + 1] = wavetable[1];
-    wavetable[wavetableSize + 2] = wavetable[2];
-    wavetable[wavetableSize + 3] = wavetable[3];
-}
-
-// Initial Generation
-generateWavetable(8192);
-
-// Fast Saturation / Soft Clipper (Cubic Approximation)
-// Much faster than Math.tanh()
-function fastSoftClip(x) {
-    if (x > 1.2) return 1.0;
-    if (x < -1.2) return -1.0;
-    // Cubic approximation of tanh for smooth saturation
-    return x * (1.5 - 0.5 * x * x * 0.694); 
+// Precompute Sine Table
+for (let i = 0; i <= WAVETABLE_SIZE; i++) {
+    SINE_TABLE[i] = Math.sin((i / WAVETABLE_SIZE) * TWO_PI);
 }
 
 const DUMMY_OSC_CONFIG = {
@@ -67,313 +41,746 @@ const DUMMY_PRESET_DATA = {
     stereoPanDepth: 0
 };
 
-// --- 2. DSP CLASSES ---
+// --- 2. BASIC DSP CLASSES (Oscillator, Filter, Envelope) ---
 
 class PolyBLEP {
   constructor(sampleRate) {
     this.sampleRate = sampleRate;
   }
+
   get(t, dt) {
     if (dt < 1e-9) return 0.0;
-    if (t < dt) { t /= dt; return t + t - t * t - 1.0; }
-    else if (t > 1.0 - dt) { t = (t - 1.0) / dt; return t * t + t + t + 1.0; }
+    if (t < dt) {
+      t /= dt;
+      return t + t - t * t - 1.0;
+    } else if (t > 1.0 - dt) {
+      t = (t - 1.0) / dt;
+      return t * t + t + t + 1.0;
+    }
     return 0.0;
   }
 }
 
 class SVF {
   constructor() {
-    this.low = 0.0; this.band = 0.0; this.high = 0.0;
+    this.low = 0.0;
+    this.band = 0.0;
+    this.high = 0.0;
+    this.notch = 0.0;
   }
-  reset() { this.low = 0.0; this.band = 0.0; this.high = 0.0; }
+
+  reset() {
+    this.low = 0.0;
+    this.band = 0.0;
+    this.high = 0.0;
+    this.notch = 0.0;
+  }
+
   process(input, cutoff, res, sampleRate) {
     const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.42));
     let f = 2.0 * Math.sin(Math.PI * safeCutoff / sampleRate);
     const q = 1.0 / (res + 0.5);
+
     this.low += f * this.band;
     this.high = input - this.low - q * this.band;
     this.band += f * this.high;
+    this.notch = this.high + this.low;
+
     return this.low; 
   }
 }
 
 class Envelope {
-  constructor() { this.stage = 'idle'; this.value = 0.0; this.velocity = 0.0; }
-  trigger(velocity = 1.0) { this.stage = 'attack'; this.velocity = velocity; }
-  release() { if (this.stage !== 'idle') this.stage = 'release'; }
-  reset() { this.stage = 'idle'; this.value = 0.0; }
-  process(config, dt) {
-    const att = config.attack || 0.01;
-    const dec = config.decay || 0.1;
-    const sus = config.sustain !== undefined ? config.sustain : 1.0;
-    const rel = config.release || 0.1;
-    switch (this.stage) {
-      case 'idle': return 0.0;
-      case 'attack':
-        this.value += (1.0 / Math.max(0.001, att)) * dt;
-        if (this.value >= 1.0) { this.value = 1.0; this.stage = 'decay'; }
-        break;
-      case 'decay':
-        this.value += (sus - this.value) * ((1.0 / Math.max(0.001, dec)) * dt * 5.0);
-        break;
-      case 'release':
-        this.value -= this.value * ((1.0 / Math.max(0.001, rel)) * dt * 5.0);
-        if (this.value < 0.001) { this.value = 0.0; this.stage = 'idle'; }
-        break;
+  constructor() {
+    this.stage = 'idle'; 
+    this.value = 0.0;
+    this.velocity = 0.0;
+  }
+
+  trigger(velocity = 1.0) {
+    this.stage = 'attack';
+    this.velocity = velocity;
+  }
+
+  release() {
+    if (this.stage !== 'idle') {
+        this.stage = 'release';
     }
-    return this.value * this.velocity;
+  }
+
+  reset() {
+      this.stage = 'idle';
+      this.value = 0.0;
+  }
+
+  process(config, dt) {
+    const att = (config.attack !== undefined) ? config.attack : 0.01;
+    const dec = (config.decay !== undefined) ? config.decay : 0.1;
+    const sus = (config.sustain !== undefined) ? config.sustain : 1.0;
+    const rel = (config.release !== undefined) ? config.release : 0.1;
+
+    switch (this.stage) {
+      case 'idle':
+        this.value = 0.0;
+        return 0.0;
+
+      case 'attack':
+        const attRate = 1.0 / (Math.max(0.001, att));
+        this.value += attRate * dt;
+        if (this.value >= 1.0) {
+          this.value = 1.0;
+          this.stage = 'decay';
+        }
+        return this.value * this.velocity;
+
+      case 'decay':
+        const decRate = 1.0 / (Math.max(0.001, dec));
+        this.value += (sus - this.value) * (decRate * dt * 5.0); 
+        return this.value * this.velocity;
+
+      case 'sustain':
+        this.value = sus;
+        return this.value * this.velocity;
+
+      case 'release':
+        const relRate = 1.0 / (Math.max(0.001, rel));
+        this.value -= this.value * (relRate * dt * 5.0);
+        if (this.value < 0.001) {
+          this.value = 0.0;
+          this.stage = 'idle';
+        }
+        return this.value * this.velocity;
+      
+      default:
+        return 0.0;
+    }
   }
 }
 
 class Oscillator {
-  constructor(sampleRate) { this.phase = 0.0; this.blep = new PolyBLEP(sampleRate); this.sampleRate = sampleRate; }
+  constructor(sampleRate) {
+    this.phase = 0.0; 
+    this.blep = new PolyBLEP(sampleRate);
+    this.sampleRate = sampleRate;
+  }
+
+  reset() {
+      // Free-running oscillators
+  }
+
   process(freq, type, dt) {
-    if (!Number.isFinite(freq) || freq <= 0) return 0.0;
+    if (!Number.isFinite(freq) || freq <= 0 || freq > 24000) return 0.0;
+
     this.phase += dt * freq;
-    if (this.phase >= 1.0) this.phase -= 1.0;
-    if (type === 'sine') {
-        const ptr = this.phase * wavetableSize;
-        const i = ptr | 0;
-        const f = ptr - i;
-        if (interpolationType === 'cubic') {
-            const y0 = i === 0 ? wavetable[wavetableSize - 1] : wavetable[i - 1];
-            const y1 = wavetable[i];
-            const y2 = wavetable[i + 1];
-            const y3 = wavetable[i + 2];
-            return y1 + 0.5 * f * (y2 - y0 + f * (2.0 * y0 - 5.0 * y1 + 4.0 * y2 - y3 + f * (3.0 * (y1 - y2) + y3 - y0)));
+    while (this.phase >= 1.0) this.phase -= 1.0;
+
+    let sample = 0.0;
+    
+    switch (type) {
+      case 'sine':
+        // High-performance LUT lookup
+        {
+            const index = this.phase * WAVETABLE_SIZE;
+            const i = Math.floor(index);
+            const f = index - i;
+            // Linear Interpolation from pre-computed table
+            sample = SINE_TABLE[i] + f * (SINE_TABLE[i + 1] - SINE_TABLE[i]);
         }
-        return wavetable[i] + f * (wavetable[i + 1] - wavetable[i]);
-    } else if (type === 'triangle') {
-        return 2.0 * (Math.abs(-1.0 + 2.0 * this.phase) - 0.5);
-    } else if (type === 'sawtooth') {
-        let sig = (2.0 * this.phase) - 1.0;
-        return sig - this.blep.get(this.phase, dt * freq);
-    } else if (type === 'square') {
-        let sig = this.phase < 0.5 ? 1.0 : -1.0;
-        sig += this.blep.get(this.phase, dt * freq);
-        sig -= this.blep.get((this.phase + 0.5) % 1.0, dt * freq);
-        return sig;
+        break;
+      case 'triangle':
+        {
+            let t = -1.0 + (2.0 * this.phase);
+            sample = 2.0 * (Math.abs(t) - 0.5);
+        }
+        break;
+      case 'sawtooth':
+        // PolyBLEP Saw is efficient and sounds good
+        sample = (2.0 * this.phase) - 1.0;
+        sample -= this.blep.get(this.phase, dt * freq);
+        break;
+      case 'square':
+        // PolyBLEP Square
+        sample = this.phase < 0.5 ? 1.0 : -1.0;
+        sample += this.blep.get(this.phase, dt * freq);
+        let phase2 = (this.phase + 0.5) % 1.0;
+        sample -= this.blep.get(phase2, dt * freq);
+        break;
     }
-    return 0.0;
+    
+    return sample;
   }
 }
 
-// --- 3. VOICE LOGIC ---
+// --- 3. VOICE LOGIC (Signal Path) ---
 
 class Voice {
   constructor(sampleRate) {
-    this.sampleRate = sampleRate; this.active = false; this.id = ''; this.panPos = 0; 
-    this.baseFreq = 440; this.targetFreq = 440;
-    this.oscs = [new Oscillator(sampleRate), new Oscillator(sampleRate), new Oscillator(sampleRate)];
-    this.filters = [new SVF(), new SVF(), new SVF()];
-    this.envs = [new Envelope(), new Envelope(), new Envelope()];
+    this.sampleRate = sampleRate;
+    this.active = false;
+    this.id = '';
+    this.type = 'normal'; // Preset selection
+    this.mode = 'gate';   // Playback behavior: 'gate', 'trigger', 'latch'
+    this.panPos = 0; 
+    
+    this.baseFreq = 440;
+    this.targetFreq = 440;
+    this.startTime = 0; 
+    this.releaseTime = 0; 
+    
+    this.oscs = [
+        new Oscillator(sampleRate),
+        new Oscillator(sampleRate),
+        new Oscillator(sampleRate)
+    ];
+
+    this.filters = [ new SVF(), new SVF(), new SVF() ];
+    this.envs = [ new Envelope(), new Envelope(), new Envelope() ];
     this.lfoPhases = [0.0, 0.0, 0.0];
-    this.activeMods = []; // Cached active matrix rows
-    this.startTime = 0;
-    this.releaseTime = 0;
+    this.envVals = new Float32Array(3);
+    this.lfoVals = new Float32Array(3);
   }
 
+  // Allow dynamic updates to sample rate when oversampling changes
   updateSampleRate(newRate) {
-    if (this.sampleRate === newRate) return;
-    this.sampleRate = newRate;
-    this.oscs.forEach(osc => { osc.sampleRate = newRate; osc.blep.sampleRate = newRate; });
+      if (this.sampleRate === newRate) return;
+      this.sampleRate = newRate;
+      this.oscs.forEach(osc => { osc.sampleRate = newRate; osc.blep.sampleRate = newRate; });
   }
 
   trigger(id, freq, type, mode) {
-    this.id = id; this.type = type || 'normal'; this.mode = mode || 'gate';
-    this.baseFreq = freq; this.targetFreq = freq; this.active = true;
-    this.startTime = currentTime; this.releaseTime = 0; 
-    this.envs.forEach(env => env.trigger());
+    this.id = id;
+    this.type = type || 'normal';
+    this.mode = mode || 'gate';
+    this.baseFreq = freq;
+    this.targetFreq = freq;
+    this.active = true;
+    this.startTime = currentTime; 
+    this.releaseTime = 0; 
+    
+    this.envs.forEach(env => {
+        // Soft reset to avoid clicks on retrigger
+        env.trigger();
+    });
+    
     this.filters.forEach(f => f.reset());
     this.lfoPhases.fill(0.0);
   }
 
-  release() { this.releaseTime = currentTime; this.envs.forEach(env => env.release()); }
-  hardStop() { this.active = false; this.envs.forEach(env => env.reset()); }
+  release() {
+    this.releaseTime = currentTime;
+    this.envs.forEach(env => env.release());
+  }
+  
+  hardStop() {
+      this.active = false;
+      this.envs.forEach(env => env.reset());
+      this.filters.forEach(f => f.reset());
+  }
 
+  getLevel() {
+    return Math.max(this.envs[0].value, this.envs[1].value, this.envs[2].value);
+  }
+
+  // Optimized block processing
   renderBlock(preset, dt, bufL, bufR, len, panSpeed, panDepth, startPanPhase, globalBend) {
     if (!this.active) return;
-    const diff = this.targetFreq - this.baseFreq;
-    if (Math.abs(diff) > 0.001) this.baseFreq += diff * 0.005; else this.baseFreq = this.targetFreq;
 
-    const osc1 = preset.osc1, osc2 = preset.osc2, osc3 = preset.osc3;
+    // --- FREQ GLIDE ---
+    const diff = this.targetFreq - this.baseFreq;
+    if (Math.abs(diff) > 0.001) {
+      this.baseFreq += diff * 0.005; // Simple exponential slide per block
+    } else {
+      this.baseFreq = this.targetFreq;
+    }
+
+    // --- CACHED CONFIGS ---
+    const osc1 = preset.osc1 || DUMMY_OSC_CONFIG;
+    const osc2 = preset.osc2 || DUMMY_OSC_CONFIG;
+    const osc3 = preset.osc3 || DUMMY_OSC_CONFIG;
     const matrix = preset.modMatrix || [];
-    const activeMods = matrix.filter(r => r.enabled && r.amount !== 0);
-    
+    const spreadAmount = preset.spread || 0;
     const voiceGain = preset.gain || 0.5;
-    const spread = preset.spread || 0;
+    const hasMatrix = matrix.length > 0;
+
+    let anyEnvActive = false;
     let panPhase = startPanPhase;
 
-    const lfoRates = [osc1.lfoRate || 0, osc2.lfoRate || 0, osc3.lfoRate || 0];
+    // Pre-calculate LFO rates to avoid dictionary lookup in tight loop
+    const lfoRate1 = osc1.lfoRate || 0;
+    const lfoRate2 = osc2.lfoRate || 0;
+    const lfoRate3 = osc3.lfoRate || 0;
+
+    // OPTIMIZATION: Pre-calculate static frequencies if no modulation
+    // Apply globalBend to the base frequency here
+    let osc1StaticFreq = 0, osc2StaticFreq = 0, osc3StaticFreq = 0;
+    let osc1ModPitch = false, osc2ModPitch = false, osc3ModPitch = false;
+
+    // Check for pitch mod in Matrix or LFO
+    if (osc1.enabled) {
+        if (osc1.lfoTarget === 'pitch') osc1ModPitch = true;
+        if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc1_pitch')) osc1ModPitch = true;
+        
+        if (!osc1ModPitch) {
+            const cents = osc1.coarseDetune + osc1.fineDetune;
+            osc1StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+        }
+    }
+    
+    if (osc2.enabled) {
+        if (osc2.lfoTarget === 'pitch') osc2ModPitch = true;
+        if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc2_pitch')) osc2ModPitch = true;
+        
+        if (!osc2ModPitch) {
+            const cents = osc2.coarseDetune + osc2.fineDetune;
+            osc2StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+        }
+    }
+
+    if (osc3.enabled) {
+        if (osc3.lfoTarget === 'pitch') osc3ModPitch = true;
+        if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc3_pitch')) osc3ModPitch = true;
+        
+        if (!osc3ModPitch) {
+            const cents = osc3.coarseDetune + osc3.fineDetune;
+            osc3StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+        }
+    }
 
     for (let s = 0; s < len; s++) {
-        const e1 = this.envs[0].process(osc1, dt), e2 = this.envs[1].process(osc2, dt), e3 = this.envs[2].process(osc3, dt);
-        if (this.envs[0].stage === 'idle' && this.envs[1].stage === 'idle' && this.envs[2].stage === 'idle' && s === len - 1) {
-            this.active = false; break;
+        // --- 1. MODULATORS ---
+        anyEnvActive = false;
+        
+        // Unrolled Envelope & LFO processing
+        // OSC 1
+        const env1 = this.envs[0].process(osc1, dt);
+        this.envVals[0] = env1;
+        if (this.envs[0].stage !== 'idle') anyEnvActive = true;
+        this.lfoPhases[0] += lfoRate1 * dt;
+        if (this.lfoPhases[0] >= 1.0) this.lfoPhases[0] -= 1.0;
+        this.lfoVals[0] = Math.sin(TWO_PI * this.lfoPhases[0]);
+
+        // OSC 2
+        const env2 = this.envs[1].process(osc2, dt);
+        this.envVals[1] = env2;
+        if (this.envs[1].stage !== 'idle') anyEnvActive = true;
+        this.lfoPhases[1] += lfoRate2 * dt;
+        if (this.lfoPhases[1] >= 1.0) this.lfoPhases[1] -= 1.0;
+        this.lfoVals[1] = Math.sin(TWO_PI * this.lfoPhases[1]);
+
+        // OSC 3
+        const env3 = this.envs[2].process(osc3, dt);
+        this.envVals[2] = env3;
+        if (this.envs[2].stage !== 'idle') anyEnvActive = true;
+        this.lfoPhases[2] += lfoRate3 * dt;
+        if (this.lfoPhases[2] >= 1.0) this.lfoPhases[2] -= 1.0;
+        this.lfoVals[2] = Math.sin(TWO_PI * this.lfoPhases[2]);
+
+        if (!anyEnvActive && s === len - 1) {
+            this.active = false;
         }
 
-        const l0 = wavetable[(this.lfoPhases[0] * wavetableSize) | 0];
-        const l1 = wavetable[(this.lfoPhases[1] * wavetableSize) | 0];
-        const l2 = wavetable[(this.lfoPhases[2] * wavetableSize) | 0];
-        this.lfoPhases[0] = (this.lfoPhases[0] + lfoRates[0] * dt) % 1.0;
-        this.lfoPhases[1] = (this.lfoPhases[1] + lfoRates[1] * dt) % 1.0;
-        this.lfoPhases[2] = (this.lfoPhases[2] + lfoRates[2] * dt) % 1.0;
+        // --- 2. MOD MATRIX ---
+        let modP1=0, modC1=0, modG1=0, modR1=0;
+        let modP2=0, modC2=0, modG2=0, modR2=0;
+        let modP3=0, modC3=0, modG3=0, modR3=0;
 
-        let modP1=0, modC1=0, modG1=0, modP2=0, modC2=0, modG2=0, modP3=0, modC3=0, modG3=0;
-        
-        for (let i = 0; i < activeMods.length; i++) {
-            const r = activeMods[i];
-            let val = 0;
-            if (r.source === 'env1') val = e1; else if (r.source === 'env2') val = e2; else if (r.source === 'env3') val = e3;
-            else if (r.source === 'lfo1') val = l0; else if (r.source === 'lfo2') val = l1; else if (r.source === 'lfo3') val = l2;
-            const amt = val * r.amount;
-            switch(r.target) {
-                case 'osc1_pitch': modP1 += amt; break; case 'osc1_cutoff': modC1 += amt; break; case 'osc1_gain': modG1 += amt; break;
-                case 'osc2_pitch': modP2 += amt; break; case 'osc2_cutoff': modC2 += amt; break; case 'osc2_gain': modG2 += amt; break;
-                case 'osc3_pitch': modP3 += amt; break; case 'osc3_cutoff': modC3 += amt; break; case 'osc3_gain': modG3 += amt; break;
+        if (hasMatrix) {
+            for(let m = 0; m < matrix.length; m++) {
+                const row = matrix[m];
+                if (!row.enabled) continue;
+                
+                let srcVal = 0;
+                // Hardcoded source lookup for speed
+                if (row.source === 'env1') srcVal = this.envVals[0];
+                else if (row.source === 'env2') srcVal = this.envVals[1];
+                else if (row.source === 'env3') srcVal = this.envVals[2];
+                else if (row.source === 'lfo1') srcVal = this.lfoVals[0];
+                else if (row.source === 'lfo2') srcVal = this.lfoVals[1];
+                else if (row.source === 'lfo3') srcVal = this.lfoVals[2];
+
+                const amt = srcVal * row.amount;
+
+                // Hardcoded target lookup
+                switch(row.target) {
+                    case 'osc1_pitch': modP1 += amt; break;
+                    case 'osc1_cutoff': modC1 += amt; break;
+                    case 'osc1_gain': modG1 += amt; break;
+                    case 'osc1_res': modR1 += amt; break;
+                    case 'osc2_pitch': modP2 += amt; break;
+                    case 'osc2_cutoff': modC2 += amt; break;
+                    case 'osc2_gain': modG2 += amt; break;
+                    case 'osc2_res': modR2 += amt; break;
+                    case 'osc3_pitch': modP3 += amt; break;
+                    case 'osc3_cutoff': modC3 += amt; break;
+                    case 'osc3_gain': modG3 += amt; break;
+                    case 'osc3_res': modR3 += amt; break;
+                }
             }
         }
 
-        let mix = 0;
-        if (osc1.enabled && e1 > 0.001) {
-            let p = modP1 * 1200, c = osc1.filterCutoff + modC1 * 5000;
-            if (osc1.lfoTarget === 'pitch') p += l0 * osc1.lfoDepth;
-            else if (osc1.lfoTarget === 'filter') c += l0 * osc1.lfoDepth * 20;
-            let sig = this.oscs[0].process(this.baseFreq * globalBend * Math.pow(2, (osc1.coarseDetune + osc1.fineDetune + p) / 1200), osc1.waveform, dt);
-            sig = this.filters[0].process(sig, c, osc1.filterResonance, this.sampleRate);
-            mix += sig * osc1.gain * e1 * (osc1.lfoTarget === 'tremolo' ? 1.0 - l0 * osc1.lfoDepth * 0.005 : 1.0) * (1.0 + modG1);
-        }
-        if (osc2.enabled && e2 > 0.001) {
-            let p = modP2 * 1200, c = osc2.filterCutoff + modC2 * 5000;
-            if (osc2.lfoTarget === 'pitch') p += l1 * osc2.lfoDepth;
-            else if (osc2.lfoTarget === 'filter') c += l1 * osc2.lfoDepth * 20;
-            let sig = this.oscs[1].process(this.baseFreq * globalBend * Math.pow(2, (osc2.coarseDetune + osc2.fineDetune + p) / 1200), osc2.waveform, dt);
-            sig = this.filters[1].process(sig, c, osc2.filterResonance, this.sampleRate);
-            mix += sig * osc2.gain * e2 * (osc2.lfoTarget === 'tremolo' ? 1.0 - l1 * osc2.lfoDepth * 0.005 : 1.0) * (1.0 + modG2);
-        }
-        if (osc3.enabled && e3 > 0.001) {
-            let p = modP3 * 1200, c = osc3.filterCutoff + modC3 * 5000;
-            if (osc3.lfoTarget === 'pitch') p += l2 * osc3.lfoDepth;
-            else if (osc3.lfoTarget === 'filter') c += l2 * osc3.lfoDepth * 20;
-            let sig = this.oscs[2].process(this.baseFreq * globalBend * Math.pow(2, (osc3.coarseDetune + osc3.fineDetune + p) / 1200), osc3.waveform, dt);
-            sig = this.filters[2].process(sig, c, osc3.filterResonance, this.sampleRate);
-            mix += sig * osc3.gain * e3 * (osc3.lfoTarget === 'tremolo' ? 1.0 - l2 * osc3.lfoDepth * 0.005 : 1.0) * (1.0 + modG3);
+        // --- 3. VOICE GENERATION ---
+        let voiceMix = 0.0;
+
+        // --- OSC 1 ---
+        if (osc1.enabled && this.envVals[0] > 0.0001) {
+            let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
+            const d = osc1.lfoDepth || 0;
+            const v = this.lfoVals[0];
+            if (osc1.lfoTarget === 'pitch') hardPitch = v * d;
+            else if (osc1.lfoTarget === 'filter') hardFilter = v * d * 20;
+            else if (osc1.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
+
+            let freq;
+            if (osc1ModPitch) {
+                const cents = osc1.coarseDetune + osc1.fineDetune + hardPitch + (modP1 * 1200);
+                freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+            } else {
+                freq = osc1StaticFreq;
+            }
+
+            let sig = this.oscs[0].process(freq, osc1.waveform, dt);
+            
+            const cut = osc1.filterCutoff + hardFilter + (modC1 * 5000);
+            const res = Math.max(0, osc1.filterResonance + (modR1 * 10));
+            sig = this.filters[0].process(sig, cut, res, this.sampleRate);
+            
+            voiceMix += sig * osc1.gain * this.envVals[0] * hardAmp * Math.max(0, 1.0 + modG1);
         }
 
-        panPhase = (panPhase + dt * panSpeed) % 1.0;
-        const p = Math.max(-1, Math.min(1, this.panPos * spread + Math.sin(panPhase * TWO_PI) * panDepth));
-        bufL[s] += mix * 0.5 * (1.0 - p) * voiceGain;
-        bufR[s] += mix * 0.5 * (1.0 + p) * voiceGain;
+        // --- OSC 2 ---
+        if (osc2.enabled && this.envVals[1] > 0.0001) {
+            let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
+            const d = osc2.lfoDepth || 0;
+            const v = this.lfoVals[1];
+            if (osc2.lfoTarget === 'pitch') hardPitch = v * d;
+            else if (osc2.lfoTarget === 'filter') hardFilter = v * d * 20;
+            else if (osc2.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
+
+            let freq;
+            if (osc2ModPitch) {
+                const cents = osc2.coarseDetune + osc2.fineDetune + hardPitch + (modP2 * 1200);
+                freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+            } else {
+                freq = osc2StaticFreq;
+            }
+
+            let sig = this.oscs[1].process(freq, osc2.waveform, dt);
+            
+            const cut = osc2.filterCutoff + hardFilter + (modC2 * 5000);
+            const res = Math.max(0, osc2.filterResonance + (modR2 * 10));
+            sig = this.filters[1].process(sig, cut, res, this.sampleRate);
+            
+            voiceMix += sig * osc2.gain * this.envVals[1] * hardAmp * Math.max(0, 1.0 + modG2);
+        }
+
+        // --- OSC 3 ---
+        if (osc3.enabled && this.envVals[2] > 0.0001) {
+            let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
+            const d = osc3.lfoDepth || 0;
+            const v = this.lfoVals[2];
+            if (osc3.lfoTarget === 'pitch') hardPitch = v * d;
+            else if (osc3.lfoTarget === 'filter') hardFilter = v * d * 20;
+            else if (osc3.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
+
+            let freq;
+            if (osc3ModPitch) {
+                const cents = osc3.coarseDetune + osc3.fineDetune + hardPitch + (modP3 * 1200);
+                freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+            } else {
+                freq = osc3StaticFreq;
+            }
+
+            let sig = this.oscs[2].process(freq, osc3.waveform, dt);
+            
+            const cut = osc3.filterCutoff + hardFilter + (modC3 * 5000);
+            const res = Math.max(0, osc3.filterResonance + (modR3 * 10));
+            sig = this.filters[2].process(sig, cut, res, this.sampleRate);
+            
+            voiceMix += sig * osc3.gain * this.envVals[2] * hardAmp * Math.max(0, 1.0 + modG3);
+        }
+
+        // --- 4. PANNING & OUTPUT ---
+        panPhase += dt * panSpeed;
+        if (panPhase > 1.0) panPhase -= 1.0;
+        
+        const autoPan = Math.sin(panPhase * TWO_PI) * panDepth;
+        let p = this.panPos * spreadAmount;
+        p += autoPan;
+        p = Math.max(-1.0, Math.min(1.0, p));
+        
+        // Equal power pan approx
+        const gainL = 0.5 * (1.0 - p);
+        const gainR = 0.5 * (1.0 + p);
+
+        bufL[s] += voiceMix * gainL * voiceGain;
+        bufR[s] += voiceMix * gainR * voiceGain;
     }
   }
 }
 
-// --- 4. PROCESSOR LOGIC ---
+// --- 4. PROCESSOR LOGIC (Worklet Core) ---
 
 class PrismaProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.isOversamplingEnabled = true; this.globalBendMultiplier = 1.0;
-    this.voices = Array.from({length:64}, (_,i) => {
-        const v = new Voice(sampleRate * 2); v.panPos = Math.sin(i * 123.456); return v;
-    });
-    this.presets = { normal: DUMMY_PRESET_DATA, latch: DUMMY_PRESET_DATA, strum: DUMMY_PRESET_DATA };
-    this.maxPolyphony = 32; this.strumDuration = 0.5;
-    this.xm1L = 0; this.ym1L = 0; this.xm1R = 0; this.ym1R = 0;
-    this.panPhase = 0; this.mixBufferL = null; this.mixBufferR = null;
+    // Default to enabled (Store controls this)
+    this.isOversamplingEnabled = true;
+    this.globalBendMultiplier = 1.0; // Master pitch bend ratio
+    
+    // Initial setup
+    const OVERSAMPLE = 2;
+    const workingRate = sampleRate * OVERSAMPLE;
+
+    this.voices = [];
+    // Increase physical voice limit to 64
+    for(let i=0; i<64; i++) {
+        const v = new Voice(workingRate);
+        v.panPos = Math.sin(i * 123.456); 
+        this.voices.push(v);
+    }
+    
+    this.presets = {
+        normal: DUMMY_PRESET_DATA,
+        latch: DUMMY_PRESET_DATA,
+        strum: DUMMY_PRESET_DATA,
+        voice: DUMMY_PRESET_DATA,
+        arpeggio: DUMMY_PRESET_DATA
+    };
+    
+    this.maxPolyphony = 32; 
+    this.strumDuration = 0.5;
+    
+    this.xm1L = 0; this.ym1L = 0;
+    this.xm1R = 0; this.ym1R = 0;
+    
+    // Global Pan Phase tracker
+    this.panPhase = 0;
+    
+    // Mix Buffers
+    this.mixBufferL = null;
+    this.mixBufferR = null;
 
     this.port.onmessage = (e) => {
-      const m = e.data;
-      if (m.type === 'update_preset') { if (m.mode && this.presets[m.mode]) this.presets[m.mode] = this.normalizePreset(m.data); }
-      else if (m.type === 'config') {
-         if (m.polyphony) {
-             this.maxPolyphony = m.polyphony;
-             this.enforcePolyphonyLimit();
-         }
-         if (m.strumDuration) this.strumDuration = m.strumDuration;
-         if (m.enableOversampling !== undefined) this.isOversamplingEnabled = m.enableOversampling;
-         if (m.globalBend !== undefined) this.globalBendMultiplier = m.globalBend;
-         if (m.wavetableSize) generateWavetable(m.wavetableSize);
-         if (m.interpolationType) interpolationType = m.interpolationType;
+      const msg = e.data;
+      if (msg.type === 'update_preset') {
+        const { mode, data } = msg;
+        if (mode && this.presets[mode]) {
+            this.presets[mode] = this.normalizePreset(data);
+        }
+      } else if (msg.type === 'config') {
+         if (msg.polyphony) this.maxPolyphony = msg.polyphony;
+         if (msg.strumDuration) this.strumDuration = msg.strumDuration;
+         if (msg.enableOversampling !== undefined) this.isOversamplingEnabled = msg.enableOversampling;
+         if (msg.globalBend !== undefined) this.globalBendMultiplier = msg.globalBend;
+      } else if (msg.type === 'note_on') {
+        this.triggerVoice(msg.id, msg.freq, msg.voiceType, msg.mode);
+      } else if (msg.type === 'note_off') {
+        this.releaseVoice(msg.id);
+      } else if (msg.type === 'glide') {
+        this.glideVoice(msg.id, msg.freq);
+      } else if (msg.type === 'stop_all') {
+         this.voices.forEach(v => v.hardStop());
       }
-      else if (m.type === 'note_on') this.triggerVoice(m.id, m.freq, m.voiceType, m.mode);
-      else if (m.type === 'note_off') this.releaseVoice(m.id);
-      else if (m.type === 'glide') this.glideVoice(m.id, m.freq);
-      else if (m.type === 'stop_all') this.voices.forEach(v => v.hardStop());
     };
   }
 
-  enforcePolyphonyLimit() {
-      const active = this.voices.filter(v => v.active);
-      if (active.length > this.maxPolyphony) {
-          // Sort: prioritize keeping voices that are NOT released, and have the newest start times
-          active.sort((a,b) => (a.releaseTime || a.startTime) - (b.releaseTime || b.startTime));
-          const count = active.length - this.maxPolyphony;
-          for (let i = 0; i < count; i++) {
-              active[i].hardStop();
-          }
-      }
-  }
-
-  normalizePreset(d) {
-    const n = (o) => ({...DUMMY_OSC_CONFIG, ...o});
-    return {
-        osc1: n(d.osc1), osc2: n(d.osc2), osc3: n(d.osc3),
-        modMatrix: (d.modMatrix || []).map(r => ({...r, amount: (r.amount || 0) / 100.0})),
-        gain: d.gain || 0.5, spread: d.spread || 0,
-        stereoPanSpeed: d.stereoPanSpeed || 0, stereoPanDepth: d.stereoPanDepth || 0
-    };
+  normalizePreset(data) {
+      return {
+          osc1: { ...DUMMY_OSC_CONFIG, ...(data.osc1 || {}) },
+          osc2: { ...DUMMY_OSC_CONFIG, ...(data.osc2 || {}) },
+          osc3: { ...DUMMY_OSC_CONFIG, ...(data.osc3 || {}) },
+          modMatrix: (data.modMatrix || []).map(row => ({
+              ...row,
+              amount: (Number.isFinite(row.amount) ? row.amount : 0) / 100.0
+          })),
+          gain: data.gain || 0.5,
+          spread: data.spread || 0,
+          stereoPanSpeed: data.stereoPanSpeed || 0,
+          stereoPanDepth: data.stereoPanDepth || 0
+      };
   }
 
   triggerVoice(id, freq, type, mode) {
-    let v = this.voices.find(v => v.active && v.id === id);
-    if (v) { v.trigger(id, freq, type, mode); return; }
-    v = this.voices.find(v => !v.active);
-    if (!v) {
-        v = this.voices.sort((a,b) => (a.releaseTime||a.startTime) - (b.releaseTime||b.startTime))[0];
-        if (v.active) this.port.postMessage({type:'voice_stolen', id:v.id});
+    for (let i = 0; i < this.voices.length; i++) {
+        if (this.voices[i].active && this.voices[i].id === id) {
+            this.voices[i].trigger(id, freq, type, mode);
+            return;
+        }
     }
-    v.trigger(id, freq, type, mode);
+
+    let activeCount = 0;
+    let oldestReleased = null;
+    let oldestReleaseTime = Infinity;
+    let oldestHeld = null;
+    let oldestStartTime = Infinity;
+    let freeVoice = null;
+
+    for (let i = 0; i < this.voices.length; i++) {
+        const v = this.voices[i];
+        if (v.active) {
+            activeCount++;
+            if (v.releaseTime > 0) {
+                if (v.releaseTime < oldestReleaseTime) {
+                    oldestReleaseTime = v.releaseTime;
+                    oldestReleased = v;
+                }
+            } else {
+                if (v.startTime < oldestStartTime) {
+                    oldestStartTime = v.startTime;
+                    oldestHeld = v;
+                }
+            }
+        } else {
+            if (!freeVoice) freeVoice = v;
+        }
+    }
+
+    if (activeCount < this.maxPolyphony && freeVoice) {
+        freeVoice.trigger(id, freq, type, mode);
+        return;
+    }
+
+    const victim = oldestReleased || oldestHeld || freeVoice || this.voices[0];
+    if (victim) {
+        if (victim.active && victim.id !== id) {
+             this.port.postMessage({ type: 'voice_stolen', id: victim.id });
+        }
+        victim.trigger(id, freq, type, mode);
+    }
   }
 
-  releaseVoice(id) { const v = this.voices.find(v => v.active && v.id === id); if (v) v.release(); }
-  glideVoice(id, freq) { const v = this.voices.find(v => v.active && v.id === id); if (v) v.targetFreq = freq; }
-
-  process(inputs, outputs) {
-    const out = outputs[0], cL = out[0], cR = out[1]; if (!cL) return true;
-    const len = cL.length, os = this.isOversamplingEnabled ? 2 : 1;
-    const wLen = len * os, wRate = sampleRate * os, dt = 1.0 / wRate;
-
-    if (!this.mixBufferL || this.mixBufferL.length !== wLen) {
-        this.mixBufferL = new Float32Array(wLen); this.mixBufferR = new Float32Array(wLen);
-        this.voices.forEach(v => v.updateSampleRate(wRate));
+  releaseVoice(id) {
+    for (let i = 0; i < this.voices.length; i++) {
+        if (this.voices[i].active && this.voices[i].id === id) {
+            this.voices[i].release();
+        }
     }
-    this.mixBufferL.fill(0); this.mixBufferR.fill(0);
+  }
+
+  glideVoice(id, freq) {
+    for (let i = 0; i < this.voices.length; i++) {
+        if (this.voices[i].active && this.voices[i].id === id) {
+             this.voices[i].targetFreq = freq;
+        }
+    }
+  }
+
+  process(inputs, outputs, parameters) {
+    const output = outputs[0];
+    const channelL = output[0];
+    const channelR = output[1];
+    if (!channelL) return true;
+    const len = channelL.length;
     
-    const mP = this.presets.normal, pS = mP.stereoPanSpeed || 0, pD = mP.stereoPanDepth || 0, iPP = this.panPhase;
-    this.voices.forEach(v => {
-        if (v.active) {
-            if ((v.mode === 'trigger' || v.type === 'strum') && v.releaseTime === 0 && (currentTime - v.startTime >= this.strumDuration)) v.release();
-            v.renderBlock(this.presets[v.type] || mP, dt, this.mixBufferL, this.mixBufferR, wLen, pS, pD, iPP, this.globalBendMultiplier);
-        }
-    });
-    this.panPhase = (this.panPhase + wLen * dt * pS) % 1.0;
+    // Config based on Oversampling setting
+    const OVERSAMPLE = this.isOversamplingEnabled ? 2 : 1;
+    const workingRate = sampleRate * OVERSAMPLE;
+    const workingLen = len * OVERSAMPLE;
+    const dt = 1.0 / workingRate;
 
-    for (let s = 0; s < len; s++) {
-        let iL, iR;
-        if (os === 2) {
-            const idx = s * 2;
-            iL = (fastSoftClip(this.mixBufferL[idx]) + fastSoftClip(this.mixBufferL[idx+1])) * 0.5;
-            iR = (fastSoftClip(this.mixBufferR[idx]) + fastSoftClip(this.mixBufferR[idx+1])) * 0.5;
-        } else {
-            iL = fastSoftClip(this.mixBufferL[s]); iR = fastSoftClip(this.mixBufferR[s]);
-        }
-        const yL = iL - this.xm1L + 0.995 * this.ym1L; this.xm1L = iL; this.ym1L = yL;
-        const yR = iR - this.xm1R + 0.995 * this.ym1R; this.xm1R = iR; this.ym1R = yR;
-        cL[s] = yL; if (cR) cR[s] = yR;
+    // Performance Budget
+    const startTime = globalThis.performance ? globalThis.performance.now() : 0;
+    const MAX_BUDGET_MS = 1.5; 
+    
+    // Resize buffer if needed
+    if (!this.mixBufferL || this.mixBufferL.length !== workingLen) {
+        this.mixBufferL = new Float32Array(workingLen);
+        this.mixBufferR = new Float32Array(workingLen);
+        // Inform voices of new sample rate for filter/osc calculations
+        this.voices.forEach(v => v.updateSampleRate(workingRate));
     }
+    
+    this.mixBufferL.fill(0);
+    this.mixBufferR.fill(0);
+    
+    const masterPreset = this.presets.normal;
+    const panSpeed = (masterPreset.stereoPanSpeed !== undefined) ? masterPreset.stereoPanSpeed : 0.0;
+    const panDepth = (masterPreset.stereoPanDepth !== undefined) ? masterPreset.stereoPanDepth : 0.0;
+    const initialPanPhase = this.panPhase;
+
+    // --- RENDER VOICES ---
+    let voicesProcessed = 0;
+    
+    for (let i = 0; i < this.voices.length; i++) {
+        const v = this.voices[i];
+        if (v.active) {
+            // Auto-Release Check for Trigger mode
+            if ((v.mode === 'trigger' || v.type === 'strum') && v.releaseTime === 0) {
+                if (currentTime - v.startTime >= this.strumDuration) v.release();
+            }
+
+            const presetToUse = this.presets[v.type] || this.presets.normal;
+            
+            // Pass the global pan parameters to synchronization
+            v.renderBlock(presetToUse, dt, this.mixBufferL, this.mixBufferR, workingLen, panSpeed, panDepth, initialPanPhase, this.globalBendMultiplier);
+            voicesProcessed++;
+
+            // CPU GOVERNOR
+            if (startTime > 0 && voicesProcessed % 2 === 0) {
+                if (globalThis.performance.now() - startTime > MAX_BUDGET_MS) {
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Update global pan phase for next block
+    this.panPhase += (workingLen * dt * panSpeed);
+    while (this.panPhase > 1.0) this.panPhase -= 1.0;
+
+    // --- OUTPUT ---
+    if (OVERSAMPLE === 2) {
+        // Simple Decimation + Linear DC Blocker
+        for (let s = 0; s < len; s++) {
+            let accL = 0;
+            let accR = 0;
+            const osIdx = s * 2;
+
+            // Soft Clip before downsample
+            let sl1 = Math.tanh(this.mixBufferL[osIdx] * 0.8);
+            let sr1 = Math.tanh(this.mixBufferR[osIdx] * 0.8);
+            let sl2 = Math.tanh(this.mixBufferL[osIdx+1] * 0.8);
+            let sr2 = Math.tanh(this.mixBufferR[osIdx+1] * 0.8);
+            
+            const outL = (sl1 + sl2) * 0.5;
+            const outR = (sr1 + sr2) * 0.5;
+
+            // DC Blocker
+            const yL = outL - this.xm1L + 0.995 * this.ym1L;
+            this.xm1L = outL;
+            this.ym1L = yL;
+            
+            const yR = outR - this.xm1R + 0.995 * this.ym1R;
+            this.xm1R = outR;
+            this.ym1R = yR;
+
+            channelL[s] = yL;
+            if (channelR) channelR[s] = yR;
+        }
+    } else {
+        // 1x Passthrough
+        for (let s = 0; s < len; s++) {
+            // Soft Clip
+            const sl = Math.tanh(this.mixBufferL[s] * 0.8);
+            const sr = Math.tanh(this.mixBufferR[s] * 0.8);
+
+            // DC Blocker
+            const yL = sl - this.xm1L + 0.995 * this.ym1L;
+            this.xm1L = sl;
+            this.ym1L = yL;
+            
+            const yR = sr - this.xm1R + 0.995 * this.ym1R;
+            this.xm1R = sr;
+            this.ym1R = yR;
+
+            channelL[s] = yL;
+            if (channelR) channelR[s] = yR;
+        }
+    }
+    
     return true;
   }
 }
+
 registerProcessor('synth-processor', PrismaProcessor);
 `;

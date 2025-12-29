@@ -21,7 +21,8 @@ interface Props {
   onLatch: () => void; // Used for Drone
   onSust?: () => void; // Used for Strings
   onPluck?: () => void; // Used for Plucked
-  latchMode: 0 | 1 | 2 | 3;
+  onVoice?: () => void; // Used for Voice
+  latchMode: 0 | 1 | 2 | 3 | 4;
   onBend: () => void;
   isBendEnabled: boolean;
   onSustainToggle?: () => void;
@@ -72,7 +73,7 @@ interface Props {
 
 const FloatingControls: React.FC<Props> = ({ 
   volume, setVolume, spatialScale, setSpatialScale, brightness, setBrightness, viewZoom, setViewZoom,
-  onPanic, onOff, onLatch, onSust, onPluck, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
+  onPanic, onOff, onLatch, onSust, onPluck, onVoice, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
   draggingId, setDraggingId, uiScale = 1.0,
@@ -330,6 +331,7 @@ const FloatingControls: React.FC<Props> = ({
           onLatch={onLatch}
           onSust={onSust}
           onPluck={onPluck}
+          onVoice={onVoice}
           activeSustainedModes={activeSustainedModes}
           onClearSustain={onClearSustain}
           presets={presets}

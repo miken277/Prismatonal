@@ -100,6 +100,7 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
           case 'normal': return 'STRINGS';
           case 'latch': return 'DRONE';
           case 'strum': return 'PLUCKED';
+          case 'voice': return 'VOICE';
           case 'arpeggio': return 'ARP';
           default: return mode;
       }
@@ -115,7 +116,7 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
         
         {/* Mode Selector */}
         <div className="flex border-b border-slate-700 bg-slate-900/80 mx-4 mt-2 rounded-t-lg overflow-hidden">
-            {(['latch', 'normal', 'strum', 'arpeggio'] as PlayMode[]).map(mode => (
+            {(['latch', 'normal', 'strum', 'voice', 'arpeggio'] as PlayMode[]).map(mode => (
                 <button
                     key={mode}
                     onClick={() => setActiveVoiceMode(mode)}

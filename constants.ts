@@ -3,6 +3,7 @@ import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorCon
 
 export const DEFAULT_COLORS: LimitColorMap = {
   1: '#EF4444', // Red (Unity)
+  2: '#EF4444', // Red (Octave)
   3: '#EAB308', // Yellow (3-Limit)
   5: '#3B82F6', // Blue (5-Limit)
   7: '#22C55E', // Green (7-Limit)
@@ -10,6 +11,15 @@ export const DEFAULT_COLORS: LimitColorMap = {
   11: '#A855F7', // Purple (11-Limit)
   13: '#F97316', // Orange (13-Limit)
   15: '#3B82F6', // Blue (15-Limit - Same as 5)
+};
+
+export const MODE_COLORS = {
+    1: '#22c55e', // Drone (Green)
+    2: '#3b82f6', // Strings (Blue)
+    3: '#f97316', // Plucked (Orange)
+    4: '#eab308', // Voice (Yellow) - New!
+    'arp': '#ef4444', // Arpeggiator (Red)
+    'cursor': '#ffffff' // Generic Touch
 };
 
 export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
@@ -32,6 +42,7 @@ export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
     modeDrone: '1',
     modeStrings: '2',
     modePlucked: '3',
+    modeVoice: '4', // New Mapping
     synth: 'm',
 
     // Chords
@@ -407,6 +418,12 @@ const ETHEREAL_MALLETS = [
     p("Star Drops", "Mallets", { enabled: true, waveform: WaveformType.SINE, decay: 0.1, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, decay: 0.1, gain: 0.3 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 2400, decay: 0.2, gain: 0.2 }, { spread: 0.9, stereoPanSpeed: 4.0, stereoPanDepth: 0.5, reverbType: 'plate', delayMix: 0.6, delayTime: 0.2 })
 ];
 
+const VOICE_PATCHES = [
+    p("Choir Aah", "Voice", { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.7, attack: 0.5, decay: 0.5, sustain: 0.8, release: 1.0, filterCutoff: 1200, filterResonance: 1.0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3, attack: 0.6, sustain: 0.7 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.2, filterCutoff: 800 }, { spread: 0.6, reverbType: 'cathedral', reverbMix: 0.6 }),
+    p("Synth Vox", "Voice", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 0.2, decay: 0.3, sustain: 0.6, filterCutoff: 2000, lfoTarget: 'filter', lfoRate: 4, lfoDepth: 20 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 5, gain: 0.4 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.3 }, { spread: 0.5, reverbType: 'hall', reverbMix: 0.5 }),
+    p("Scat Doo", "Voice", { enabled: true, waveform: WaveformType.SQUARE, gain: 0.8, attack: 0.05, decay: 0.2, sustain: 0.4, release: 0.2, filterCutoff: 800 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3, decay: 0.1, sustain: 0 }, { enabled: false }, { spread: 0.4, reverbType: 'room', reverbMix: 0.3 })
+];
+
 // Create User Bank with 100 Empty Slots
 export const DEFAULT_USER_BANK: SynthPreset[] = Array.from({ length: 100 }).map((_, i) => ({
     ...generateInitPatch(`User Slot ${i + 1}`, `user-${i}`),
@@ -426,11 +443,13 @@ export const PRESETS: SynthPreset[] = [
     ...ETHEREAL_LEADS,
     ...ETHEREAL_BASS,
     ...ETHEREAL_KEYS,
-    ...ETHEREAL_MALLETS
+    ...ETHEREAL_MALLETS,
+    ...VOICE_PATCHES
 ];
 
 export const DEFAULT_NORMAL_PRESET = preservedAnalogStrings; 
 export const DEFAULT_STRUM_PRESET = PLUCKED_PATCHES[0]; 
 export const DEFAULT_LATCH_PRESET = preservedNoiseWash;
-export const DEFAULT_ARP_PRESET = PLUCKED_PATCHES[0];
+export const DEFAULT_VOICE_PRESET = VOICE_PATCHES[0]; // New Default for Voice
+export const DEFAULT_ARP_PRESET = PLUCKED_PATCHES[0]; // Arp Service fallback
 export const DEFAULT_PRESET = preservedAnalogStrings;

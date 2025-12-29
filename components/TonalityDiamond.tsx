@@ -1,5 +1,6 @@
+
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode } from '../types';
+import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType } from '../types';
 import { generateLattice } from '../services/LatticeService';
 import { getPitchRatioFromScreenDelta, getRainbowPeriod, PITCH_SCALE } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
@@ -21,7 +22,7 @@ interface Props {
   onLimitInteraction: (limit: number) => void;
   activeChordIds: string[];
   uiUnlocked: boolean;
-  latchMode: 0 | 1 | 2 | 3; 
+  latchMode: 0 | 1 | 2 | 3 | 4; // 0=Off, 1=Drone, 2=Strings, 3=Plucked, 4=Voice
   isCurrentSustainEnabled: boolean;
   globalScale?: number; 
   viewZoom?: number;
@@ -36,6 +37,13 @@ interface ActiveCursor {
   hoverNodeId: string | null;
   hasMoved: boolean;
   interactionLockedNodeId: string | null; 
+}
+
+// Data structure for active modes on a single node
+interface NodeActivation {
+    mode: number;
+    timestamp: number;
+    presetId: string;
 }
 
 const GRID_CELL_SIZE = 100; 
@@ -89,7 +97,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   }, [data.nodes, settings.buttonSpacingScale, dynamicSize, effectiveScale]);
 
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
-  const [persistentLatches, setPersistentLatches] = useState<Map<string, number>>(new Map());
+  
+  // Persistent Latches: NodeId -> Map<ModeId, Timestamp>
+  const [persistentLatches, setPersistentLatches] = useState<Map<string, Map<number, number>>>(new Map());
   
   // Store timestamps for ripple effects [nodeId, timestamp]
   const nodeTriggerHistory = useRef<Map<string, number>>(new Map());
@@ -97,7 +107,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   // Notify parent of active modes
   useEffect(() => {
       if (onSustainStatusChange) {
-          const modes = new Set(persistentLatches.values());
+          const modes = new Set<number>();
+          persistentLatches.forEach((modeMap) => {
+              modeMap.forEach((_, mode) => modes.add(mode));
+          });
           onSustainStatusChange(Array.from(modes));
       }
   }, [persistentLatches, onSustainStatusChange]);
@@ -106,14 +119,19 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => {
       const unsubscribe = audioEngine.onVoiceSteal((voiceId) => {
           if (voiceId.startsWith('node-')) {
+              // Fallback logic for old IDs
               const nodeId = voiceId.replace('node-', '');
-              setPersistentLatches(prev => {
-                  if (prev.has(nodeId)) {
-                      const next = new Map(prev);
+              
+              setPersistentLatches((prev: Map<string, Map<number, number>>) => {
+                  let changed = false;
+                  const next = new Map(prev);
+                  
+                  if (next.has(nodeId)) {
                       next.delete(nodeId);
-                      return next;
+                      changed = true;
                   }
-                  return prev;
+                  
+                  return changed ? next : prev;
               });
           }
       });
@@ -145,38 +163,49 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       });
   }, [activeChordIds, settings.savedChords, audioEngine]);
 
+  // Aggregates all activations (Persistent + Chords)
   const audioLatchedNodes = useMemo(() => {
-      const effective = new Map<string, { mode: number, presetId: string }>();
+      const effective = new Map<string, NodeActivation[]>();
       
-      persistentLatches.forEach((mode, nodeId) => {
-          const pId = mode === 2 ? 'normal' : 'latch';
-          effective.set(nodeId, { mode, presetId: pId });
+      // 1. Process Persistent Latches
+      persistentLatches.forEach((modeMap, nodeId) => {
+          const activations: NodeActivation[] = [];
+          modeMap.forEach((timestamp, mode) => {
+              // Map mode number to preset slot
+              let pId = 'normal';
+              if (mode === 1) pId = 'latch';
+              else if (mode === 3) pId = 'strum';
+              else if (mode === 4) pId = 'voice';
+              
+              activations.push({ mode, timestamp, presetId: pId });
+          });
+          effective.set(nodeId, activations);
       });
       
       const defaultChordMode = (latchMode === 2) ? 2 : 1; 
 
+      // 2. Process Chords
       activeChordIds.forEach(chordId => {
         const chordDef = settings.savedChords.find(c => c.id === chordId);
         if (chordDef) {
             chordDef.nodes.forEach(n => {
                 let mode = defaultChordMode;
-                let presetId = `chord-${chordId}`; // Default legacy fallback
+                let presetId = `chord-${chordId}`; 
 
                 if (n.voiceMode) {
                     if (n.voiceMode === 'latch') mode = 1;
                     else if (n.voiceMode === 'normal') mode = 2;
                     else if (n.voiceMode === 'strum') mode = 3;
+                    else if (n.voiceMode === 'voice') mode = 4;
 
                     if (chordDef.soundConfigs && chordDef.soundConfigs[n.voiceMode]) {
                         presetId = `chord-${chordId}-${n.voiceMode}`;
                     } else if (chordDef.soundConfig) {
                         presetId = `chord-${chordId}`;
                     } else {
-                        // Fallback to active app presets if somehow missing
                         presetId = n.voiceMode;
                     }
                 } else {
-                    // Legacy chord node handling
                     if (chordDef.soundConfig) {
                         presetId = `chord-${chordId}`;
                     } else {
@@ -185,35 +214,56 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 }
 
                 if (!effective.has(n.id)) {
-                    effective.set(n.id, { mode, presetId });
+                    effective.set(n.id, []);
+                }
+                
+                const existing = effective.get(n.id)!;
+                if (!existing.some(a => a.mode === mode)) {
+                    existing.push({ mode, timestamp: 0, presetId });
                 }
             });
         }
       });
+      
+      // Sort activations by timestamp
+      effective.forEach((list) => {
+          list.sort((a, b) => a.timestamp - b.timestamp);
+      });
+      
       return effective;
   }, [persistentLatches, activeChordIds, settings.savedChords, latchMode]);
 
   const visualLatchedNodes = useMemo(() => {
-      const visual = new Map<string, number>();
-      audioLatchedNodes.forEach((val, key) => visual.set(key, val.mode));
+      // Clone the audio latched map
+      const visual = new Map<string, NodeActivation[]>();
+      audioLatchedNodes.forEach((v, k) => visual.set(k, [...v]));
 
+      // Add temporary cursor activations
       activeCursors.forEach(cursor => {
-          const isSustainingInstrument = latchMode === 1 || latchMode === 2;
+          // Sustaining instruments: Drone (1), Strings (2), Voice (4)
+          const isSustainingInstrument = latchMode === 1 || latchMode === 2 || latchMode === 4;
           const isSustainActive = isCurrentSustainEnabled;
-          const isBendEnabled = settings.isPitchBendEnabled;
+          const isBendEnabled = settings.isPitchBendEnabled && latchMode !== 3; // Disable bend visual for Plucked
           
           const isHybridMode = isSustainingInstrument && isSustainActive && isBendEnabled;
-          if (isHybridMode) return;
+          if (isHybridMode) return; // Hybrid logic handled via persistent latches
 
           const isMelodic = !isSustainingInstrument || !isSustainActive || isBendEnabled;
           if (isMelodic && cursor.hoverNodeId) {
-              visual.set(cursor.hoverNodeId, latchMode);
+              const nodeId = cursor.hoverNodeId;
+              if (!visual.has(nodeId)) {
+                  visual.set(nodeId, []);
+              }
+              const list = visual.get(nodeId)!;
+              const activation = { mode: latchMode, timestamp: Date.now(), presetId: 'cursor' };
+              list.push(activation);
+              list.sort((a, b) => a.timestamp - b.timestamp);
           }
       });
       return visual;
   }, [audioLatchedNodes, activeCursors, settings.isPitchBendEnabled, latchMode, isCurrentSustainEnabled]);
 
-  // Line Logic
+  // Line Logic (Updated to check for ANY activation)
   const activeLines = useMemo(() => {
     const latched = visualLatchedNodes;
     const lines = data.lines;
@@ -235,17 +285,27 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             for (let j=i+1; j<activeNodes.length; j++) {
                 const A = activeNodes[i];
                 const B = activeNodes[j];
-                let dist = 0;
+                
+                let coordDist = 0;
                 for (let k=0; k < A.coords.length; k++) {
-                    dist += Math.abs(A.coords[k] - B.coords[k]);
+                    coordDist += Math.abs(A.coords[k] - B.coords[k]);
                 }
-                dist += Math.abs(A.octave - B.octave); 
-                if (dist <= 2) {
-                    const maxP = Math.max(A.maxPrime, B.maxPrime);
+                const octaveDist = Math.abs(A.octave - B.octave);
+                const totalDist = coordDist + octaveDist;
+
+                if (totalDist <= 2) {
+                    let lineLimit = Math.max(A.maxPrime, B.maxPrime);
+                    
+                    // Explicitly detect Octave relationship (same coords, different octave)
+                    if (coordDist === 0 && octaveDist !== 0) {
+                        lineLimit = LimitType.LIMIT_2;
+                    }
+
                     active.push({
                         id: `${A.id}-${B.id}`,
                         x1: A.x, y1: A.y, x2: B.x, y2: B.y,
-                        limit: maxP, sourceId: A.id, targetId: B.id
+                        limit: lineLimit, 
+                        sourceId: A.id, targetId: B.id
                     });
                 }
             }
@@ -288,10 +348,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const brightenedLinesRef = useRef(brightenedLines);
   const dynamicSizeRef = useRef(dynamicSize);
   const effectiveScaleRef = useRef(effectiveScale);
+  const latchModeRef = useRef(latchMode); // Track latchMode for renderer
   
   const nodeMapRef = useRef(nodeMap);
   const spatialGridRef = useRef(spatialGrid);
-  const persistentLatchesRef = useRef(persistentLatches);
+  
+  // Update persistentLatches type for Ref
+  const persistentLatchesRef = useRef<Map<string, Map<number, number>>>(persistentLatches);
   
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
 
@@ -304,6 +367,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => { brightenedLinesRef.current = brightenedLines; }, [brightenedLines]);
   useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
   useEffect(() => { effectiveScaleRef.current = effectiveScale; }, [effectiveScale]);
+  useEffect(() => { latchModeRef.current = latchMode; }, [latchMode]);
   
   useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
   useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
@@ -338,10 +402,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         if (mode === undefined) {
             setPersistentLatches(new Map());
         } else {
-            setPersistentLatches(prev => {
+            setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                 const next = new Map();
-                prev.forEach((val, key) => {
-                    if (val !== mode) next.set(key, val);
+                prev.forEach((modeMap, nodeId) => {
+                    const newModeMap = new Map(modeMap);
+                    if (newModeMap.has(mode)) {
+                        newModeMap.delete(mode);
+                    }
+                    if (newModeMap.size > 0) {
+                        next.set(nodeId, newModeMap);
+                    }
                 });
                 return next;
             });
@@ -369,9 +439,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     },
     getLatchedNodes: () => {
         const result: { node: LatticeNode, mode: number }[] = [];
-        persistentLatches.forEach((mode, id) => {
+        persistentLatches.forEach((modeMap, id) => {
             const n = nodeMap.get(id);
-            if (n) result.push({ node: n, mode });
+            if (n) {
+                // Return one entry per mode? Or just the primary?
+                // The chord system expects flat list.
+                modeMap.forEach((_, mode) => {
+                    result.push({ node: n, mode });
+                });
+            }
         });
         return result;
     }
@@ -527,26 +603,41 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   }, [settings.buttonSpacingScale, effectiveScale]);
 
   // Audio Latched Nodes Sync
-  const prevAudioLatchedRef = useRef<Map<string, { mode: number, presetId: string }>>(new Map());
+  // Updated to handle multiple voices per node via unique ID generation
+  const prevAudioLatchedRef = useRef<Map<string, NodeActivation[]>>(new Map());
   useEffect(() => {
       const current = audioLatchedNodes;
       const prev = prevAudioLatchedRef.current;
       const nodes = nodeMap;
       
-      current.forEach((data, nodeId) => {
-          if (!prev.has(nodeId)) {
-               const node = nodes.get(nodeId); 
-               if (node) {
-                   audioEngine.startVoice(`node-${nodeId}`, node.ratio, settings.baseFrequency, data.presetId, 'latch');
-                   if (settings.midiEnabled) midiService.noteOn(`node-${nodeId}`, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
-               }
-          }
+      current.forEach((activations, nodeId) => {
+          activations.forEach(act => {
+              const voiceId = `node-${nodeId}-${act.mode}`;
+              
+              const prevActivations = prev.get(nodeId);
+              const wasActive = prevActivations && prevActivations.some(p => p.mode === act.mode);
+              
+              if (!wasActive) {
+                   const node = nodes.get(nodeId); 
+                   if (node) {
+                       audioEngine.startVoice(voiceId, node.ratio, settings.baseFrequency, act.presetId, 'latch');
+                       if (settings.midiEnabled) midiService.noteOn(voiceId, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
+                   }
+              }
+          });
       });
-      prev.forEach((_, nodeId) => {
-          if (!current.has(nodeId)) {
-              audioEngine.stopVoice(`node-${nodeId}`);
-              if (settings.midiEnabled) midiService.noteOff(`node-${nodeId}`);
-          }
+      
+      prev.forEach((activations, nodeId) => {
+          activations.forEach(act => {
+              const voiceId = `node-${nodeId}-${act.mode}`;
+              const currentActivations = current.get(nodeId);
+              const stillActive = currentActivations && currentActivations.some(c => c.mode === act.mode);
+              
+              if (!stillActive) {
+                  audioEngine.stopVoice(voiceId);
+                  if (settings.midiEnabled) midiService.noteOff(voiceId);
+              }
+          });
       });
 
       prevAudioLatchedRef.current = current;
@@ -616,26 +707,23 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           case 1: return { preset: 'latch', playback: isStrumEnabled ? 'trigger' : 'gate' };
           case 2: return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
           case 3: return { preset: 'strum', playback: 'trigger' };
+          case 4: return { preset: 'voice', playback: isStrumEnabled ? 'trigger' : 'gate' };
           default: return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
       }
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-      // 1. Force Resume on Interaction
       if (audioEngine) audioEngine.resume();
 
       if (uiUnlocked || !dynamicCanvasRef.current) return;
       e.preventDefault();
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
-      // 2. FORCE RECT UPDATE on interaction start to handle layout shifts/latency
       updateRect();
 
-      // Pre-calculate relative canvas coordinates to avoid jitter in renderer
       let canvasPos = { x: e.clientX, y: e.clientY };
       if (scrollContainerRef.current) {
           const r = scrollContainerRef.current.getBoundingClientRect();
-          // Normalize to canvas coordinate space (considering scroll)
           const bend = globalBendRef.current;
           const pixelOffset = -bend * (PITCH_SCALE / 12) * effectiveScale;
           
@@ -661,16 +749,26 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             onNodeTrigger(hitNode.id, hitNode.ratio, hitNode.n, hitNode.d, hitNode.maxPrime);
         }
 
-        const isSustainingInstrument = latchMode === 1 || latchMode === 2;
+        const isSustainingInstrument = latchMode === 1 || latchMode === 2 || latchMode === 4;
         const isSustainActive = isCurrentSustainEnabled;
-        const isBendEnabled = settings.isPitchBendEnabled;
+        const isBendEnabled = settings.isPitchBendEnabled && latchMode !== 3; 
 
         if (isSustainingInstrument && isSustainActive) {
-             const existingMode = persistentLatches.get(hitNode.id);
-             setPersistentLatches(prev => {
+             setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                  const next = new Map(prev);
-                 if (existingMode === latchMode) next.delete(hitNode.id);
-                 else next.set(hitNode.id, latchMode);
+                 const nodeModes = next.get(hitNode.id) || new Map<number, number>();
+                 
+                 if (nodeModes.has(latchMode)) {
+                     nodeModes.delete(latchMode);
+                 } else {
+                     nodeModes.set(latchMode, Date.now());
+                 }
+                 
+                 if (nodeModes.size > 0) {
+                     next.set(hitNode.id, nodeModes);
+                 } else {
+                     next.delete(hitNode.id);
+                 }
                  return next;
              });
         }
@@ -697,7 +795,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             const { preset, playback } = getVoiceParams(latchMode, settings.isStrumEnabled);
             const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
             
-            // NOTE: startVoice now queues internally if context is suspended/initing
             audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, preset, playback);
             if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
         }
@@ -709,9 +806,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               hasMoved: false,
               interactionLockedNodeId: null
           };
-          // Don't update state for empty space clicks unless needed, to save render? 
-          // Actually we need the cursor for bending reference if dragging from empty space logic existed, but it doesn't.
-          // Keeping it consistent.
           setActiveCursors(prev => {
               const next = new Map(prev);
               next.set(e.pointerId, newCursor);
@@ -727,7 +821,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
     const cursor = activeCursorsRef.current.get(e.pointerId)!;
     
-    // 1. Update coordinates in Ref ONLY (No React State Update here!)
     let canvasPos = { x: e.clientX, y: e.clientY };
     if (scrollContainerRef.current) {
         const r = scrollContainerRef.current.getBoundingClientRect();
@@ -741,7 +834,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     const prevPos = cursorPositionsRef.current.get(e.pointerId);
     cursorPositionsRef.current.set(e.pointerId, canvasPos);
     
-    // Check if we need to update hasMoved
     let hasMoved = cursor.hasMoved;
     if (!hasMoved && prevPos) {
         const dx = Math.abs(canvasPos.x - prevPos.x);
@@ -749,15 +841,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         if (dx > 2 || dy > 2) hasMoved = true;
     }
 
-    // 2. Logic Check (Hit Testing)
     const hitNode = getHitNode(e.clientX, e.clientY);
     const hitId = hitNode ? hitNode.id : null;
 
     const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
     
-    const isSustainingInstrument = latchMode === 1 || latchMode === 2;
+    const isSustainingInstrument = latchMode === 1 || latchMode === 2 || latchMode === 4;
     const isSustainActive = isCurrentSustainEnabled;
-    const isBendEnabled = settingsRef.current.isPitchBendEnabled;
+    const isBendEnabled = settingsRef.current.isPitchBendEnabled && latchMode !== 3; 
     
     const isBending = isBendEnabled && !!cursor.originNodeId;
 
@@ -785,19 +876,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     let nextInteractionLock = cursor.interactionLockedNodeId;
     let shouldUpdateState = false;
 
-    // Latch Dragging Logic (enter/exit)
     if (hitNode) {
-         const isAlreadyLatched = isSustainingInstrument && isSustainActive && 
-                                  persistentLatchesRef.current.get(hitNode.id) === latchMode;
-
          if (isSustainingInstrument && isSustainActive && isBendEnabled) {
-             // Hybrid Mode Logic...
-             // Simplifying: if entering node area, trigger latch.
              if (cursor.interactionLockedNodeId !== hitNode.id) {
+                 const currentModes = persistentLatchesRef.current.get(hitNode.id);
+                 const isAlreadyLatched = currentModes && currentModes.has(latchMode);
+
                  if (!isAlreadyLatched) {
-                     setPersistentLatches(prev => {
+                     setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                          const next = new Map(prev);
-                         next.set(hitNode.id, latchMode);
+                         const nodeModes = next.get(hitNode.id) || new Map<number, number>();
+                         nodeModes.set(latchMode, Date.now());
+                         next.set(hitNode.id, nodeModes);
                          return next;
                      });
                      nodeTriggerHistory.current.set(hitNode.id, Date.now());
@@ -808,7 +898,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
          }
     }
 
-    // Node Entry/Exit Logic
     if (cursor.hoverNodeId !== hitId) {
         shouldUpdateState = true;
         nextInteractionLock = null;
@@ -828,16 +917,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              const topLayer = settingsRef.current.layerOrder[settingsRef.current.layerOrder.length - 1];
              if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
              
-             const isAlreadyLatched = isSustainingInstrument && isSustainActive && 
-                                      persistentLatchesRef.current.get(hitNode.id) === latchMode;
-
              if (isSustainingInstrument && isSustainActive && !isBendEnabled) {
                 const isDifferentNode = hitNode.id !== cursor.originNodeId;
                 if (hasMoved || isDifferentNode) {
+                    const currentModes = persistentLatchesRef.current.get(hitNode.id);
+                    const isAlreadyLatched = currentModes && currentModes.has(latchMode);
+                    
                     if (!isAlreadyLatched) { 
-                        setPersistentLatches(prev => {
+                        setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                             const next = new Map(prev);
-                            next.set(hitNode.id, latchMode);
+                            const nodeModes = next.get(hitNode.id) || new Map<number, number>();
+                            nodeModes.set(latchMode, Date.now());
+                            next.set(hitNode.id, nodeModes);
                             return next;
                         });
                         nodeTriggerHistory.current.set(hitNode.id, Date.now());
@@ -856,7 +947,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
     }
 
-    // 3. Update State ONLY if logic changed (hover node change)
     if (shouldUpdateState || (hasMoved !== cursor.hasMoved)) {
         const updatedCursor = { 
             ...cursor, 
@@ -879,7 +969,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
         const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
         
-        if (cursor.originNodeId && settingsRef.current.isPitchBendEnabled) {
+        const isBendEnabled = settingsRef.current.isPitchBendEnabled && latchMode !== 3; 
+
+        if (cursor.originNodeId && isBendEnabled) {
             const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
             audioEngine.stopVoice(voiceId);
             if (settingsRef.current.midiEnabled) midiService.noteOff(voiceId);
@@ -938,7 +1030,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           {
               data: dataRef.current,
               settings: settingsRef.current,
-              visualLatchedNodes: visualLatchedRef.current,
+              visualLatchedNodes: visualLatchedRef.current, 
               activeLines: activeLinesRef.current,
               brightenedLines: brightenedLinesRef.current,
               activeCursors: activeCursorsRef.current,
@@ -948,7 +1040,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               effectiveScale: effectiveScaleRef.current,
               dynamicSize: dynamicSizeRef.current,
               view: { x: viewX, y: viewY, w: viewW, h: viewH },
-              time: time
+              time: time,
+              latchMode: latchModeRef.current
           }
       );
 
