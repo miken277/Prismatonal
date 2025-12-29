@@ -274,6 +274,8 @@ export interface AppSettings {
   };
 }
 
+export type FilterType = 'lowpass' | 'highpass' | 'bandpass' | 'notch';
+
 export interface OscillatorConfig {
   enabled: boolean;
   waveform: WaveformType;
@@ -290,11 +292,13 @@ export interface OscillatorConfig {
   // Filter
   filterCutoff: number; // Hz
   filterResonance: number; // Q factor
+  filterType: FilterType;
 
   // LFO
   lfoRate: number; // Hz
   lfoDepth: number; // Amount 0-100
   lfoTarget: 'none' | 'pitch' | 'filter' | 'tremolo';
+  lfoDelay: number; // Fade in time (seconds)
 }
 
 export type ModSource = 'lfo1' | 'lfo2' | 'lfo3' | 'env1' | 'env2' | 'env3';
@@ -327,6 +331,13 @@ export interface SynthPreset {
 
   // Master Gain for the preset
   gain: number; 
+
+  // Formant / Vocal Tract
+  formantStrength?: number; // 0 to 1 (0 = Bypass, 1 = Full Formant Filtering)
+  vowel?: number; // 0.0 (A) to 1.0 (U)
+
+  // Expression / Performance
+  portamento?: number; // 0 to 1 (Glide time)
 
   // Stereo & Pan
   spread?: number; // 0 to 1 (Voice Stereo Width)

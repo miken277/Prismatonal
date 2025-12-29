@@ -13,6 +13,16 @@ for (let i = 0; i <= WAVETABLE_SIZE; i++) {
     SINE_TABLE[i] = Math.sin((i / WAVETABLE_SIZE) * TWO_PI);
 }
 
+// Formant Frequencies (Approximations of Tenor/Soprano)
+// A, E, I, O, U
+const FORMANTS = [
+    { f1: 730, f2: 1090, f3: 2440, g1: 1.0, g2: 0.5, g3: 0.2 }, // A (aa)
+    { f1: 530, f2: 1840, f3: 2480, g1: 1.0, g2: 0.4, g3: 0.2 }, // E (eh)
+    { f1: 270, f2: 2290, f3: 3010, g1: 1.0, g2: 0.3, g3: 0.1 }, // I (iy)
+    { f1: 570, f2: 840,  f3: 2410, g1: 1.0, g2: 0.5, g3: 0.2 }, // O (ow)
+    { f1: 300, f2: 870,  f3: 2240, g1: 1.0, g2: 0.4, g3: 0.2 }  // U (uw)
+];
+
 const DUMMY_OSC_CONFIG = {
     enabled: false,
     waveform: 'sine',
@@ -25,9 +35,11 @@ const DUMMY_OSC_CONFIG = {
     release: 0.1,
     filterCutoff: 20000,
     filterResonance: 0,
+    filterType: 'lowpass',
     lfoRate: 1,
     lfoDepth: 0,
-    lfoTarget: 'none'
+    lfoTarget: 'none',
+    lfoDelay: 0
 };
 
 const DUMMY_PRESET_DATA = {
@@ -38,7 +50,10 @@ const DUMMY_PRESET_DATA = {
     gain: 1.0,
     spread: 0,
     stereoPanSpeed: 0,
-    stereoPanDepth: 0
+    stereoPanDepth: 0,
+    formantStrength: 0,
+    vowel: 0,
+    portamento: 0
 };
 
 // --- 2. BASIC DSP CLASSES (Oscillator, Filter, Envelope) ---
@@ -76,8 +91,11 @@ class SVF {
     this.notch = 0.0;
   }
 
-  process(input, cutoff, res, sampleRate) {
-    const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.42));
+  process(input, cutoff, res, sampleRate, type) {
+    // Safe Cutoff range: 20Hz to Nyquist (approx)
+    // Stability fix: Limit cutoff to < sampleRate / 2.2
+    const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.45));
+    
     let f = 2.0 * Math.sin(Math.PI * safeCutoff / sampleRate);
     const q = 1.0 / (res + 0.5);
 
@@ -86,8 +104,64 @@ class SVF {
     this.band += f * this.high;
     this.notch = this.high + this.low;
 
+    // Type: 0=Low, 1=High, 2=Band, 3=Notch
+    if (type === 1) return this.high;
+    if (type === 2) return this.band;
+    if (type === 3) return this.notch;
     return this.low; 
   }
+}
+
+class FormantFilter {
+    constructor() {
+        this.f1 = new SVF();
+        this.f2 = new SVF();
+        this.f3 = new SVF();
+        this.currentVowel = -1; // Force update on first run
+    }
+
+    reset() {
+        this.f1.reset();
+        this.f2.reset();
+        this.f3.reset();
+        this.currentVowel = -1;
+    }
+
+    // Interpolate formant params
+    process(input, vowel, sampleRate) {
+        // Vowel 0-1 maps to A-E-I-O-U
+        // Indices: 0, 1, 2, 3, 4
+        // scaledVowel = vowel * 4
+        
+        const pos = Math.max(0, Math.min(1, vowel)) * 4.0;
+        const idx = Math.floor(pos);
+        const frac = pos - idx;
+        
+        const nextIdx = Math.min(idx + 1, 4);
+        
+        const p1 = FORMANTS[idx];
+        const p2 = FORMANTS[nextIdx];
+
+        // Linear interpolation of freq
+        const f1_freq = p1.f1 + (p2.f1 - p1.f1) * frac;
+        const f2_freq = p1.f2 + (p2.f2 - p1.f2) * frac;
+        const f3_freq = p1.f3 + (p2.f3 - p1.f3) * frac;
+        
+        // Gains
+        const g1 = p1.g1 + (p2.g1 - p1.g1) * frac;
+        const g2 = p1.g2 + (p2.g2 - p1.g2) * frac;
+        const g3 = p1.g3 + (p2.g3 - p1.g3) * frac;
+
+        // Bandpass processing with moderate Q (Resonance ~ 4-8)
+        // High Q makes vowels clearer but quieter
+        const res = 4.0; 
+
+        const out1 = this.f1.process(input, f1_freq, res, sampleRate, 2); // 2 = Band
+        const out2 = this.f2.process(input, f2_freq, res, sampleRate, 2);
+        const out3 = this.f3.process(input, f3_freq, res, sampleRate, 2);
+
+        return (out1 * g1) + (out2 * g2) + (out3 * g3);
+    }
 }
 
 class Envelope {
@@ -230,6 +304,7 @@ class Voice {
     this.targetFreq = 440;
     this.startTime = 0; 
     this.releaseTime = 0; 
+    this.activeTime = 0.0; // Seconds active, for LFO delay
     
     this.oscs = [
         new Oscillator(sampleRate),
@@ -238,6 +313,8 @@ class Voice {
     ];
 
     this.filters = [ new SVF(), new SVF(), new SVF() ];
+    this.formantFilter = new FormantFilter();
+    
     this.envs = [ new Envelope(), new Envelope(), new Envelope() ];
     this.lfoPhases = [0.0, 0.0, 0.0];
     this.envVals = new Float32Array(3);
@@ -260,6 +337,7 @@ class Voice {
     this.active = true;
     this.startTime = currentTime; 
     this.releaseTime = 0; 
+    this.activeTime = 0.0;
     
     this.envs.forEach(env => {
         // Soft reset to avoid clicks on retrigger
@@ -267,6 +345,7 @@ class Voice {
     });
     
     this.filters.forEach(f => f.reset());
+    this.formantFilter.reset();
     this.lfoPhases.fill(0.0);
   }
 
@@ -279,10 +358,19 @@ class Voice {
       this.active = false;
       this.envs.forEach(env => env.reset());
       this.filters.forEach(f => f.reset());
+      this.formantFilter.reset();
   }
 
   getLevel() {
     return Math.max(this.envs[0].value, this.envs[1].value, this.envs[2].value);
+  }
+
+  // Helper to map string types to integer for optimized loop
+  getFilterTypeId(type) {
+      if (type === 'highpass') return 1;
+      if (type === 'bandpass') return 2;
+      if (type === 'notch') return 3;
+      return 0; // lowpass
   }
 
   // Optimized block processing
@@ -292,7 +380,25 @@ class Voice {
     // --- FREQ GLIDE ---
     const diff = this.targetFreq - this.baseFreq;
     if (Math.abs(diff) > 0.001) {
-      this.baseFreq += diff * 0.005; // Simple exponential slide per block
+        // Dynamic Portamento Coefficient
+        // portamento = 0 (fast) -> high coefficient
+        // portamento = 1 (slow) -> low coefficient
+        // Default curve approximation: time constant
+        const glideParam = preset.portamento !== undefined ? preset.portamento : 0;
+        let coef = 0.005; // Fallback
+        
+        if (glideParam <= 0.01) {
+            coef = 1.0; // Instant
+        } else {
+            // Mapping 0..1 to approx 0.5s time constant range
+            // coef = 1 - exp(-dt / time_const)
+            const timeConst = glideParam * 0.5; // Up to 0.5s glide
+            coef = 1.0 - Math.exp(- (len * dt) / timeConst);
+            // Distribute across block? For simplicity, we step once per block for freq
+            // For smoother audio rate glide, we'd do it per sample, but block rate is usually fine for portamento
+        }
+        
+        this.baseFreq += diff * coef;
     } else {
       this.baseFreq = this.targetFreq;
     }
@@ -304,7 +410,14 @@ class Voice {
     const matrix = preset.modMatrix || [];
     const spreadAmount = preset.spread || 0;
     const voiceGain = preset.gain || 0.5;
+    const formantStrength = preset.formantStrength || 0;
+    const vowelPos = preset.vowel || 0;
     const hasMatrix = matrix.length > 0;
+
+    // Filter Type Integers
+    const fType1 = this.getFilterTypeId(osc1.filterType);
+    const fType2 = this.getFilterTypeId(osc2.filterType);
+    const fType3 = this.getFilterTypeId(osc3.filterType);
 
     let anyEnvActive = false;
     let panPhase = startPanPhase;
@@ -349,6 +462,15 @@ class Voice {
             osc3StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
         }
     }
+    
+    // --- LFO DELAY CALCULATION ---
+    // Linear fade-in of LFO depth based on activeTime
+    this.activeTime += (len * dt);
+    
+    // 0.001 to prevent divide by zero
+    const lfoFade1 = osc1.lfoDelay ? Math.min(1.0, this.activeTime / Math.max(0.01, osc1.lfoDelay)) : 1.0;
+    const lfoFade2 = osc2.lfoDelay ? Math.min(1.0, this.activeTime / Math.max(0.01, osc2.lfoDelay)) : 1.0;
+    const lfoFade3 = osc3.lfoDelay ? Math.min(1.0, this.activeTime / Math.max(0.01, osc3.lfoDelay)) : 1.0;
 
     for (let s = 0; s < len; s++) {
         // --- 1. MODULATORS ---
@@ -361,7 +483,7 @@ class Voice {
         if (this.envs[0].stage !== 'idle') anyEnvActive = true;
         this.lfoPhases[0] += lfoRate1 * dt;
         if (this.lfoPhases[0] >= 1.0) this.lfoPhases[0] -= 1.0;
-        this.lfoVals[0] = Math.sin(TWO_PI * this.lfoPhases[0]);
+        this.lfoVals[0] = Math.sin(TWO_PI * this.lfoPhases[0]) * lfoFade1;
 
         // OSC 2
         const env2 = this.envs[1].process(osc2, dt);
@@ -369,7 +491,7 @@ class Voice {
         if (this.envs[1].stage !== 'idle') anyEnvActive = true;
         this.lfoPhases[1] += lfoRate2 * dt;
         if (this.lfoPhases[1] >= 1.0) this.lfoPhases[1] -= 1.0;
-        this.lfoVals[1] = Math.sin(TWO_PI * this.lfoPhases[1]);
+        this.lfoVals[1] = Math.sin(TWO_PI * this.lfoPhases[1]) * lfoFade2;
 
         // OSC 3
         const env3 = this.envs[2].process(osc3, dt);
@@ -377,7 +499,7 @@ class Voice {
         if (this.envs[2].stage !== 'idle') anyEnvActive = true;
         this.lfoPhases[2] += lfoRate3 * dt;
         if (this.lfoPhases[2] >= 1.0) this.lfoPhases[2] -= 1.0;
-        this.lfoVals[2] = Math.sin(TWO_PI * this.lfoPhases[2]);
+        this.lfoVals[2] = Math.sin(TWO_PI * this.lfoPhases[2]) * lfoFade3;
 
         if (!anyEnvActive && s === len - 1) {
             this.active = false;
@@ -446,7 +568,9 @@ class Voice {
             
             const cut = osc1.filterCutoff + hardFilter + (modC1 * 5000);
             const res = Math.max(0, osc1.filterResonance + (modR1 * 10));
-            sig = this.filters[0].process(sig, cut, res, this.sampleRate);
+            
+            // Pass Type to Filter
+            sig = this.filters[0].process(sig, cut, res, this.sampleRate, fType1);
             
             voiceMix += sig * osc1.gain * this.envVals[0] * hardAmp * Math.max(0, 1.0 + modG1);
         }
@@ -472,7 +596,7 @@ class Voice {
             
             const cut = osc2.filterCutoff + hardFilter + (modC2 * 5000);
             const res = Math.max(0, osc2.filterResonance + (modR2 * 10));
-            sig = this.filters[1].process(sig, cut, res, this.sampleRate);
+            sig = this.filters[1].process(sig, cut, res, this.sampleRate, fType2);
             
             voiceMix += sig * osc2.gain * this.envVals[1] * hardAmp * Math.max(0, 1.0 + modG2);
         }
@@ -498,12 +622,21 @@ class Voice {
             
             const cut = osc3.filterCutoff + hardFilter + (modC3 * 5000);
             const res = Math.max(0, osc3.filterResonance + (modR3 * 10));
-            sig = this.filters[2].process(sig, cut, res, this.sampleRate);
+            sig = this.filters[2].process(sig, cut, res, this.sampleRate, fType3);
             
             voiceMix += sig * osc3.gain * this.envVals[2] * hardAmp * Math.max(0, 1.0 + modG3);
         }
 
-        // --- 4. PANNING & OUTPUT ---
+        // --- 4. FORMANT FILTER (Parallel Bandpass Bank) ---
+        if (formantStrength > 0.01) {
+            const formantSig = this.formantFilter.process(voiceMix, vowelPos, this.sampleRate);
+            // Mix Dry/Wet based on formantStrength
+            // Note: Formant filter gain can be high, so we might need to compensate volume slightly
+            // Usually formants are subtractive in nature (filtering), but parallel bandpass adds energy at peaks.
+            voiceMix = (voiceMix * (1.0 - formantStrength)) + (formantSig * formantStrength * 1.5);
+        }
+
+        // --- 5. PANNING & OUTPUT ---
         panPhase += dt * panSpeed;
         if (panPhase > 1.0) panPhase -= 1.0;
         
@@ -600,7 +733,10 @@ class PrismaProcessor extends AudioWorkletProcessor {
           gain: data.gain || 0.5,
           spread: data.spread || 0,
           stereoPanSpeed: data.stereoPanSpeed || 0,
-          stereoPanDepth: data.stereoPanDepth || 0
+          stereoPanDepth: data.stereoPanDepth || 0,
+          formantStrength: (data.formantStrength !== undefined) ? data.formantStrength : 0,
+          vowel: (data.vowel !== undefined) ? data.vowel : 0,
+          portamento: (data.portamento !== undefined) ? data.portamento : 0
       };
   }
 

@@ -226,9 +226,11 @@ const defaultDisabledOsc: OscillatorConfig = {
     release: 1.0,
     filterCutoff: 2000,
     filterResonance: 0.5,
+    filterType: 'lowpass',
     lfoRate: 1,
     lfoDepth: 0,
-    lfoTarget: 'none'
+    lfoTarget: 'none',
+    lfoDelay: 0
 };
 
 const generateInitPatch = (name: string, id: string): SynthPreset => ({
@@ -253,7 +255,8 @@ const generateInitPatch = (name: string, id: string): SynthPreset => ({
     delayFeedback: 0.2,
     compressorThreshold: -10,
     compressorRatio: 4,
-    compressorRelease: 0.2
+    compressorRelease: 0.2,
+    portamento: 0
 });
 
 const p = (name: string, cat: string, osc1: Partial<OscillatorConfig>, osc2: Partial<OscillatorConfig>, osc3: Partial<OscillatorConfig>, extra: Partial<SynthPreset> = {}): SynthPreset => {
@@ -349,7 +352,7 @@ const PLUCKED_PATCHES = [
 ];
 
 const STRINGS_PATCHES = [
-    p("Solo Violin", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 5 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 4, gain: 0.4, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.2, filterCutoff: 800 }, { spread: 0.3, reverbType: 'hall', reverbMix: 0.4, compressorThreshold: -15 }),
+    p("Solo Violin", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 5, lfoDelay: 0.3 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 4, gain: 0.4, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.2, filterCutoff: 800 }, { spread: 0.3, reverbType: 'hall', reverbMix: 0.4, compressorThreshold: -15, portamento: 0.2 }),
     p("Cello Section", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.5, attack: 0.4, release: 0.8, filterCutoff: 1000 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1205, gain: 0.4, attack: 0.5, release: 0.9, filterCutoff: 800 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1195, gain: 0.4, attack: 0.4, release: 0.8 }, { spread: 0.6, reverbType: 'hall', reverbMix: 0.6 }),
     p("Pizzicato", "Strings", { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.8, attack: 0.01, decay: 0.25, sustain: 0, release: 0.25 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3, attack: 0.01, decay: 0.2, sustain: 0 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.2, attack: 0.02, decay: 0.15, sustain: 0, filterCutoff: 1200 }, { spread: 0.4, reverbType: 'room', reverbMix: 0.2 }),
     p("Tremolo Strings", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.2, sustain: 0.8, lfoTarget: 'tremolo', lfoRate: 6, lfoDepth: 40 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 5, gain: 0.5, attack: 0.25, sustain: 0.8, lfoTarget: 'tremolo', lfoRate: 6.2, lfoDepth: 40 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.3 }, { spread: 0.7, reverbType: 'hall', reverbMix: 0.5 }),
@@ -375,7 +378,7 @@ const ETHEREAL_PADS = [
 ];
 
 const ETHEREAL_LEADS = [
-    p("Liquid Light", "Leads", { enabled: true, waveform: WaveformType.SINE, gain: 0.8, attack: 0.05 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 4, gain: 0.6 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, gain: 0.2, filterCutoff: 2000, lfoTarget: 'filter', lfoRate: 6, lfoDepth: 20 }, { spread: 0.4, stereoPanSpeed: 2.0, stereoPanDepth: 0.5, reverbType: 'hall', delayMix: 0.4, reverbMix: 0.4 }),
+    p("Liquid Light", "Leads", { enabled: true, waveform: WaveformType.SINE, gain: 0.8, attack: 0.05 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 4, gain: 0.6 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, gain: 0.2, filterCutoff: 2000, lfoTarget: 'filter', lfoRate: 6, lfoDepth: 20 }, { spread: 0.4, stereoPanSpeed: 2.0, stereoPanDepth: 0.5, reverbType: 'hall', delayMix: 0.4, reverbMix: 0.4, portamento: 0.1 }),
     p("Laser Harp", "Leads", { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 4000, decay: 0.3, sustain: 0 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, gain: 0.3, decay: 0.2, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.2, decay: 0.1 }, { spread: 0.6, stereoPanSpeed: 6.0, stereoPanDepth: 0.3, reverbType: 'plate', delayMix: 0.5, delayTime: 0.3, modMatrix: [{ id: 'm1', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 50 }] }),
     p("Ghost Flute", "Leads", { enabled: true, waveform: WaveformType.TRIANGLE, attack: 0.1, lfoTarget: 'tremolo', lfoRate: 5, lfoDepth: 20 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.2 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1205, gain: 0.2 }, { spread: 0.5, stereoPanSpeed: 0.5, stereoPanDepth: 0.6, reverbType: 'hall', reverbMix: 0.8 }),
     p("Warp Drive", "Leads", { enabled: true, waveform: WaveformType.SAWTOOTH, filterCutoff: 2000, lfoTarget: 'pitch', lfoRate: 8, lfoDepth: 5 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.5 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.3, lfoTarget: 'filter', lfoRate: 2, lfoDepth: 40 }, { spread: 0.3, stereoPanSpeed: 8.0, stereoPanDepth: 0.4, reverbType: 'room', delayMix: 0.3 }),
@@ -418,41 +421,42 @@ const ETHEREAL_MALLETS = [
     p("Star Drops", "Mallets", { enabled: true, waveform: WaveformType.SINE, decay: 0.1, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, decay: 0.1, gain: 0.3 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 2400, decay: 0.2, gain: 0.2 }, { spread: 0.9, stereoPanSpeed: 4.0, stereoPanDepth: 0.5, reverbType: 'plate', delayMix: 0.6, delayTime: 0.2 })
 ];
 
+// --- RESET VOICE PATCHES TO SINE WAVES ---
 const VOICE_PATCHES = [
-    // 1. Female Solo (Soprano)
+    // 1. Female Solo (Soprano) - RESET
     p("Solo Soprano", "Voice", 
-        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.6, attack: 0.1, decay: 0.3, sustain: 0.8, release: 0.4, lfoTarget: 'pitch', lfoRate: 5.5, lfoDepth: 8, filterCutoff: 1500, filterResonance: 1.0 }, 
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.2, coarseDetune: 0, fineDetune: 5, filterCutoff: 2500, filterResonance: 0.5 },
-        { enabled: true, waveform: WaveformType.NOISE, gain: 0.05, filterCutoff: 4000, filterResonance: 0 }, 
-        { spread: 0.3, reverbType: 'hall', reverbMix: 0.5, delayMix: 0.1 }
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 }, 
+        { enabled: false },
+        { enabled: false }, 
+        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
     ),
-    // 2. Male Solo (Tenor)
+    // 2. Male Solo (Tenor) - RESET
     p("Solo Tenor", "Voice", 
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.1, decay: 0.2, sustain: 0.9, release: 0.5, lfoTarget: 'pitch', lfoRate: 5.0, lfoDepth: 5, filterCutoff: 800, filterResonance: 2.0 }, // Formant-ish peak
-        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.3, coarseDetune: 0, fineDetune: -3, filterCutoff: 1200 },
-        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.4, coarseDetune: -1200 }, 
-        { spread: 0.2, reverbType: 'room', reverbMix: 0.3 }
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 }, 
+        { enabled: false },
+        { enabled: false }, 
+        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
     ),
-    // 3. Female Group (Choir)
+    // 3. Female Group (Choir) - RESET
     p("Womens Choir", "Voice",
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 0.8, sustain: 1.0, release: 1.2, fineDetune: -10, filterCutoff: 2000 },
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 0.9, sustain: 1.0, release: 1.2, fineDetune: 10, filterCutoff: 2000 },
-        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.3, attack: 0.7, sustain: 1.0, release: 1.5, coarseDetune: 1200, fineDetune: 0, filterCutoff: 1500 },
-        { spread: 0.7, reverbType: 'cathedral', reverbMix: 0.7, stereoPanSpeed: 0.1, stereoPanDepth: 0.2 }
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 },
+        { enabled: false },
+        { enabled: false },
+        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
     ),
-    // 4. Male Group (Monks)
+    // 4. Male Group (Monks) - RESET
     p("Monks Choir", "Voice",
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 1.0, sustain: 1.0, release: 1.5, coarseDetune: -1200, fineDetune: -15, filterCutoff: 600 },
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 1.2, sustain: 1.0, release: 1.5, coarseDetune: -1200, fineDetune: 15, filterCutoff: 600 },
-        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.2, attack: 1.5, sustain: 0.8, release: 2.0, coarseDetune: -2400, filterCutoff: 300 },
-        { spread: 0.6, reverbType: 'cathedral', reverbMix: 0.8 }
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 },
+        { enabled: false },
+        { enabled: false },
+        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
     ),
-    // 5. Combined Group (Tutti)
+    // 5. Combined Group (Tutti) - RESET
     p("Tutti Choir", "Voice",
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, coarseDetune: -1200, fineDetune: -5, attack: 0.5, release: 1.0, filterCutoff: 800 }, // Men
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, coarseDetune: 0, fineDetune: 5, attack: 0.5, release: 1.0, filterCutoff: 1500 }, // Women
-        { enabled: true, waveform: WaveformType.NOISE, gain: 0.05, attack: 0.1, release: 0.5, filterCutoff: 3000 }, // Air
-        { spread: 0.9, reverbType: 'hall', reverbMix: 0.6, delayMix: 0.2 }
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 },
+        { enabled: false },
+        { enabled: false },
+        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
     )
 ];
 
