@@ -30,8 +30,8 @@ const App: React.FC = () => {
   const [latchMode, setLatchMode] = useState<0 | 1 | 2 | 3 | 4>(2);
   
   // Track sustain ON/OFF preference per instrument mode
-  // 1: Drone (Default True), 2: Strings (Default False), 3: Plucked (N/A), 4: Voice (Default False)
-  const [sustainStates, setSustainStates] = useState<{ [key: number]: boolean }>({ 1: true, 2: false, 3: false, 4: false });
+  // 1: Drone (Default True), 2: Strings (Default True), 3: Plucked (N/A), 4: Voice (Default False)
+  const [sustainStates, setSustainStates] = useState<{ [key: number]: boolean }>({ 1: true, 2: true, 3: false, 4: false });
 
   // Track which modes currently have active voices sustained
   const [activeSustainedModes, setActiveSustainedModes] = useState<number[]>([]);
@@ -308,7 +308,6 @@ const App: React.FC = () => {
       let nextSustainState = sustainStates[newMode] ?? false;
       
       // FORCE RESETs for specific modes if desired defaults
-      if (newMode === 2) nextSustainState = false; // Strings starts clean
       if (newMode === 3) nextSustainState = false; // Plucked no sustain
       if (newMode === 4) nextSustainState = false; // Voice starts clean
 

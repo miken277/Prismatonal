@@ -136,8 +136,8 @@ const InstrumentCluster: React.FC<Props> = ({
                 <div className="w-8 h-1 bg-slate-600 rounded-full" />
             </div>
 
-            {/* Drone (Green) */}
-            {renderInstrument(1, "Drone", 'latch', onLatch, MODE_COLORS[1])}
+            {/* Voice (Yellow) - Top */}
+            {renderInstrument(4, "Voice", 'voice', onVoice, MODE_COLORS[4])}
 
             {/* Strings (Blue) */}
             {renderInstrument(2, "Strings", 'normal', onSust, MODE_COLORS[2])}
@@ -145,8 +145,8 @@ const InstrumentCluster: React.FC<Props> = ({
             {/* Plucked (Orange) */}
             {renderInstrument(3, "Plucked", 'strum', onPluck, MODE_COLORS[3])}
 
-            {/* Voice (Yellow) */}
-            {renderInstrument(4, "Voice", 'voice', onVoice, MODE_COLORS[4])}
+            {/* Drone (Green) - Bottom */}
+            {renderInstrument(1, "Drone", 'latch', onLatch, MODE_COLORS[1])}
         </div>
     );
 };

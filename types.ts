@@ -1,5 +1,4 @@
 
-
 export enum LimitType {
   LIMIT_2 = 2,
   LIMIT_3 = 3,
@@ -16,6 +15,7 @@ export enum WaveformType {
   SQUARE = 'square',
   SAWTOOTH = 'sawtooth',
   TRIANGLE = 'triangle',
+  NOISE = 'noise',
 }
 
 export enum ButtonShape {

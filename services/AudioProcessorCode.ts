@@ -205,6 +205,10 @@ class Oscillator {
         let phase2 = (this.phase + 0.5) % 1.0;
         sample -= this.blep.get(phase2, dt * freq);
         break;
+      case 'noise':
+        // Simple White Noise
+        sample = (Math.random() * 2.0) - 1.0;
+        break;
     }
     
     return sample;

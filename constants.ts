@@ -183,8 +183,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   colors: { ...DEFAULT_COLORS },
   nodeTextSizeScale: 1.0,
   showFractionBar: false,
-  isPitchBendEnabled: false, 
-  isSustainEnabled: false, // Set to false so Strings starts Normal; Drone logic overrides this when selected
+  isPitchBendEnabled: true, // Default: Enabled
+  isSustainEnabled: true, // Default: Enabled (for Strings)
   isStrumEnabled: false, // Default to false so String behaves like a normal Gate instrument
   chordsAlwaysRelatch: false, // New Default
   isPitchSnapEnabled: true,
@@ -419,9 +419,41 @@ const ETHEREAL_MALLETS = [
 ];
 
 const VOICE_PATCHES = [
-    p("Choir Aah", "Voice", { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.7, attack: 0.5, decay: 0.5, sustain: 0.8, release: 1.0, filterCutoff: 1200, filterResonance: 1.0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3, attack: 0.6, sustain: 0.7 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.2, filterCutoff: 800 }, { spread: 0.6, reverbType: 'cathedral', reverbMix: 0.6 }),
-    p("Synth Vox", "Voice", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 0.2, decay: 0.3, sustain: 0.6, filterCutoff: 2000, lfoTarget: 'filter', lfoRate: 4, lfoDepth: 20 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 5, gain: 0.4 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.3 }, { spread: 0.5, reverbType: 'hall', reverbMix: 0.5 }),
-    p("Scat Doo", "Voice", { enabled: true, waveform: WaveformType.SQUARE, gain: 0.8, attack: 0.05, decay: 0.2, sustain: 0.4, release: 0.2, filterCutoff: 800 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3, decay: 0.1, sustain: 0 }, { enabled: false }, { spread: 0.4, reverbType: 'room', reverbMix: 0.3 })
+    // 1. Female Solo (Soprano)
+    p("Solo Soprano", "Voice", 
+        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.6, attack: 0.1, decay: 0.3, sustain: 0.8, release: 0.4, lfoTarget: 'pitch', lfoRate: 5.5, lfoDepth: 8, filterCutoff: 1500, filterResonance: 1.0 }, 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.2, coarseDetune: 0, fineDetune: 5, filterCutoff: 2500, filterResonance: 0.5 },
+        { enabled: true, waveform: WaveformType.NOISE, gain: 0.05, filterCutoff: 4000, filterResonance: 0 }, 
+        { spread: 0.3, reverbType: 'hall', reverbMix: 0.5, delayMix: 0.1 }
+    ),
+    // 2. Male Solo (Tenor)
+    p("Solo Tenor", "Voice", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.1, decay: 0.2, sustain: 0.9, release: 0.5, lfoTarget: 'pitch', lfoRate: 5.0, lfoDepth: 5, filterCutoff: 800, filterResonance: 2.0 }, // Formant-ish peak
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.3, coarseDetune: 0, fineDetune: -3, filterCutoff: 1200 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.4, coarseDetune: -1200 }, 
+        { spread: 0.2, reverbType: 'room', reverbMix: 0.3 }
+    ),
+    // 3. Female Group (Choir)
+    p("Womens Choir", "Voice",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 0.8, sustain: 1.0, release: 1.2, fineDetune: -10, filterCutoff: 2000 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 0.9, sustain: 1.0, release: 1.2, fineDetune: 10, filterCutoff: 2000 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.3, attack: 0.7, sustain: 1.0, release: 1.5, coarseDetune: 1200, fineDetune: 0, filterCutoff: 1500 },
+        { spread: 0.7, reverbType: 'cathedral', reverbMix: 0.7, stereoPanSpeed: 0.1, stereoPanDepth: 0.2 }
+    ),
+    // 4. Male Group (Monks)
+    p("Monks Choir", "Voice",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 1.0, sustain: 1.0, release: 1.5, coarseDetune: -1200, fineDetune: -15, filterCutoff: 600 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 1.2, sustain: 1.0, release: 1.5, coarseDetune: -1200, fineDetune: 15, filterCutoff: 600 },
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.2, attack: 1.5, sustain: 0.8, release: 2.0, coarseDetune: -2400, filterCutoff: 300 },
+        { spread: 0.6, reverbType: 'cathedral', reverbMix: 0.8 }
+    ),
+    // 5. Combined Group (Tutti)
+    p("Tutti Choir", "Voice",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, coarseDetune: -1200, fineDetune: -5, attack: 0.5, release: 1.0, filterCutoff: 800 }, // Men
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, coarseDetune: 0, fineDetune: 5, attack: 0.5, release: 1.0, filterCutoff: 1500 }, // Women
+        { enabled: true, waveform: WaveformType.NOISE, gain: 0.05, attack: 0.1, release: 0.5, filterCutoff: 3000 }, // Air
+        { spread: 0.9, reverbType: 'hall', reverbMix: 0.6, delayMix: 0.2 }
+    )
 ];
 
 // Create User Bank with 100 Empty Slots
