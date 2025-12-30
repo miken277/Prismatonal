@@ -7,20 +7,45 @@ const TWO_PI = 2 * Math.PI;
 // Increased from 4096 to 65536 to eliminate linear interpolation artifacts
 const WAVETABLE_SIZE = 65536; 
 const SINE_TABLE = new Float32Array(WAVETABLE_SIZE + 1); // +1 for simple interpolation guard
+const GLOTTAL_TABLE = new Float32Array(WAVETABLE_SIZE + 1); 
 
 // Precompute Sine Table
 for (let i = 0; i <= WAVETABLE_SIZE; i++) {
-    SINE_TABLE[i] = Math.sin((i / WAVETABLE_SIZE) * TWO_PI);
+    const phase = i / WAVETABLE_SIZE;
+    SINE_TABLE[i] = Math.sin(phase * TWO_PI);
 }
 
-// Formant Frequencies (Approximations of Tenor/Soprano)
-// A, E, I, O, U
-const FORMANTS = [
-    { f1: 730, f2: 1090, f3: 2440, g1: 1.0, g2: 0.5, g3: 0.2 }, // A (aa)
-    { f1: 530, f2: 1840, f3: 2480, g1: 1.0, g2: 0.4, g3: 0.2 }, // E (eh)
-    { f1: 270, f2: 2290, f3: 3010, g1: 1.0, g2: 0.3, g3: 0.1 }, // I (iy)
-    { f1: 570, f2: 840,  f3: 2410, g1: 1.0, g2: 0.5, g3: 0.2 }, // O (ow)
-    { f1: 300, f2: 870,  f3: 2240, g1: 1.0, g2: 0.4, g3: 0.2 }  // U (uw)
+// Precompute Glottal Table (Rosenberg-C approximation via additive synthesis)
+// This creates a band-limited pulse with approx -12dB/oct spectral slope
+// Rich in even and odd harmonics, perfect for subtractive vocal/brass synthesis.
+{
+    const numHarmonics = 64;
+    for (let i = 0; i <= WAVETABLE_SIZE; i++) {
+        let sample = 0;
+        const phase = i / WAVETABLE_SIZE;
+        for (let k = 1; k <= numHarmonics; k++) {
+            // Amplitude falls off as 1/k^1.6 (approx -10dB/oct)
+            const amp = 1.0 / Math.pow(k, 1.6);
+            // Cosine phase alignment ensures a peak at 0 (Pulse-like)
+            sample += amp * Math.cos(k * phase * TWO_PI);
+        }
+        GLOTTAL_TABLE[i] = sample;
+    }
+    // Normalize Glottal Table
+    let maxVal = 0;
+    for (let i = 0; i <= WAVETABLE_SIZE; i++) maxVal = Math.max(maxVal, Math.abs(GLOTTAL_TABLE[i]));
+    for (let i = 0; i <= WAVETABLE_SIZE; i++) GLOTTAL_TABLE[i] /= maxVal;
+}
+
+// Resonator Presets (Replaces Fixed Formants)
+// Can simulate different instrument body sizes or vocal tracts
+// Interpolated by 'resonatorSweep'
+const RESONANCES = [
+    { f1: 730, f2: 1090, f3: 2440, g1: 1.0, g2: 0.5, g3: 0.2 }, // Open
+    { f1: 530, f2: 1840, f3: 2480, g1: 1.0, g2: 0.4, g3: 0.2 }, // Mid 1
+    { f1: 270, f2: 2290, f3: 3010, g1: 1.0, g2: 0.3, g3: 0.1 }, // Mid 2
+    { f1: 570, f2: 840,  f3: 2410, g1: 1.0, g2: 0.5, g3: 0.2 }, // Mid 3
+    { f1: 300, f2: 870,  f3: 2240, g1: 1.0, g2: 0.4, g3: 0.2 }  // Closed/Muted
 ];
 
 const DUMMY_OSC_CONFIG = {
@@ -51,9 +76,11 @@ const DUMMY_PRESET_DATA = {
     spread: 0,
     stereoPanSpeed: 0,
     stereoPanDepth: 0,
-    formantStrength: 0,
-    vowel: 0,
-    portamento: 0
+    resonatorMix: 0,
+    resonatorSweep: 0,
+    portamento: 0,
+    noiseGain: 0,
+    noiseCutoff: 4000
 };
 
 // --- 2. BASIC DSP CLASSES (Oscillator, Filter, Envelope) ---
@@ -91,9 +118,8 @@ class SVF {
     this.notch = 0.0;
   }
 
-  process(input, cutoff, res, sampleRate, type) {
+  process(input, cutoff, res, sampleRate, type, peakGain = 1.0) {
     // Safe Cutoff range: 20Hz to Nyquist (approx)
-    // Stability fix: Limit cutoff to < sampleRate / 2.2
     const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.45));
     
     let f = 2.0 * Math.sin(Math.PI * safeCutoff / sampleRate);
@@ -104,48 +130,73 @@ class SVF {
     this.band += f * this.high;
     this.notch = this.high + this.low;
 
-    // Type: 0=Low, 1=High, 2=Band, 3=Notch
+    // 0=Low, 1=High, 2=Band, 3=Notch
+    if (type === 0) return this.low;
     if (type === 1) return this.high;
     if (type === 2) return this.band;
     if (type === 3) return this.notch;
+    
+    // 4=Peak: Mix of Low/High and Band.
+    // For a peak filter in SVF: Output = Low + High + (Band * Gain)
+    // If Gain is high, we boost at cutoff.
+    if (type === 4) {
+        return this.low + this.high + (this.band * peakGain);
+    }
+    
+    // 5=LowShelf: Boost/Cut Lows
+    // Output = (Low * Gain) + High + Band
+    if (type === 5) {
+        return (this.low * peakGain) + this.high + this.band;
+    }
+
+    // 6=HighShelf: Boost/Cut Highs
+    // Output = Low + (High * Gain) + Band
+    if (type === 6) {
+        return this.low + (this.high * peakGain) + this.band;
+    }
+
     return this.low; 
   }
 }
 
-class FormantFilter {
+class ResonatorBank {
     constructor() {
         this.f1 = new SVF();
         this.f2 = new SVF();
         this.f3 = new SVF();
-        this.currentVowel = -1; // Force update on first run
+        this.currentSweep = -1; // Force update on first run
     }
 
     reset() {
         this.f1.reset();
         this.f2.reset();
         this.f3.reset();
-        this.currentVowel = -1;
+        this.currentSweep = -1;
     }
 
-    // Interpolate formant params
-    process(input, vowel, sampleRate) {
-        // Vowel 0-1 maps to A-E-I-O-U
-        // Indices: 0, 1, 2, 3, 4
-        // scaledVowel = vowel * 4
+    // Interpolate resonator params with pitch scaling (Key Tracking)
+    process(input, sweep, pitchHz, sampleRate) {
+        // Sweep 0-1 maps through 5 resonator states
         
-        const pos = Math.max(0, Math.min(1, vowel)) * 4.0;
+        const pos = Math.max(0, Math.min(1, sweep)) * 4.0;
         const idx = Math.floor(pos);
         const frac = pos - idx;
         
         const nextIdx = Math.min(idx + 1, 4);
         
-        const p1 = FORMANTS[idx];
-        const p2 = FORMANTS[nextIdx];
+        const p1 = RESONANCES[idx];
+        const p2 = RESONANCES[nextIdx];
 
-        // Linear interpolation of freq
-        const f1_freq = p1.f1 + (p2.f1 - p1.f1) * frac;
-        const f2_freq = p1.f2 + (p2.f2 - p1.f2) * frac;
-        const f3_freq = p1.f3 + (p2.f3 - p1.f3) * frac;
+        // Key Tracking / Scaling Logic
+        // Reference frequency for formants/body is usually around 200Hz (Male/Alto range)
+        // We scale centers up slightly as pitch rises to preserve brightness
+        // Scale Factor: 10-15% of pitch ratio
+        const pitchScale = 1.0 + 0.15 * Math.log2(Math.max(50, pitchHz) / 200);
+
+        // Linear interpolation of freq * Scale
+        const f1_freq = (p1.f1 + (p2.f1 - p1.f1) * frac) * pitchScale;
+        const f2_freq = (p1.f2 + (p2.f2 - p1.f2) * frac) * pitchScale;
+        const f3_freq = (p1.f3 + (p2.f3 - p1.f3) * frac) * pitchScale;
         
         // Gains
         const g1 = p1.g1 + (p2.g1 - p1.g1) * frac;
@@ -153,7 +204,6 @@ class FormantFilter {
         const g3 = p1.g3 + (p2.g3 - p1.g3) * frac;
 
         // Bandpass processing with moderate Q (Resonance ~ 4-8)
-        // High Q makes vowels clearer but quieter
         const res = 4.0; 
 
         const out1 = this.f1.process(input, f1_freq, res, sampleRate, 2); // 2 = Band
@@ -261,6 +311,15 @@ class Oscillator {
             sample = SINE_TABLE[i] + f * (SINE_TABLE[i + 1] - SINE_TABLE[i]);
         }
         break;
+      case 'glottal':
+        {
+            const index = this.phase * WAVETABLE_SIZE;
+            const i = Math.floor(index);
+            const f = index - i;
+            // Lookup from new Glottal table
+            sample = GLOTTAL_TABLE[i] + f * (GLOTTAL_TABLE[i + 1] - GLOTTAL_TABLE[i]);
+        }
+        break;
       case 'triangle':
         {
             let t = -1.0 + (2.0 * this.phase);
@@ -313,7 +372,8 @@ class Voice {
     ];
 
     this.filters = [ new SVF(), new SVF(), new SVF() ];
-    this.formantFilter = new FormantFilter();
+    this.resonator = new ResonatorBank();
+    this.noiseFilter = new SVF(); // Dedicated Noise Filter
     
     this.envs = [ new Envelope(), new Envelope(), new Envelope() ];
     this.lfoPhases = [0.0, 0.0, 0.0];
@@ -345,7 +405,8 @@ class Voice {
     });
     
     this.filters.forEach(f => f.reset());
-    this.formantFilter.reset();
+    this.resonator.reset();
+    this.noiseFilter.reset();
     this.lfoPhases.fill(0.0);
   }
 
@@ -358,7 +419,8 @@ class Voice {
       this.active = false;
       this.envs.forEach(env => env.reset());
       this.filters.forEach(f => f.reset());
-      this.formantFilter.reset();
+      this.resonator.reset();
+      this.noiseFilter.reset();
   }
 
   getLevel() {
@@ -370,6 +432,9 @@ class Voice {
       if (type === 'highpass') return 1;
       if (type === 'bandpass') return 2;
       if (type === 'notch') return 3;
+      if (type === 'peak') return 4;
+      if (type === 'lowshelf') return 5;
+      if (type === 'highshelf') return 6;
       return 0; // lowpass
   }
 
@@ -380,22 +445,14 @@ class Voice {
     // --- FREQ GLIDE ---
     const diff = this.targetFreq - this.baseFreq;
     if (Math.abs(diff) > 0.001) {
-        // Dynamic Portamento Coefficient
-        // portamento = 0 (fast) -> high coefficient
-        // portamento = 1 (slow) -> low coefficient
-        // Default curve approximation: time constant
         const glideParam = preset.portamento !== undefined ? preset.portamento : 0;
         let coef = 0.005; // Fallback
         
         if (glideParam <= 0.01) {
             coef = 1.0; // Instant
         } else {
-            // Mapping 0..1 to approx 0.5s time constant range
-            // coef = 1 - exp(-dt / time_const)
             const timeConst = glideParam * 0.5; // Up to 0.5s glide
             coef = 1.0 - Math.exp(- (len * dt) / timeConst);
-            // Distribute across block? For simplicity, we step once per block for freq
-            // For smoother audio rate glide, we'd do it per sample, but block rate is usually fine for portamento
         }
         
         this.baseFreq += diff * coef;
@@ -410,14 +467,24 @@ class Voice {
     const matrix = preset.modMatrix || [];
     const spreadAmount = preset.spread || 0;
     const voiceGain = preset.gain || 0.5;
-    const formantStrength = preset.formantStrength || 0;
-    const vowelPos = preset.vowel || 0;
+    
+    // New Params (Renamed)
+    const resonatorMix = preset.resonatorMix || 0;
+    const resonatorSweep = preset.resonatorSweep || 0;
+    const noiseGain = preset.noiseGain || 0;
+    const noiseCutoff = preset.noiseCutoff || 4000;
+    
     const hasMatrix = matrix.length > 0;
 
     // Filter Type Integers
     const fType1 = this.getFilterTypeId(osc1.filterType);
     const fType2 = this.getFilterTypeId(osc2.filterType);
     const fType3 = this.getFilterTypeId(osc3.filterType);
+
+    // --- CHECK FOR SERIAL FILTER MODE (e.g. BRASS) ---
+    // If Osc 1 is GLOTTAL, we switch to Serial Filtering topology
+    // This allows constructing complex timbres like brass body resonances
+    const isSerialMode = osc1.waveform === 'glottal';
 
     let anyEnvActive = false;
     let panPhase = startPanPhase;
@@ -443,7 +510,7 @@ class Voice {
         }
     }
     
-    if (osc2.enabled) {
+    if (osc2.enabled && !isSerialMode) {
         if (osc2.lfoTarget === 'pitch') osc2ModPitch = true;
         if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc2_pitch')) osc2ModPitch = true;
         
@@ -453,7 +520,7 @@ class Voice {
         }
     }
 
-    if (osc3.enabled) {
+    if (osc3.enabled && !isSerialMode) {
         if (osc3.lfoTarget === 'pitch') osc3ModPitch = true;
         if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc3_pitch')) osc3ModPitch = true;
         
@@ -547,7 +614,7 @@ class Voice {
         // --- 3. VOICE GENERATION ---
         let voiceMix = 0.0;
 
-        // --- OSC 1 ---
+        // --- OSC 1 (MASTER CARRIER FOR SERIAL/BRASS) ---
         if (osc1.enabled && this.envVals[0] > 0.0001) {
             let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
             const d = osc1.lfoDepth || 0;
@@ -566,74 +633,116 @@ class Voice {
 
             let sig = this.oscs[0].process(freq, osc1.waveform, dt);
             
-            const cut = osc1.filterCutoff + hardFilter + (modC1 * 5000);
-            const res = Math.max(0, osc1.filterResonance + (modR1 * 10));
+            // SPECTRAL TILT (Acoustic Physics)
+            // Open up the lowpass filter as the envelope gets louder (simulates sharper glottal closure/brightness)
+            // Dynamic Range: ~2000Hz brightness added at peak velocity
+            const tiltMod = isSerialMode ? (this.envVals[0] * 2000) : 0;
             
-            // Pass Type to Filter
-            sig = this.filters[0].process(sig, cut, res, this.sampleRate, fType1);
+            const cut1 = osc1.filterCutoff + hardFilter + (modC1 * 5000) + tiltMod;
+            const res1 = Math.max(0, osc1.filterResonance + (modR1 * 10));
             
-            voiceMix += sig * osc1.gain * this.envVals[0] * hardAmp * Math.max(0, 1.0 + modG1);
+            // F1: Standard Filter (Lowpass usually for Source)
+            sig = this.filters[0].process(sig, cut1, res1, this.sampleRate, fType1);
+            
+            if (isSerialMode) {
+                // Serial Chain: F1 -> F2 -> F3 -> Mix
+                // Osc 2 is F2. Use osc2.gain as Peak Gain.
+                // Map 0-1 gain to 0-8 boost for powerful resonance
+                const gain2 = osc2.gain * 8.0;
+                const cut2 = osc2.filterCutoff + (modC2 * 5000);
+                const res2 = Math.max(0, osc2.filterResonance + (modR2 * 10));
+                sig = this.filters[1].process(sig, cut2, res2, this.sampleRate, fType2, gain2); 
+
+                // Osc 3 is F3. Use osc3.gain as Peak Gain.
+                const gain3 = osc3.gain * 8.0;
+                const cut3 = osc3.filterCutoff + (modC3 * 5000);
+                const res3 = Math.max(0, osc3.filterResonance + (modR3 * 10));
+                sig = this.filters[2].process(sig, cut3, res3, this.sampleRate, fType3, gain3); 
+                
+                // For serial mode, we rely on Osc 1 Gain & Env for the master output
+                voiceMix += sig * osc1.gain * this.envVals[0] * hardAmp * Math.max(0, 1.0 + modG1);
+                
+                // --- NOISE LAYER (AIR/BREATH) ---
+                // Additive noise layer processed by Highpass Filter
+                // REVISED: Scale by env^2 to tighten noise envelope (focus on onset/transient)
+                if (noiseGain > 0.001) {
+                    let noise = (Math.random() * 2.0) - 1.0;
+                    // Filter: Highpass (Type 1), Resonance 0.5 (Neutral)
+                    noise = this.noiseFilter.process(noise, noiseCutoff, 0.5, this.sampleRate, 1);
+                    
+                    // Tightened Envelope: Square the envelope value to make noise decay faster than tone
+                    const tightEnv = this.envVals[0] * this.envVals[0];
+                    voiceMix += noise * noiseGain * tightEnv * hardAmp * 0.5;
+                }
+
+            } else {
+                // Standard Parallel Mode
+                voiceMix += sig * osc1.gain * this.envVals[0] * hardAmp * Math.max(0, 1.0 + modG1);
+            }
         }
 
-        // --- OSC 2 ---
-        if (osc2.enabled && this.envVals[1] > 0.0001) {
-            let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
-            const d = osc2.lfoDepth || 0;
-            const v = this.lfoVals[1];
-            if (osc2.lfoTarget === 'pitch') hardPitch = v * d;
-            else if (osc2.lfoTarget === 'filter') hardFilter = v * d * 20;
-            else if (osc2.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
+        if (!isSerialMode) {
+            // --- OSC 2 (Standard Mode) ---
+            if (osc2.enabled && this.envVals[1] > 0.0001) {
+                let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
+                const d = osc2.lfoDepth || 0;
+                const v = this.lfoVals[1];
+                if (osc2.lfoTarget === 'pitch') hardPitch = v * d;
+                else if (osc2.lfoTarget === 'filter') hardFilter = v * d * 20;
+                else if (osc2.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
 
-            let freq;
-            if (osc2ModPitch) {
-                const cents = osc2.coarseDetune + osc2.fineDetune + hardPitch + (modP2 * 1200);
-                freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
-            } else {
-                freq = osc2StaticFreq;
+                let freq;
+                if (osc2ModPitch) {
+                    const cents = osc2.coarseDetune + osc2.fineDetune + hardPitch + (modP2 * 1200);
+                    freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+                } else {
+                    freq = osc2StaticFreq;
+                }
+
+                let sig = this.oscs[1].process(freq, osc2.waveform, dt);
+                const cut = osc2.filterCutoff + hardFilter + (modC2 * 5000);
+                const res = Math.max(0, osc2.filterResonance + (modR2 * 10));
+                sig = this.filters[1].process(sig, cut, res, this.sampleRate, fType2);
+                
+                voiceMix += sig * osc2.gain * this.envVals[1] * hardAmp * Math.max(0, 1.0 + modG2);
             }
 
-            let sig = this.oscs[1].process(freq, osc2.waveform, dt);
-            
-            const cut = osc2.filterCutoff + hardFilter + (modC2 * 5000);
-            const res = Math.max(0, osc2.filterResonance + (modR2 * 10));
-            sig = this.filters[1].process(sig, cut, res, this.sampleRate, fType2);
-            
-            voiceMix += sig * osc2.gain * this.envVals[1] * hardAmp * Math.max(0, 1.0 + modG2);
-        }
+            // --- OSC 3 (Standard Mode) ---
+            if (osc3.enabled && this.envVals[2] > 0.0001) {
+                let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
+                const d = osc3.lfoDepth || 0;
+                const v = this.lfoVals[2];
+                if (osc3.lfoTarget === 'pitch') hardPitch = v * d;
+                else if (osc3.lfoTarget === 'filter') hardFilter = v * d * 20;
+                else if (osc3.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
 
-        // --- OSC 3 ---
-        if (osc3.enabled && this.envVals[2] > 0.0001) {
-            let hardPitch = 0, hardFilter = 0, hardAmp = 1.0;
-            const d = osc3.lfoDepth || 0;
-            const v = this.lfoVals[2];
-            if (osc3.lfoTarget === 'pitch') hardPitch = v * d;
-            else if (osc3.lfoTarget === 'filter') hardFilter = v * d * 20;
-            else if (osc3.lfoTarget === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
+                let freq;
+                if (osc3ModPitch) {
+                    const cents = osc3.coarseDetune + osc3.fineDetune + hardPitch + (modP3 * 1200);
+                    freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+                } else {
+                    freq = osc3StaticFreq;
+                }
 
-            let freq;
-            if (osc3ModPitch) {
-                const cents = osc3.coarseDetune + osc3.fineDetune + hardPitch + (modP3 * 1200);
-                freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
-            } else {
-                freq = osc3StaticFreq;
+                let sig = this.oscs[2].process(freq, osc3.waveform, dt);
+                const cut = osc3.filterCutoff + hardFilter + (modC3 * 5000);
+                const res = Math.max(0, osc3.filterResonance + (modR3 * 10));
+                sig = this.filters[2].process(sig, cut, res, this.sampleRate, fType3);
+                
+                voiceMix += sig * osc3.gain * this.envVals[2] * hardAmp * Math.max(0, 1.0 + modG3);
             }
-
-            let sig = this.oscs[2].process(freq, osc3.waveform, dt);
-            
-            const cut = osc3.filterCutoff + hardFilter + (modC3 * 5000);
-            const res = Math.max(0, osc3.filterResonance + (modR3 * 10));
-            sig = this.filters[2].process(sig, cut, res, this.sampleRate, fType3);
-            
-            voiceMix += sig * osc3.gain * this.envVals[2] * hardAmp * Math.max(0, 1.0 + modG3);
         }
 
-        // --- 4. FORMANT FILTER (Parallel Bandpass Bank) ---
-        if (formantStrength > 0.01) {
-            const formantSig = this.formantFilter.process(voiceMix, vowelPos, this.sampleRate);
-            // Mix Dry/Wet based on formantStrength
-            // Note: Formant filter gain can be high, so we might need to compensate volume slightly
-            // Usually formants are subtractive in nature (filtering), but parallel bandpass adds energy at peaks.
-            voiceMix = (voiceMix * (1.0 - formantStrength)) + (formantSig * formantStrength * 1.5);
+        // --- 4. RESONATOR BANK (Parallel Bandpass Bank - Legacy or Extra Color) ---
+        if (resonatorMix > 0.01) {
+            // Updated to pass current pitch Frequency for Key Tracking
+            // Using baseFreq adjusted by global bend (Osc1 Logic) as reference
+            let trackingFreq = osc1StaticFreq; 
+            if (osc1ModPitch) trackingFreq = this.baseFreq; // Simple fallback if heavily modulated
+
+            const resSig = this.resonator.process(voiceMix, resonatorSweep, trackingFreq, this.sampleRate);
+            // Mix Dry/Wet based on resonatorMix
+            voiceMix = (voiceMix * (1.0 - resonatorMix)) + (resSig * resonatorMix * 1.5);
         }
 
         // --- 5. PANNING & OUTPUT ---
@@ -680,7 +789,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
         normal: DUMMY_PRESET_DATA,
         latch: DUMMY_PRESET_DATA,
         strum: DUMMY_PRESET_DATA,
-        voice: DUMMY_PRESET_DATA,
+        brass: DUMMY_PRESET_DATA,
         arpeggio: DUMMY_PRESET_DATA
     };
     
@@ -734,8 +843,12 @@ class PrismaProcessor extends AudioWorkletProcessor {
           spread: data.spread || 0,
           stereoPanSpeed: data.stereoPanSpeed || 0,
           stereoPanDepth: data.stereoPanDepth || 0,
-          formantStrength: (data.formantStrength !== undefined) ? data.formantStrength : 0,
-          vowel: (data.vowel !== undefined) ? data.vowel : 0,
+          
+          resonatorMix: (data.resonatorMix !== undefined) ? data.resonatorMix : 0,
+          resonatorSweep: (data.resonatorSweep !== undefined) ? data.resonatorSweep : 0,
+          noiseGain: (data.noiseGain !== undefined) ? data.noiseGain : 0,
+          noiseCutoff: (data.noiseCutoff !== undefined) ? data.noiseCutoff : 4000,
+          
           portamento: (data.portamento !== undefined) ? data.portamento : 0
       };
   }

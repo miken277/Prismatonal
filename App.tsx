@@ -26,7 +26,7 @@ const App: React.FC = () => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [autoScaleFactor, setAutoScaleFactor] = useState(1.0);
   
-  // Latch Modes: 0=Off, 1=Drone, 2=Strings, 3=Plucked, 4=Voice
+  // Latch Modes: 0=Off, 1=Drone, 2=Strings, 3=Plucked, 4=Voice (Brass)
   const [latchMode, setLatchMode] = useState<0 | 1 | 2 | 3 | 4>(2);
   
   // Track sustain ON/OFF preference per instrument mode
@@ -379,7 +379,7 @@ const App: React.FC = () => {
                   if (mode === 1) modeStr = 'latch';
                   else if (mode === 2) modeStr = 'normal';
                   else if (mode === 3) modeStr = 'strum';
-                  else if (mode === 4) modeStr = 'voice';
+                  else if (mode === 4) modeStr = 'brass'; // Use brass instead of voice
                   
                   usedModes.add(modeStr);
                   

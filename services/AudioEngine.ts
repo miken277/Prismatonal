@@ -1,5 +1,4 @@
 
-
 import { SynthPreset, AppSettings, ReverbType, PresetState, PlayMode, PlaybackMode } from '../types';
 import { store } from './Store';
 import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
@@ -88,7 +87,7 @@ class AudioEngine {
         normal: this.ensurePresetSafety(rawPresets.normal),
         latch: this.ensurePresetSafety(rawPresets.latch),
         strum: this.ensurePresetSafety(rawPresets.strum),
-        voice: this.ensurePresetSafety(rawPresets.voice),
+        brass: this.ensurePresetSafety(rawPresets.brass),
         arpeggio: this.ensurePresetSafety(rawPresets.arpeggio)
     };
 
@@ -127,7 +126,9 @@ class AudioEngine {
          osc2: { ...DEFAULT_PRESET.osc2, ...(p.osc2 || {}) },
          osc3: { ...DEFAULT_PRESET.osc3, ...(p.osc3 || {}) },
          modMatrix: p.modMatrix || [],
-         reverbType: rType
+         reverbType: rType,
+         aspirationGain: p.aspirationGain !== undefined ? p.aspirationGain : 0,
+         aspirationCutoff: p.aspirationCutoff !== undefined ? p.aspirationCutoff : 4000
      };
 
      const defaults = REVERB_DEFAULTS[rType];
@@ -162,7 +163,7 @@ class AudioEngine {
   }
 
   public updatePresets(newPresets: PresetState) {
-      const modes: PlayMode[] = ['normal', 'latch', 'strum', 'voice', 'arpeggio'];
+      const modes: PlayMode[] = ['normal', 'latch', 'strum', 'brass', 'arpeggio'];
       let recomputeReverb = false;
 
       const oldMaster = this.activePresets.normal;
@@ -181,7 +182,7 @@ class AudioEngine {
           normal: this.ensurePresetSafety(newPresets.normal),
           latch: this.ensurePresetSafety(newPresets.latch),
           strum: this.ensurePresetSafety(newPresets.strum),
-          voice: this.ensurePresetSafety(newPresets.voice),
+          brass: this.ensurePresetSafety(newPresets.brass),
           arpeggio: this.ensurePresetSafety(newPresets.arpeggio)
       };
 
@@ -203,7 +204,7 @@ class AudioEngine {
   // New Method: Register a dynamic preset (like a chord patch) with the audio engine
   public registerPreset(id: string, preset: SynthPreset) {
       this.postMessage({
-          type: 'update_preset',
+          type: 'update_preset', 
           mode: id,
           data: this.ensurePresetSafety(preset)
       });
@@ -265,7 +266,7 @@ class AudioEngine {
                 };
                 
                 // Initialize state from store
-                (['normal', 'latch', 'strum', 'voice', 'arpeggio'] as PlayMode[]).forEach(mode => {
+                (['normal', 'latch', 'strum', 'brass', 'arpeggio'] as PlayMode[]).forEach(mode => {
                     this.workletNode!.port.postMessage({ 
                         type: 'update_preset', 
                         mode: mode, 

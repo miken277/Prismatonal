@@ -27,7 +27,7 @@ const EffectsPanel: React.FC<Props> = ({ preset, isReverbEditable, onUpdate, onR
                 </div>
             </div>
 
-            {/* Formant Filter Section (New) */}
+            {/* Formant Filter Section */}
             <div className="bg-slate-900/50 p-3 rounded border border-slate-700">
                 <h4 className="text-xs font-bold text-yellow-500 uppercase mb-3">Vocal Formant Filter</h4>
                 <div className="space-y-3">
@@ -65,6 +65,37 @@ const EffectsPanel: React.FC<Props> = ({ preset, isReverbEditable, onUpdate, onR
                         <div className="flex justify-between text-[8px] text-slate-500 mt-1 uppercase font-bold px-1">
                             <span>A</span><span>E</span><span>I</span><span>O</span><span>U</span>
                         </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-600/50 mt-2">
+                        <label className="flex justify-between text-xs mb-1 text-slate-300">
+                            <span>Breath Noise</span> 
+                            <span>{((preset.aspirationGain || 0) * 100).toFixed(0)}%</span>
+                        </label>
+                        <input 
+                            type="range" 
+                            min="0" 
+                            max="1" 
+                            step="0.01" 
+                            value={preset.aspirationGain || 0} 
+                            onChange={(e) => onUpdate('aspirationGain', parseFloat(e.target.value))} 
+                            className="w-full h-1 bg-slate-500 rounded appearance-none cursor-pointer" 
+                        />
+                    </div>
+                    <div>
+                        <label className="flex justify-between text-xs mb-1 text-slate-300">
+                            <span>Breath Color</span> 
+                            <span>{(preset.aspirationCutoff || 2000).toFixed(0)} Hz</span>
+                        </label>
+                        <input 
+                            type="range" 
+                            min="500" 
+                            max="8000" 
+                            step="100" 
+                            value={preset.aspirationCutoff || 2000} 
+                            onChange={(e) => onUpdate('aspirationCutoff', parseFloat(e.target.value))} 
+                            className="w-full h-1 bg-slate-600 rounded appearance-none cursor-pointer" 
+                        />
                     </div>
                 </div>
             </div>

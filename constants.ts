@@ -17,7 +17,7 @@ export const MODE_COLORS = {
     1: '#22c55e', // Drone (Green)
     2: '#3b82f6', // Strings (Blue)
     3: '#f97316', // Plucked (Orange)
-    4: '#eab308', // Voice (Yellow) - New!
+    4: '#eab308', // Brass (Yellow)
     'arp': '#ef4444', // Arpeggiator (Red)
     'cursor': '#ffffff' // Generic Touch
 };
@@ -42,7 +42,7 @@ export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
     modeDrone: '1',
     modeStrings: '2',
     modePlucked: '3',
-    modeVoice: '4', // New Mapping
+    modeBrass: '4', // Updated mapping name
     synth: 'm',
 
     // Chords
@@ -421,42 +421,56 @@ const ETHEREAL_MALLETS = [
     p("Star Drops", "Mallets", { enabled: true, waveform: WaveformType.SINE, decay: 0.1, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, decay: 0.1, gain: 0.3 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 2400, decay: 0.2, gain: 0.2 }, { spread: 0.9, stereoPanSpeed: 4.0, stereoPanDepth: 0.5, reverbType: 'plate', delayMix: 0.6, delayTime: 0.2 })
 ];
 
-// --- RESET VOICE PATCHES TO SINE WAVES ---
-const VOICE_PATCHES = [
-    // 1. Female Solo (Soprano) - RESET
-    p("Solo Soprano", "Voice", 
-        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 }, 
-        { enabled: false },
-        { enabled: false }, 
-        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
+// --- BRASS PATCHES (Renamed from Voice, Generalized Parameters) ---
+// Uses the ResonatorBank (Formants) to simulate brass body impulses
+const BRASS_PATCHES = [
+    // 1. Synth Brass
+    // Bright, punchy, slight swell
+    p("Synth Brass", "Brass", 
+        // Osc 1: Source (Glottal/Pulse) - Spectral Tilt added via dynamic cutoff in DSP
+        { enabled: true, waveform: WaveformType.GLOTTAL, gain: 0.55, attack: 0.08, decay: 0.2, sustain: 0.8, release: 0.4, filterType: 'lowpass', filterCutoff: 600, filterResonance: 0.2 }, 
+        // Osc 2: F2 (Peak) - Body Resonance
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, filterType: 'peak', filterCutoff: 1200, filterResonance: 1.5 },
+        // Osc 3: F3 (Peak) - Shine
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.25, filterType: 'peak', filterCutoff: 2500, filterResonance: 2.0 }, 
+        { spread: 0.3, reverbType: 'hall', reverbMix: 0.35, portamento: 0.1, resonatorMix: 0.5, resonatorSweep: 0.2, noiseGain: 0.005, noiseCutoff: 2000 }
     ),
-    // 2. Male Solo (Tenor) - RESET
-    p("Solo Tenor", "Voice", 
-        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 }, 
-        { enabled: false },
-        { enabled: false }, 
-        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
+    
+    // 2. Muted Trumpet
+    // More closed filter, higher resonance sweep
+    p("Muted Trumpet", "Brass", 
+        { enabled: true, waveform: WaveformType.GLOTTAL, gain: 0.5, attack: 0.05, decay: 0.1, sustain: 0.9, release: 0.2, filterType: 'lowpass', filterCutoff: 500, filterResonance: 0.8 }, 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.4, filterType: 'peak', filterCutoff: 1500, filterResonance: 3.0 },
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.15, filterType: 'peak', filterCutoff: 3000, filterResonance: 1.5 },
+        { spread: 0.2, reverbType: 'room', reverbMix: 0.2, portamento: 0.05, resonatorMix: 0.7, resonatorSweep: 0.9, noiseGain: 0.008, noiseCutoff: 5000 }
     ),
-    // 3. Female Group (Choir) - RESET
-    p("Womens Choir", "Voice",
-        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 },
-        { enabled: false },
-        { enabled: false },
-        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
+    
+    // 3. Low Brass Swell
+    // Slow attack, deep body
+    p("Low Brass Swell", "Brass",
+        { enabled: true, waveform: WaveformType.GLOTTAL, coarseDetune: -1200, gain: 0.6, attack: 0.8, decay: 0.5, sustain: 1.0, release: 1.0, filterType: 'lowpass', filterCutoff: 350, filterResonance: 0.3 },
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, filterType: 'peak', filterCutoff: 600, filterResonance: 2.5 }, 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.3, filterType: 'peak', filterCutoff: 1800, filterResonance: 1.5 }, 
+        { spread: 0.5, reverbType: 'cathedral', reverbMix: 0.6, portamento: 0.2, resonatorMix: 0.4, resonatorSweep: 0.1 }
     ),
-    // 4. Male Group (Monks) - RESET
-    p("Monks Choir", "Voice",
-        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 },
-        { enabled: false },
-        { enabled: false },
-        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
+    
+    // 4. Polysynth Brass (Classic 80s)
+    // Less resonator, more detuned saws (simulated via glottal+width in this engine constraints, or standard)
+    // Using Standard waveforms for 80s feel, ignoring resonator
+    p("Polysynth Brass", "Brass",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.15, decay: 0.2, sustain: 0.7, release: 0.6, filterType: 'lowpass', filterCutoff: 1200, filterResonance: 0.3 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 5, gain: 0.5, filterType: 'lowpass', filterCutoff: 1200 }, 
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.25, filterType: 'lowpass', filterCutoff: 800 },
+        { spread: 0.7, reverbType: 'plate', reverbMix: 0.4, portamento: 0.15 }
     ),
-    // 5. Combined Group (Tutti) - RESET
-    p("Tutti Choir", "Voice",
-        { enabled: true, waveform: WaveformType.SINE, gain: 0.5, attack: 0.1, decay: 0.1, sustain: 1.0, release: 0.1 },
-        { enabled: false },
-        { enabled: false },
-        { spread: 0.0, reverbType: 'room', reverbMix: 0.0, delayMix: 0.0, portamento: 0 }
+    
+    // 5. French Horn
+    // Warm, distant
+    p("French Horn", "Brass",
+        { enabled: true, waveform: WaveformType.GLOTTAL, gain: 0.55, attack: 0.4, sustain: 0.9, release: 0.8, filterType: 'lowpass', filterCutoff: 450 },
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.4, filterType: 'peak', filterCutoff: 400, filterResonance: 2.5 }, 
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.3, filterType: 'peak', filterCutoff: 900, filterResonance: 1.5 }, 
+        { spread: 0.4, reverbType: 'hall', reverbMix: 0.5, resonatorMix: 0.6, resonatorSweep: 0.3 }
     )
 ];
 
@@ -480,12 +494,12 @@ export const PRESETS: SynthPreset[] = [
     ...ETHEREAL_BASS,
     ...ETHEREAL_KEYS,
     ...ETHEREAL_MALLETS,
-    ...VOICE_PATCHES
+    ...BRASS_PATCHES // Replaced VOICE_PATCHES
 ];
 
 export const DEFAULT_NORMAL_PRESET = preservedAnalogStrings; 
 export const DEFAULT_STRUM_PRESET = PLUCKED_PATCHES[0]; 
 export const DEFAULT_LATCH_PRESET = preservedNoiseWash;
-export const DEFAULT_VOICE_PRESET = VOICE_PATCHES[0]; // New Default for Voice
+export const DEFAULT_BRASS_PRESET = BRASS_PATCHES[0]; // New Default for Brass
 export const DEFAULT_ARP_PRESET = PLUCKED_PATCHES[0]; // Arp Service fallback
 export const DEFAULT_PRESET = preservedAnalogStrings;

@@ -22,7 +22,7 @@ interface Props {
   onLimitInteraction: (limit: number) => void;
   activeChordIds: string[];
   uiUnlocked: boolean;
-  latchMode: 0 | 1 | 2 | 3 | 4; // 0=Off, 1=Drone, 2=Strings, 3=Plucked, 4=Voice
+  latchMode: 0 | 1 | 2 | 3 | 4; 
   isCurrentSustainEnabled: boolean;
   globalScale?: number; 
   viewZoom?: number;
@@ -32,14 +32,12 @@ interface Props {
 
 interface ActiveCursor {
   pointerId: number;
-  // removed currentX/Y from state to prevent re-renders on every move
   originNodeId: string | null; 
   hoverNodeId: string | null;
   hasMoved: boolean;
   interactionLockedNodeId: string | null; 
 }
 
-// Data structure for active modes on a single node
 interface NodeActivation {
     mode: number;
     timestamp: number;
@@ -47,15 +45,17 @@ interface NodeActivation {
 }
 
 const GRID_CELL_SIZE = 100; 
+const VIRTUAL_SIZE = 40000; // Fixed massive scroll area to prevent layout thrashing
+const CENTER_OFFSET = VIRTUAL_SIZE / 2;
 
 const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) => {
   const { settings, updateSettings, audioEngine, onLimitInteraction, activeChordIds, uiUnlocked, latchMode, isCurrentSustainEnabled, globalScale = 1.0, viewZoom = 1.0, onNodeTrigger, onSustainStatusChange } = props;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const bgLineCanvasRef = useRef<HTMLCanvasElement>(null);
   const staticCanvasRef = useRef<HTMLCanvasElement>(null); 
   const dynamicCanvasRef = useRef<HTMLCanvasElement>(null); 
-  const wrapperRef = useRef<HTMLDivElement>(null);
   
   // Cache the bounding rect to avoid reflows
   const canvasRectRef = useRef<DOMRect | null>(null);
@@ -68,9 +68,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const [isGenerating, setIsGenerating] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   
-  const [dynamicSize, setDynamicSize] = useState(2000);
-  const prevDynamicSizeRef = useRef(2000);
-
   // Unified Scale Calculation
   const effectiveScale = globalScale * viewZoom;
   const prevEffectiveScaleRef = useRef(effectiveScale);
@@ -81,12 +78,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const spatialGrid = useMemo(() => {
       const grid = new Map<string, LatticeNode[]>();
-      const centerOffset = dynamicSize / 2;
       const spacing = settings.buttonSpacingScale * effectiveScale;
 
       data.nodes.forEach(node => {
-          const x = node.x * spacing + centerOffset;
-          const y = node.y * spacing + centerOffset;
+          const x = node.x * spacing + CENTER_OFFSET;
+          const y = node.y * spacing + CENTER_OFFSET;
           const col = Math.floor(x / GRID_CELL_SIZE);
           const row = Math.floor(y / GRID_CELL_SIZE);
           const key = `${col},${row}`;
@@ -94,14 +90,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           grid.get(key)!.push(node);
       });
       return grid;
-  }, [data.nodes, settings.buttonSpacingScale, dynamicSize, effectiveScale]);
+  }, [data.nodes, settings.buttonSpacingScale, effectiveScale]);
 
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
-  
-  // Persistent Latches: NodeId -> Map<ModeId, Timestamp>
   const [persistentLatches, setPersistentLatches] = useState<Map<string, Map<number, number>>>(new Map());
-  
-  // Store timestamps for ripple effects [nodeId, timestamp]
   const nodeTriggerHistory = useRef<Map<string, number>>(new Map());
 
   // Notify parent of active modes
@@ -119,18 +111,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => {
       const unsubscribe = audioEngine.onVoiceSteal((voiceId) => {
           if (voiceId.startsWith('node-')) {
-              // Fallback logic for old IDs
               const nodeId = voiceId.replace('node-', '');
-              
               setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                   let changed = false;
                   const next = new Map(prev);
-                  
                   if (next.has(nodeId)) {
                       next.delete(nodeId);
                       changed = true;
                   }
-                  
                   return changed ? next : prev;
               });
           }
@@ -151,9 +139,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       activeChordIds.forEach(id => {
           const chord = settings.savedChords.find(c => c.id === id);
           if (chord) {
-              if (chord.soundConfig) {
-                  audioEngine.registerPreset(`chord-${id}`, chord.soundConfig);
-              }
+              if (chord.soundConfig) audioEngine.registerPreset(`chord-${id}`, chord.soundConfig);
               if (chord.soundConfigs) {
                   Object.entries(chord.soundConfigs).forEach(([mode, preset]) => {
                       audioEngine.registerPreset(`chord-${id}-${mode}`, preset);
@@ -163,20 +149,17 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       });
   }, [activeChordIds, settings.savedChords, audioEngine]);
 
-  // Aggregates all activations (Persistent + Chords)
+  // Aggregates all activations
   const audioLatchedNodes = useMemo(() => {
       const effective = new Map<string, NodeActivation[]>();
       
-      // 1. Process Persistent Latches
       persistentLatches.forEach((modeMap, nodeId) => {
           const activations: NodeActivation[] = [];
           modeMap.forEach((timestamp, mode) => {
-              // Map mode number to preset slot
               let pId = 'normal';
               if (mode === 1) pId = 'latch';
               else if (mode === 3) pId = 'strum';
-              else if (mode === 4) pId = 'voice';
-              
+              else if (mode === 4) pId = 'brass';
               activations.push({ mode, timestamp, presetId: pId });
           });
           effective.set(nodeId, activations);
@@ -184,76 +167,52 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       
       const defaultChordMode = (latchMode === 2) ? 2 : 1; 
 
-      // 2. Process Chords
       activeChordIds.forEach(chordId => {
         const chordDef = settings.savedChords.find(c => c.id === chordId);
         if (chordDef) {
             chordDef.nodes.forEach(n => {
                 let mode = defaultChordMode;
                 let presetId = `chord-${chordId}`; 
-
                 if (n.voiceMode) {
                     if (n.voiceMode === 'latch') mode = 1;
                     else if (n.voiceMode === 'normal') mode = 2;
                     else if (n.voiceMode === 'strum') mode = 3;
-                    else if (n.voiceMode === 'voice') mode = 4;
+                    else if (n.voiceMode === 'brass') mode = 4;
 
-                    if (chordDef.soundConfigs && chordDef.soundConfigs[n.voiceMode]) {
-                        presetId = `chord-${chordId}-${n.voiceMode}`;
-                    } else if (chordDef.soundConfig) {
-                        presetId = `chord-${chordId}`;
-                    } else {
-                        presetId = n.voiceMode;
-                    }
+                    if (chordDef.soundConfigs && chordDef.soundConfigs[n.voiceMode]) presetId = `chord-${chordId}-${n.voiceMode}`;
+                    else if (chordDef.soundConfig) presetId = `chord-${chordId}`;
+                    else presetId = n.voiceMode;
                 } else {
-                    if (chordDef.soundConfig) {
-                        presetId = `chord-${chordId}`;
-                    } else {
-                        presetId = (latchMode === 2) ? 'normal' : 'latch';
-                    }
+                    if (chordDef.soundConfig) presetId = `chord-${chordId}`;
+                    else presetId = (latchMode === 2) ? 'normal' : 'latch';
                 }
 
-                if (!effective.has(n.id)) {
-                    effective.set(n.id, []);
-                }
-                
+                if (!effective.has(n.id)) effective.set(n.id, []);
                 const existing = effective.get(n.id)!;
-                if (!existing.some(a => a.mode === mode)) {
-                    existing.push({ mode, timestamp: 0, presetId });
-                }
+                if (!existing.some(a => a.mode === mode)) existing.push({ mode, timestamp: 0, presetId });
             });
         }
       });
-      
-      // Sort activations by timestamp
-      effective.forEach((list) => {
-          list.sort((a, b) => a.timestamp - b.timestamp);
-      });
-      
+      effective.forEach((list) => list.sort((a, b) => a.timestamp - b.timestamp));
       return effective;
   }, [persistentLatches, activeChordIds, settings.savedChords, latchMode]);
 
   const visualLatchedNodes = useMemo(() => {
-      // Clone the audio latched map
       const visual = new Map<string, NodeActivation[]>();
       audioLatchedNodes.forEach((v, k) => visual.set(k, [...v]));
 
-      // Add temporary cursor activations
       activeCursors.forEach(cursor => {
-          // Sustaining instruments: Drone (1), Strings (2), Voice (4)
           const isSustainingInstrument = latchMode === 1 || latchMode === 2 || latchMode === 4;
           const isSustainActive = isCurrentSustainEnabled;
-          const isBendEnabled = settings.isPitchBendEnabled && latchMode !== 3; // Disable bend visual for Plucked
+          const isBendEnabled = settings.isPitchBendEnabled && latchMode !== 3; 
           
           const isHybridMode = isSustainingInstrument && isSustainActive && isBendEnabled;
-          if (isHybridMode) return; // Hybrid logic handled via persistent latches
+          if (isHybridMode) return; 
 
           const isMelodic = !isSustainingInstrument || !isSustainActive || isBendEnabled;
           if (isMelodic && cursor.hoverNodeId) {
               const nodeId = cursor.hoverNodeId;
-              if (!visual.has(nodeId)) {
-                  visual.set(nodeId, []);
-              }
+              if (!visual.has(nodeId)) visual.set(nodeId, []);
               const list = visual.get(nodeId)!;
               const activation = { mode: latchMode, timestamp: Date.now(), presetId: 'cursor' };
               list.push(activation);
@@ -263,20 +222,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       return visual;
   }, [audioLatchedNodes, activeCursors, settings.isPitchBendEnabled, latchMode, isCurrentSustainEnabled]);
 
-  // Line Logic (Updated to check for ANY activation)
   const activeLines = useMemo(() => {
     const latched = visualLatchedNodes;
     const lines = data.lines;
     const active: LatticeLine[] = [];
     const reach = settings.voiceLeadingSteps || 1;
-    
     if (latched.size < 2) return [];
 
     if (reach === 1) {
         for (const line of lines) {
-            if (latched.has(line.sourceId) && latched.has(line.targetId)) {
-                active.push(line);
-            }
+            if (latched.has(line.sourceId) && latched.has(line.targetId)) active.push(line);
         }
     } 
     else if (reach === 2) {
@@ -285,22 +240,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             for (let j=i+1; j<activeNodes.length; j++) {
                 const A = activeNodes[i];
                 const B = activeNodes[j];
-                
                 let coordDist = 0;
-                for (let k=0; k < A.coords.length; k++) {
-                    coordDist += Math.abs(A.coords[k] - B.coords[k]);
-                }
+                for (let k=0; k < A.coords.length; k++) coordDist += Math.abs(A.coords[k] - B.coords[k]);
                 const octaveDist = Math.abs(A.octave - B.octave);
                 const totalDist = coordDist + octaveDist;
 
                 if (totalDist <= 2) {
                     let lineLimit = Math.max(A.maxPrime, B.maxPrime);
-                    
-                    // Explicitly detect Octave relationship (same coords, different octave)
-                    if (coordDist === 0 && octaveDist !== 0) {
-                        lineLimit = LimitType.LIMIT_2;
-                    }
-
+                    if (coordDist === 0 && octaveDist !== 0) lineLimit = LimitType.LIMIT_2;
                     active.push({
                         id: `${A.id}-${B.id}`,
                         x1: A.x, y1: A.y, x2: B.x, y2: B.y,
@@ -331,9 +278,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       if (settings.lineBrighteningSteps === 2) {
           data.lines.forEach(line => {
               if (resultLines.has(line)) return;
-              if (step1Neighbors.has(line.sourceId) || step1Neighbors.has(line.targetId)) {
-                  resultLines.add(line);
-              }
+              if (step1Neighbors.has(line.sourceId) || step1Neighbors.has(line.targetId)) resultLines.add(line);
           });
       }
       return Array.from(resultLines);
@@ -346,29 +291,21 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const visualLatchedRef = useRef(visualLatchedNodes);
   const activeLinesRef = useRef(activeLines);
   const brightenedLinesRef = useRef(brightenedLines);
-  const dynamicSizeRef = useRef(dynamicSize);
   const effectiveScaleRef = useRef(effectiveScale);
-  const latchModeRef = useRef(latchMode); // Track latchMode for renderer
-  
+  const latchModeRef = useRef(latchMode);
   const nodeMapRef = useRef(nodeMap);
   const spatialGridRef = useRef(spatialGrid);
-  
-  // Update persistentLatches type for Ref
   const persistentLatchesRef = useRef<Map<string, Map<number, number>>>(persistentLatches);
-  
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
 
-  // Sync Refs
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { dataRef.current = data; }, [data]);
   useEffect(() => { activeCursorsRef.current = activeCursors; }, [activeCursors]);
   useEffect(() => { visualLatchedRef.current = visualLatchedNodes; }, [visualLatchedNodes]);
   useEffect(() => { activeLinesRef.current = activeLines; }, [activeLines]);
   useEffect(() => { brightenedLinesRef.current = brightenedLines; }, [brightenedLines]);
-  useEffect(() => { dynamicSizeRef.current = dynamicSize; }, [dynamicSize]);
   useEffect(() => { effectiveScaleRef.current = effectiveScale; }, [effectiveScale]);
   useEffect(() => { latchModeRef.current = latchMode; }, [latchMode]);
-  
   useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
   useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
   useEffect(() => { persistentLatchesRef.current = persistentLatches; }, [persistentLatches]);
@@ -376,10 +313,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const lastTouchedLimitRef = useRef<number | null>(null);
   const depthHistoryRef = useRef<number[]>([]);
 
-  // Update Rect on Scroll/Resize
   const updateRect = () => {
-      if (dynamicCanvasRef.current) {
-          canvasRectRef.current = dynamicCanvasRef.current.getBoundingClientRect();
+      if (scrollContainerRef.current) {
+          canvasRectRef.current = scrollContainerRef.current.getBoundingClientRect();
       }
   };
 
@@ -394,24 +330,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       };
   }, []);
 
-  useEffect(() => { updateRect(); }, [dynamicSize]);
-
-  // Imperative Handle
   useImperativeHandle(ref, () => ({
     clearLatches: (mode?: number) => {
-        if (mode === undefined) {
-            setPersistentLatches(new Map());
-        } else {
+        if (mode === undefined) setPersistentLatches(new Map());
+        else {
             setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                 const next = new Map();
                 prev.forEach((modeMap, nodeId) => {
                     const newModeMap = new Map(modeMap);
-                    if (newModeMap.has(mode)) {
-                        newModeMap.delete(mode);
-                    }
-                    if (newModeMap.size > 0) {
-                        next.set(nodeId, newModeMap);
-                    }
+                    if (newModeMap.has(mode)) newModeMap.delete(mode);
+                    if (newModeMap.size > 0) next.set(nodeId, newModeMap);
                 });
                 return next;
             });
@@ -442,11 +370,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         persistentLatches.forEach((modeMap, id) => {
             const n = nodeMap.get(id);
             if (n) {
-                // Return one entry per mode? Or just the primary?
-                // The chord system expects flat list.
-                modeMap.forEach((_, mode) => {
-                    result.push({ node: n, mode });
-                });
+                modeMap.forEach((_, mode) => result.push({ node: n, mode }));
             }
         });
         return result;
@@ -455,37 +379,23 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const centerScroll = () => {
       if (scrollContainerRef.current) {
-        const center = dynamicSize / 2;
         const viewportW = scrollContainerRef.current.clientWidth;
         const viewportH = scrollContainerRef.current.clientHeight;
-        scrollContainerRef.current.scrollLeft = center - viewportW / 2;
-        scrollContainerRef.current.scrollTop = center - viewportH / 2;
+        scrollContainerRef.current.scrollLeft = CENTER_OFFSET - viewportW / 2;
+        scrollContainerRef.current.scrollTop = CENTER_OFFSET - viewportH / 2;
         requestAnimationFrame(updateRect);
       }
   };
 
   useEffect(() => {
       if (isInitialLoad && !isGenerating && data.nodes.length > 0) {
-          centerScroll();
+          // Delay centering slightly to ensure layout is done
+          requestAnimationFrame(centerScroll);
           setIsInitialLoad(false);
       }
-  }, [isGenerating, data.nodes.length, isInitialLoad, dynamicSize]);
+  }, [isGenerating, data.nodes.length, isInitialLoad]);
 
-  // Handle Lattice Resize (Symmetric Expansion)
-  useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    
-    if (!isInitialLoad && dynamicSize !== prevDynamicSizeRef.current) {
-        const diff = (dynamicSize - prevDynamicSizeRef.current) / 2;
-        container.scrollLeft += diff;
-        container.scrollTop += diff;
-        requestAnimationFrame(updateRect);
-    }
-    prevDynamicSizeRef.current = dynamicSize;
-  }, [dynamicSize, isInitialLoad]);
-
-  // Handle Zoom Stabilization (Keep center view point steady when zooming)
+  // Handle Zoom Stabilization
   useLayoutEffect(() => {
       const container = scrollContainerRef.current;
       if (!container) return;
@@ -496,7 +406,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       if (oldScale !== newScale && oldScale > 0) {
           const viewW = container.clientWidth;
           const viewH = container.clientHeight;
-          const centerOffset = dynamicSizeRef.current / 2;
           
           const oldSpacing = settingsRef.current.buttonSpacingScale * oldScale;
           const newSpacing = settingsRef.current.buttonSpacingScale * newScale;
@@ -504,22 +413,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           const currentScrollLeft = container.scrollLeft;
           const currentScrollTop = container.scrollTop;
 
-          const centerX_from_1_1 = (currentScrollLeft + viewW / 2) - centerOffset;
-          const centerY_from_1_1 = (currentScrollTop + viewH / 2) - centerOffset;
+          const centerX_from_origin = (currentScrollLeft + viewW / 2) - CENTER_OFFSET;
+          const centerY_from_origin = (currentScrollTop + viewH / 2) - CENTER_OFFSET;
 
-          if (Math.abs(centerX_from_1_1) < 2.0 && Math.abs(centerY_from_1_1) < 2.0) {
-              container.scrollLeft = centerOffset - viewW / 2;
-              container.scrollTop = centerOffset - viewH / 2;
-          } else {
-              const normX = centerX_from_1_1 / oldSpacing;
-              const normY = centerY_from_1_1 / oldSpacing;
+          // Normalize position by spacing
+          const normX = centerX_from_origin / oldSpacing;
+          const normY = centerY_from_origin / oldSpacing;
 
-              const newCenterX_from_1_1 = normX * newSpacing;
-              const newCenterY_from_1_1 = normY * newSpacing;
+          const newCenterX_from_origin = normX * newSpacing;
+          const newCenterY_from_origin = normY * newSpacing;
 
-              container.scrollLeft = (newCenterX_from_1_1 + centerOffset) - viewW / 2;
-              container.scrollTop = (newCenterY_from_1_1 + centerOffset) - viewH / 2;
-          }
+          container.scrollLeft = (newCenterX_from_origin + CENTER_OFFSET) - viewW / 2;
+          container.scrollTop = (newCenterY_from_origin + CENTER_OFFSET) - viewH / 2;
           
           requestAnimationFrame(updateRect);
       }
@@ -557,53 +462,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             return true;
         });
 
-        let maxExtent = 0;
-        for (const n of result.nodes) {
-            const absX = Math.abs(n.x);
-            const absY = Math.abs(n.y);
-            if (absX > maxExtent) maxExtent = absX;
-            if (absY > maxExtent) maxExtent = absY;
-        }
-
-        const padding = 600; 
-        const spacing = settingsRef.current.buttonSpacingScale * effectiveScale; 
-        const calculatedSize = (maxExtent * spacing * 2) + padding;
-        const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
-
-        const MAX_CANVAS_SIZE = 5000; 
-        const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
-
-        if (Math.abs(clampedSize - dynamicSizeRef.current) > 50) {
-            setDynamicSize(clampedSize);
-        }
-
         setData({ nodes: result.nodes, lines: visibleLines });
         setIsGenerating(false);
     }, 10);
     return () => clearTimeout(timerId);
   }, [generationDeps]); 
   
-  useEffect(() => {
-      let maxExtent = 0;
-      for (const n of data.nodes) {
-          const absX = Math.abs(n.x);
-          const absY = Math.abs(n.y);
-          if (absX > maxExtent) maxExtent = absX;
-          if (absY > maxExtent) maxExtent = absY;
-      }
-      const padding = 600; 
-      const spacing = settings.buttonSpacingScale * effectiveScale;
-      const calculatedSize = (maxExtent * spacing * 2) + padding;
-      const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
-      
-      const MAX_CANVAS_SIZE = 5000;
-      const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
-
-      if (Math.abs(clampedSize - dynamicSize) > 50) setDynamicSize(clampedSize);
-  }, [settings.buttonSpacingScale, effectiveScale]);
-
-  // Audio Latched Nodes Sync
-  // Updated to handle multiple voices per node via unique ID generation
   const prevAudioLatchedRef = useRef<Map<string, NodeActivation[]>>(new Map());
   useEffect(() => {
       const current = audioLatchedNodes;
@@ -613,7 +477,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       current.forEach((activations, nodeId) => {
           activations.forEach(act => {
               const voiceId = `node-${nodeId}-${act.mode}`;
-              
               const prevActivations = prev.get(nodeId);
               const wasActive = prevActivations && prevActivations.some(p => p.mode === act.mode);
               
@@ -647,22 +510,31 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     audioEngine.setPolyphony(settings.polyphony);
   }, [settings.polyphony]);
 
-  // --- HIT TEST LOGIC ---
   const getHitNode = (clientX: number, clientY: number): LatticeNode | null => {
-      if (!dynamicCanvasRef.current) return null;
-      let rect = canvasRectRef.current;
-      if (!rect) {
-          rect = dynamicCanvasRef.current.getBoundingClientRect();
-          canvasRectRef.current = rect;
-      }
+      // Use clientRect of the scroll container as the viewport reference
+      if (!scrollContainerRef.current) return null;
+      const rect = scrollContainerRef.current.getBoundingClientRect();
       
       const bend = globalBendRef.current;
       const pixelOffset = -bend * (PITCH_SCALE / 12) * effectiveScale;
 
-      const x = clientX - rect.left;
-      const y = clientY - (rect.top + pixelOffset); 
+      const scrollLeft = scrollContainerRef.current.scrollLeft;
+      const scrollTop = scrollContainerRef.current.scrollTop;
 
-      const centerOffset = dynamicSizeRef.current / 2;
+      // Coordinate in Viewport
+      const viewportX = clientX - rect.left;
+      const viewportY = clientY - rect.top;
+
+      // Coordinate in World (Content)
+      // pixelOffset affects visual translation of sticky wrapper, but hit test is logic based
+      // wrapper.style.transform = `translate3d(0px, ${pixelOffset}px, 0px)`;
+      // So visual Y is shifted DOWN by pixelOffset (if bend > 0 -> pitch down -> pixelOffset positive)
+      // Wait, pixelOffset = -bend * ... 
+      // If bend +1 (pitch up), pixelOffset is negative (move up).
+      // Hit Y = viewportY + scrollTop - pixelOffset
+      const x = viewportX + scrollLeft;
+      const y = (viewportY - pixelOffset) + scrollTop;
+
       const spacing = settings.buttonSpacingScale * effectiveScale;
       const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
 
@@ -684,8 +556,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           const nodesInCell = grid.get(key);
           if (nodesInCell) {
               for (const node of nodesInCell) {
-                  const nx = node.x * spacing + centerOffset;
-                  const ny = node.y * spacing + centerOffset;
+                  const nx = node.x * spacing + CENTER_OFFSET;
+                  const ny = node.y * spacing + CENTER_OFFSET;
                   
                   const isLatched = latchedMap.has(node.id);
                   const activeZoom = isLatched ? zoomScale : 1.0;
@@ -707,7 +579,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           case 1: return { preset: 'latch', playback: isStrumEnabled ? 'trigger' : 'gate' };
           case 2: return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
           case 3: return { preset: 'strum', playback: 'trigger' };
-          case 4: return { preset: 'voice', playback: isStrumEnabled ? 'trigger' : 'gate' };
+          case 4: return { preset: 'brass', playback: isStrumEnabled ? 'trigger' : 'gate' };
           default: return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
       }
   };
@@ -715,24 +587,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const handlePointerDown = (e: React.PointerEvent) => {
       if (audioEngine) audioEngine.resume();
 
-      if (uiUnlocked || !dynamicCanvasRef.current) return;
+      if (uiUnlocked) return;
       e.preventDefault();
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
       updateRect();
 
       let canvasPos = { x: e.clientX, y: e.clientY };
-      if (scrollContainerRef.current) {
-          const r = scrollContainerRef.current.getBoundingClientRect();
-          const bend = globalBendRef.current;
-          const pixelOffset = -bend * (PITCH_SCALE / 12) * effectiveScale;
-          
-          canvasPos = {
-              x: (e.clientX - r.left) + scrollContainerRef.current.scrollLeft,
-              y: (e.clientY - r.top) + scrollContainerRef.current.scrollTop - pixelOffset
-          };
-      }
-      
+      // Store raw client coordinates for move deltas
       cursorPositionsRef.current.set(e.pointerId, canvasPos);
 
       const hitNode = getHitNode(e.clientX, e.clientY);
@@ -764,11 +626,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                      nodeModes.set(latchMode, Date.now());
                  }
                  
-                 if (nodeModes.size > 0) {
-                     next.set(hitNode.id, nodeModes);
-                 } else {
-                     next.delete(hitNode.id);
-                 }
+                 if (nodeModes.size > 0) next.set(hitNode.id, nodeModes);
+                 else next.delete(hitNode.id);
                  return next;
              });
         }
@@ -821,25 +680,27 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
     const cursor = activeCursorsRef.current.get(e.pointerId)!;
     
-    let canvasPos = { x: e.clientX, y: e.clientY };
+    // Calculate world coordinate for pitch bend logic
+    let worldY = e.clientY;
     if (scrollContainerRef.current) {
         const r = scrollContainerRef.current.getBoundingClientRect();
         const bend = globalBendRef.current;
         const pixelOffset = -bend * (PITCH_SCALE / 12) * effectiveScale;
-        canvasPos = {
-            x: (e.clientX - r.left) + scrollContainerRef.current.scrollLeft,
-            y: (e.clientY - r.top) + scrollContainerRef.current.scrollTop - pixelOffset
-        };
+        worldY = (e.clientY - r.top) - pixelOffset + scrollContainerRef.current.scrollTop;
     }
-    const prevPos = cursorPositionsRef.current.get(e.pointerId);
-    cursorPositionsRef.current.set(e.pointerId, canvasPos);
+    
+    // Update raw position for renderer lines
+    // We store Viewport X/Y for lines relative to viewport
+    if (scrollContainerRef.current) {
+        const r = scrollContainerRef.current.getBoundingClientRect();
+        cursorPositionsRef.current.set(e.pointerId, { 
+            x: e.clientX - r.left + scrollContainerRef.current.scrollLeft, 
+            y: e.clientY - r.top + scrollContainerRef.current.scrollTop 
+        });
+    }
     
     let hasMoved = cursor.hasMoved;
-    if (!hasMoved && prevPos) {
-        const dx = Math.abs(canvasPos.x - prevPos.x);
-        const dy = Math.abs(canvasPos.y - prevPos.y);
-        if (dx > 2 || dy > 2) hasMoved = true;
-    }
+    // ... move detection threshold ...
 
     const hitNode = getHitNode(e.clientX, e.clientY);
     const hitId = hitNode ? hitNode.id : null;
@@ -853,17 +714,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     const isBending = isBendEnabled && !!cursor.originNodeId;
 
     if (isBending && dynamicCanvasRef.current) {
-         const centerOffset = dynamicSizeRef.current / 2;
-         const rect = canvasRectRef.current || dynamicCanvasRef.current.getBoundingClientRect();
-         
-         const bend = globalBendRef.current;
-         const pixelOffset = -bend * (PITCH_SCALE / 12) * effectiveScale; 
-
          const originNode = nodeMapRef.current.get(cursor.originNodeId!);
          if (originNode) {
              const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
-             const originScreenY = (rect.top + pixelOffset) + (originNode.y * spacing) + centerOffset;
-             const currentDeltaY = e.clientY - originScreenY;
+             const originWorldY = (originNode.y * spacing) + CENTER_OFFSET;
+             const currentDeltaY = worldY - originWorldY;
              const bentRatio = getPitchRatioFromScreenDelta(currentDeltaY, settingsRef.current.buttonSpacingScale * effectiveScale);
              const finalRatio = originNode.ratio * bentRatio;
              
@@ -1038,7 +893,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               nodeTriggerHistory: nodeTriggerHistory.current,
               globalBend: globalBendRef.current,
               effectiveScale: effectiveScaleRef.current,
-              dynamicSize: dynamicSizeRef.current,
+              centerOffset: CENTER_OFFSET,
               view: { x: viewX, y: viewY, w: viewW, h: viewH },
               time: time,
               latchMode: latchModeRef.current
@@ -1058,9 +913,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const offset = settings.backgroundYOffset || 0;
       const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
       
+      // Fixed massive scroll area allows simple CSS background repetition
       const baseStyle: React.CSSProperties = {
-          minWidth: '100%', minHeight: '100%', width: dynamicSize, height: dynamicSize,
-          pointerEvents: uiUnlocked ? 'none' : 'auto',
+          position: 'absolute', top: 0, left: 0,
+          width: '100%', height: '100%', 
+          pointerEvents: 'none',
           backgroundPosition: `center calc(50% + ${offset}px)`,
           backgroundRepeat: 'no-repeat', backgroundSize: 'cover'
       };
@@ -1078,6 +935,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                   const hue = (settings.rainbowOffset + i*60);
                   stops.push(`hsl(${hue}, ${settings.rainbowSaturation}%, ${settings.rainbowBrightness}%) ${pct}%`);
               }
+              // Linear gradient repeats by default
               return { ...baseStyle, backgroundImage: `linear-gradient(to bottom, ${stops.join(', ')})`, backgroundSize: `100% ${period}px`, backgroundRepeat: 'repeat', backgroundPosition: `0px calc(50% + ${offset}px)` };
           case 'charcoal': return { ...baseStyle, backgroundColor: '#18181b' }; 
           case 'midnight_blue': return { ...baseStyle, backgroundColor: '#0a0a23' }; 
@@ -1095,11 +953,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   return (
     <div ref={scrollContainerRef} className="w-full h-full overflow-auto bg-slate-950 relative" style={{ touchAction: 'none' }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp} onPointerCancel={handlePointerUp}>
-        <div ref={wrapperRef} className="relative" style={getBackgroundStyle()}>
-           <canvas ref={bgLineCanvasRef} className="absolute top-0 left-0 z-[5] pointer-events-none" style={{ width: '100%', height: '100%' }} />
-           <canvas ref={staticCanvasRef} className="absolute top-0 left-0 z-[10] pointer-events-none" style={{ width: '100%', height: '100%' }} />
-           <canvas ref={dynamicCanvasRef} className="absolute top-0 left-0 z-[20] pointer-events-none" style={{ width: '100%', height: '100%' }} />
-           {isGenerating && (<div className="absolute top-4 right-4 z-50 flex items-center gap-2 bg-slate-900/80 p-2 rounded-full backdrop-blur-sm border border-white/10 shadow-xl"><svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span className="text-xs font-bold text-slate-300 pr-2">Calculating...</span></div>)}
+        <div className="sticky top-0 left-0 w-full h-full z-10 overflow-hidden pointer-events-none">
+            <div ref={wrapperRef} className="relative w-full h-full">
+                <canvas ref={bgLineCanvasRef} className="absolute top-0 left-0 z-[5]" style={{ width: '100%', height: '100%' }} />
+                <canvas ref={staticCanvasRef} className="absolute top-0 left-0 z-[10]" style={{ width: '100%', height: '100%' }} />
+                <canvas ref={dynamicCanvasRef} className="absolute top-0 left-0 z-[20]" style={{ width: '100%', height: '100%' }} />
+                {isGenerating && (<div className="absolute top-4 right-4 z-50 flex items-center gap-2 bg-slate-900/80 p-2 rounded-full backdrop-blur-sm border border-white/10 shadow-xl"><svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span className="text-xs font-bold text-slate-300 pr-2">Calculating...</span></div>)}
+            </div>
+        </div>
+        
+        {/* Massive Fixed Spacer for Stable Scrolling + Background */}
+        <div style={{ width: VIRTUAL_SIZE, height: VIRTUAL_SIZE }} className="relative z-0">
+             <div style={getBackgroundStyle()} />
         </div>
     </div>
   );

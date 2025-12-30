@@ -16,6 +16,7 @@ export enum WaveformType {
   SAWTOOTH = 'sawtooth',
   TRIANGLE = 'triangle',
   NOISE = 'noise',
+  GLOTTAL = 'glottal',
 }
 
 export enum ButtonShape {
@@ -35,6 +36,17 @@ export type BackgroundMode = 'rainbow' | 'charcoal' | 'midnight_blue' | 'deep_ma
 
 export interface LimitColorMap {
   [key: number]: string;
+}
+
+export interface Particle {
+    id: number;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    life: number; // 0.0 to 1.0
+    color: string;
+    size: number;
 }
 
 export interface ChordNode {
@@ -110,7 +122,7 @@ export interface KeyMappings {
     modeDrone: string; // Switch to Drone Mode
     modeStrings: string; // Switch to Strings Mode
     modePlucked: string; // Switch to Plucked Mode
-    modeVoice: string; // Switch to Voice Mode (New)
+    modeBrass: string; // Switch to Brass Mode (Renamed from Voice)
     synth: string; // Toggle Synth Panel
 
     // Chords & Performance
@@ -274,7 +286,7 @@ export interface AppSettings {
   };
 }
 
-export type FilterType = 'lowpass' | 'highpass' | 'bandpass' | 'notch';
+export type FilterType = 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peak' | 'lowshelf' | 'highshelf';
 
 export interface OscillatorConfig {
   enabled: boolean;
@@ -332,9 +344,13 @@ export interface SynthPreset {
   // Master Gain for the preset
   gain: number; 
 
-  // Formant / Vocal Tract
-  formantStrength?: number; // 0 to 1 (0 = Bypass, 1 = Full Formant Filtering)
-  vowel?: number; // 0.0 (A) to 1.0 (U)
+  // Resonator / Body (Formerly Formant/Vocal)
+  resonatorMix?: number; // 0 to 1 (0 = Bypass)
+  resonatorSweep?: number; // 0.0 to 1.0 (Timbre sweep)
+  
+  // Noise / Air (Formerly Aspiration)
+  noiseGain?: number; // 0 to 1 (Noise level)
+  noiseCutoff?: number; // Hz (Highpass filter on noise)
 
   // Expression / Performance
   portamento?: number; // 0 to 1 (Glide time)
@@ -366,7 +382,7 @@ export interface SynthPreset {
 }
 
 // Slot Types
-export type PresetSlot = 'normal' | 'latch' | 'strum' | 'voice' | 'arpeggio';
+export type PresetSlot = 'normal' | 'latch' | 'strum' | 'brass' | 'arpeggio';
 export type PlayMode = PresetSlot; // Alias for backward compatibility
 export type PlaybackMode = 'gate' | 'trigger' | 'latch'; // Behavior type
 
@@ -374,7 +390,7 @@ export interface PresetState {
     normal: SynthPreset;
     latch: SynthPreset;
     strum: SynthPreset;
-    voice: SynthPreset;
+    brass: SynthPreset; // Renamed from voice
     arpeggio: SynthPreset;
 }
 

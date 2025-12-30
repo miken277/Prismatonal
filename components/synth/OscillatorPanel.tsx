@@ -87,14 +87,14 @@ const OscillatorPanel: React.FC<Props> = ({ label, config, isPrimary = false, on
                 {/* Filter */}
                 <div className="space-y-2">
                     <h4 className="text-xs font-bold text-yellow-500 uppercase tracking-wide">Filter</h4>
-                    <div className="flex gap-1 mb-2">
-                        {(['lowpass', 'highpass', 'bandpass', 'notch'] as FilterType[]).map(type => (
+                    <div className="flex gap-1 mb-2 flex-wrap">
+                        {(['lowpass', 'highpass', 'bandpass', 'notch', 'peak', 'lowshelf', 'highshelf'] as FilterType[]).map(type => (
                             <button 
                                 key={type} 
                                 onClick={() => onUpdate('filterType', type)} 
-                                className={`flex-1 py-1 text-[9px] uppercase font-bold rounded border transition-colors ${config.filterType === type ? 'bg-yellow-600 border-yellow-500 text-white' : 'bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700'}`}
+                                className={`flex-1 min-w-[30px] py-1 text-[9px] uppercase font-bold rounded border transition-colors ${config.filterType === type ? 'bg-yellow-600 border-yellow-500 text-white' : 'bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700'}`}
                             >
-                                {type === 'lowpass' ? 'LP' : type === 'highpass' ? 'HP' : type === 'bandpass' ? 'BP' : 'NT'}
+                                {type.replace('low', 'lo').replace('high', 'hi').replace('pass', '').replace('shelf', 'sh')}
                             </button>
                         ))}
                     </div>
@@ -103,7 +103,7 @@ const OscillatorPanel: React.FC<Props> = ({ label, config, isPrimary = false, on
                         <input type="range" min="20" max="10000" step="10" value={config.filterCutoff} onChange={(e) => onUpdate('filterCutoff', parseFloat(e.target.value))} className="w-full h-1 bg-yellow-600 rounded appearance-none cursor-pointer" />
                     </div>
                     <div>
-                        <label className="flex justify-between text-xs mb-1 text-slate-300"><span>Resonance</span> <span>{config.filterResonance.toFixed(1)}</span></label>
+                        <label className="flex justify-between text-xs mb-1 text-slate-300"><span>Resonance / Q</span> <span>{config.filterResonance.toFixed(1)}</span></label>
                         <input type="range" min="0" max="20" step="0.1" value={config.filterResonance} onChange={(e) => onUpdate('filterResonance', parseFloat(e.target.value))} className="w-full h-1 bg-yellow-600 rounded appearance-none cursor-pointer" />
                     </div>
                 </div>
