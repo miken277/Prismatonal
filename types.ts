@@ -1,4 +1,5 @@
 
+
 export enum LimitType {
   LIMIT_2 = 2,
   LIMIT_3 = 3,
@@ -32,7 +33,7 @@ export type LayoutApproach =
   | 'indian_circle' | 'indian_thaat'           // Indian specific
   | 'pyth_spiral' | 'pyth_row';                // Pythagorean specific
 
-export type BackgroundMode = 'rainbow' | 'charcoal' | 'midnight_blue' | 'deep_maroon' | 'forest_green' | 'slate_grey' | 'image' | 'none';
+export type BackgroundMode = 'solid' | 'gradient' | 'image';
 
 export interface LimitColorMap {
   [key: number]: string;
@@ -239,19 +240,42 @@ export interface AppSettings {
   pitchOffLocked: boolean;
   volumeLocked: boolean;
 
-  // Visuals - Background
+  // --- Visuals - Background ---
   backgroundMode: BackgroundMode;
-  backgroundImageData: string | null; // Base64 string for custom image
-  backgroundTiling: boolean; // True = Repeat, False = No Repeat (Centered)
-  backgroundYOffset: number; // Vertical offset in pixels
   
-  // Legacy Rainbow params (still used if mode is 'rainbow')
-  isRainbowModeEnabled: boolean; 
-  rainbowSaturation: number; // 0-100
-  rainbowBrightness: number; // 0-100
-  rainbowOffset: number; // 0-360 (Hue shift)
-  
+  // Solid
+  solidColor: string; // Hex color for solid background
+
+  // Gradient
+  gradientColorStart: string;
+  gradientColorEnd: string;
+  gradientType: 'linear' | 'radial';
+  gradientAngle: number; // Degrees (0-360)
+
+  // Image
+  backgroundImageData: string | null; // Base64
+  backgroundYOffset: number; // Vertical offset
+  backgroundTiling: boolean; // Tile the background image
+  bgImageGamma: number; // 0.5 to 1.5 (Brightness control)
+  bgImageTint: string; // Tint Color
+  bgImageTintStrength: number; // 0.0 to 1.0
+
+  // Overlay
+  isOverlayEnabled: boolean;
+  overlayBlendMode: 'normal' | 'multiply' | 'screen' | 'overlay';
+  overlayOpacity: number;
+  overlayType: 'solid' | 'gradient';
+  overlayColorStart: string;
+  overlayColorEnd: string;
+  overlayGradientType: 'linear' | 'radial';
+  overlayGradientAngle: number;
+
+  // Rainbow Settings
+  rainbowSaturation: number;
+  rainbowBrightness: number;
+  rainbowOffset: number;
   isColoredIlluminationEnabled: boolean;
+  isRainbowModeEnabled: boolean;
 
   // MIDI Settings
   midiEnabled: boolean;
@@ -379,6 +403,12 @@ export interface SynthPreset {
 
   // Arp Settings
   arpConfig?: ArpConfig;
+  
+  // Vocal/Formant legacy fields (optional for migration)
+  formantStrength?: number;
+  vowel?: number;
+  aspirationGain?: number;
+  aspirationCutoff?: number;
 }
 
 // Slot Types

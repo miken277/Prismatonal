@@ -158,7 +158,13 @@ class PrismaStore {
     if (next === current) return;
 
     this.state = { ...this.state, settings: next };
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    
+    try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    } catch (e) {
+        console.warn("Settings storage limit reached. Changes saved to session only.", e);
+        // We do NOT stop the state update, so the app still works for this session.
+    }
     this.notify();
   };
 
@@ -169,7 +175,11 @@ class PrismaStore {
     const nextPresets = { ...this.state.presets, [mode]: newPreset };
     this.state = { ...this.state, presets: nextPresets };
     
-    localStorage.setItem(PRESET_KEY, JSON.stringify(nextPresets));
+    try {
+        localStorage.setItem(PRESET_KEY, JSON.stringify(nextPresets));
+    } catch (e) {
+        console.warn("Preset storage limit reached. Changes saved to session only.");
+    }
     this.notify();
   };
 
@@ -179,7 +189,13 @@ class PrismaStore {
       newBank[slotIndex] = { ...preset, category: 'User' };
       
       this.state = { ...this.state, userBank: newBank };
-      localStorage.setItem(USER_BANK_KEY, JSON.stringify(newBank));
+      
+      try {
+          localStorage.setItem(USER_BANK_KEY, JSON.stringify(newBank));
+      } catch (e) {
+          console.warn("Bank storage limit reached. Changes saved to session only.");
+          alert("Storage Limit Reached. Export XML to save your work.");
+      }
       this.notify();
   };
 
@@ -214,9 +230,16 @@ class PrismaStore {
                   });
               }
 
-              localStorage.setItem(SETTINGS_KEY, JSON.stringify(nextState.settings));
-              localStorage.setItem(PRESET_KEY, JSON.stringify(nextState.presets));
-              localStorage.setItem(USER_BANK_KEY, JSON.stringify(nextState.userBank));
+              // Try saving imported data to local storage, handle quotas
+              try {
+                  localStorage.setItem(SETTINGS_KEY, JSON.stringify(nextState.settings));
+                  localStorage.setItem(PRESET_KEY, JSON.stringify(nextState.presets));
+                  localStorage.setItem(USER_BANK_KEY, JSON.stringify(nextState.userBank));
+              } catch (e) {
+                  console.warn("Import exceeded local storage quota. Data loaded into session memory only.");
+                  alert("Warning: Import successful, but data exceeds browser storage limits. It will persist only for this session unless you export again.");
+              }
+
               this.state = nextState as StoreState; // Cast to ensure type safety after partial merge
               this.notify();
               return true;

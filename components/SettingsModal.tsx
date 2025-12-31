@@ -23,6 +23,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   const { exportXML, importXML } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bgImageInputRef = useRef<HTMLInputElement>(null);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
 
   useEffect(() => {
     if (isOpen && activeTab === 'midi') {
@@ -60,16 +61,74 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleBackgroundImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const processImageFile = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          
+          img.onload = () => {
+              URL.revokeObjectURL(url);
+              const canvas = document.createElement('canvas');
+              
+              // Resize logic: Max 1920px width or height to save space
+              const MAX_DIM = 1920;
+              let width = img.width;
+              let height = img.height;
+              
+              if (width > MAX_DIM || height > MAX_DIM) {
+                  const ratio = width / height;
+                  if (width > height) {
+                      width = MAX_DIM;
+                      height = MAX_DIM / ratio;
+                  } else {
+                      height = MAX_DIM;
+                      width = MAX_DIM * ratio;
+                  }
+              }
+              
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              
+              if (ctx) {
+                  ctx.drawImage(img, 0, 0, width, height);
+                  // Compress to JPEG at 0.7 quality to ensure it fits in LocalStorage
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                  resolve(dataUrl);
+              } else {
+                  reject(new Error("Could not get canvas context"));
+              }
+          };
+          
+          img.onerror = () => {
+              URL.revokeObjectURL(url);
+              reject(new Error("Failed to load image"));
+          };
+          
+          img.src = url;
+      });
+  };
+
+  const handleBackgroundImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (readerEvent) => {
-        const base64 = readerEvent.target?.result as string;
-        handleChange('backgroundImageData', base64);
-        handleChange('backgroundMode', 'image');
-      };
-      reader.readAsDataURL(file);
+      try {
+          setIsProcessingImage(true);
+          const base64 = await processImageFile(file);
+          
+          // Apply changes
+          handleUpdate({
+              backgroundImageData: base64,
+              backgroundMode: 'image'
+          });
+          
+      } catch (err) {
+          console.error("Image processing failed:", err);
+          alert("Failed to process image. Please try a smaller file.");
+      } finally {
+          setIsProcessingImage(false);
+          if (bgImageInputRef.current) bgImageInputRef.current.value = '';
+      }
     }
   };
 
@@ -185,100 +244,115 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                   </div>
                   
                   <div className="space-y-6">
-                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Connections & Voice Leading</h3>
-                    <div className="space-y-4">
-                        <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-4">
-                            <div>
-                                <label className="block text-sm font-semibold mb-1 text-slate-300">Base Line Width</label>
-                                <div className="flex items-center gap-3">
-                                    <input 
-                                        type="range" 
-                                        min="0.5" 
-                                        max="3.0" 
-                                        step="0.1" 
-                                        value={settings.baseLineWidth || 1.0} 
-                                        onChange={(e) => handleChange('baseLineWidth', parseFloat(e.target.value))} 
-                                        className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" 
-                                    />
-                                    <span className="text-xs font-mono w-10 text-right text-blue-300">{(settings.baseLineWidth || 1.0).toFixed(1)}</span>
-                                </div>
-                                <p className="text-[10px] text-slate-500 italic mt-1">Controls thickness of the static lattice grid.</p>
-                            </div>
-                            <hr className="border-slate-700/50" />
-                            <label className="flex items-center justify-between cursor-pointer">
-                                <span className="text-sm font-semibold text-slate-300">Enable Line Brightening</span>
-                                <input type="checkbox" checked={settings.lineBrighteningEnabled} onChange={(e) => handleChange('lineBrighteningEnabled', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-pink-500" />
-                            </label>
-                            
-                            <div className={`${!settings.lineBrighteningEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
-                                <label className="block text-sm font-semibold mb-1 text-slate-300">Brightening Width</label>
-                                <div className="flex items-center gap-3">
-                                    <input 
-                                        type="range" 
-                                        min="1.0" 
-                                        max="4.0" 
-                                        step="0.1" 
-                                        value={settings.lineBrighteningWidth || 1.0} 
-                                        onChange={(e) => handleChange('lineBrighteningWidth', parseFloat(e.target.value))} 
-                                        className="flex-grow h-2 bg-pink-900 rounded-lg appearance-none cursor-pointer accent-pink-500" 
-                                    />
-                                    <span className="text-xs font-mono w-10 text-right text-pink-300">{(settings.lineBrighteningWidth || 1.0).toFixed(1)}</span>
-                                </div>
-                                <p className="text-[10px] text-slate-500 italic mt-1">Controls thickness of highlighted connections between active nodes.</p>
+                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Background</h3>
+                    
+                    <div className="bg-slate-900/40 p-4 rounded border border-slate-700/50 space-y-6">
+                        {/* Mode Selector */}
+                        <div>
+                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Background Mode</label>
+                            <div className="flex bg-slate-800 rounded p-1 border border-slate-600">
+                                {(['solid', 'gradient', 'image'] as BackgroundMode[]).map(mode => (
+                                    <button 
+                                        key={mode} 
+                                        onClick={() => handleChange('backgroundMode', mode)} 
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded uppercase transition-colors ${settings.backgroundMode === mode ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                                    >
+                                        {mode}
+                                    </button>
+                                ))}
                             </div>
                         </div>
-                    </div>
 
-                    <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1 mt-2">Lattice Background</h3>
-                    <div className="space-y-4">
-                      <select value={settings.backgroundMode} onChange={(e) => handleChange('backgroundMode', e.target.value as BackgroundMode)} className="w-full bg-slate-700 rounded p-2 text-sm text-white border border-slate-600">
-                        <option value="charcoal">Charcoal</option>
-                        <option value="midnight_blue">Midnight Blue</option>
-                        <option value="deep_maroon">Deep Maroon</option>
-                        <option value="forest_green">Forest Green</option>
-                        <option value="slate_grey">Slate Grey</option>
-                        <option value="rainbow">Rainbow Gradient</option>
-                        <option value="image">Custom Image</option>
-                        <option value="none">Solid Black</option>
-                      </select>
-                      
-                      {settings.backgroundMode === 'rainbow' && (
-                        <div className="bg-slate-900/50 p-4 rounded border border-slate-700 space-y-4">
-                          <h4 className="text-xs font-bold text-slate-300 uppercase">Rainbow Parameters</h4>
-                          <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Saturation</span> <span>{settings.rainbowSaturation}%</span></label>
-                            <input type="range" min="0" max="100" value={settings.rainbowSaturation} onChange={(e) => handleChange('rainbowSaturation', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="flex justify-between text-xs font-bold text-slate-400 uppercase"><span>Brightness</span> <span>{settings.rainbowBrightness}%</span></label>
-                            <input type="range" min="0" max="100" value={settings.rainbowBrightness} onChange={(e) => handleChange('rainbowBrightness', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="flex justify-between text-xs font-bold text-slate-400 uppercase"><span>Offset</span> <span>{settings.rainbowOffset}°</span></label>
-                            <input type="range" min="0" max="360" value={settings.rainbowOffset} onChange={(e) => handleChange('rainbowOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-pink-900/30 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                          </div>
-                          <label className="flex items-center justify-between cursor-pointer">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Colored Node Illumination</span>
-                            <input type="checkbox" checked={settings.isColoredIlluminationEnabled} onChange={(e) => handleChange('isColoredIlluminationEnabled', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
-                          </label>
-                        </div>
-                      )}
+                        {/* SOLID Mode Controls */}
+                        {settings.backgroundMode === 'solid' && (
+                            <div className="animate-in fade-in space-y-4">
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">Fill Color</label>
+                                    <div className="flex items-center gap-3">
+                                        <input type="color" value={settings.solidColor} onChange={(e) => handleChange('solidColor', e.target.value)} className="flex-1 h-10 bg-transparent border-none cursor-pointer rounded" />
+                                        <span className="text-xs font-mono text-slate-400">{settings.solidColor}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
-                      {settings.backgroundMode === 'image' && (
-                        <div className="bg-slate-900/50 p-4 rounded border border-slate-700 space-y-4">
-                          <h4 className="text-xs font-bold text-slate-300 uppercase">Custom Image</h4>
-                          <input type="file" ref={bgImageInputRef} className="hidden" accept="image/*" onChange={handleBackgroundImageUpload} />
-                          <button onClick={() => bgImageInputRef.current?.click()} className="w-full py-2 bg-slate-700 hover:bg-slate-600 text-xs font-bold rounded border border-slate-600 transition">Upload Image</button>
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">Tiling</span>
-                            <input type="checkbox" checked={settings.backgroundTiling} onChange={(e) => handleChange('backgroundTiling', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-pink-500" />
-                          </div>
-                          <div className="space-y-2">
-                            <label className="flex justify-between text-[10px] text-slate-400 uppercase font-bold"><span>Y Offset</span> <span>{settings.backgroundYOffset}px</span></label>
-                            <input type="range" min="-1000" max="1000" step="10" value={settings.backgroundYOffset} onChange={(e) => handleChange('backgroundYOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
-                          </div>
-                        </div>
-                      )}
+                        {/* GRADIENT Mode Controls */}
+                        {settings.backgroundMode === 'gradient' && (
+                            <div className="animate-in fade-in space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">Start Color</label>
+                                        <input type="color" value={settings.gradientColorStart} onChange={(e) => handleChange('gradientColorStart', e.target.value)} className="w-full h-10 bg-transparent border-none cursor-pointer" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">End Color</label>
+                                        <input type="color" value={settings.gradientColorEnd} onChange={(e) => handleChange('gradientColorEnd', e.target.value)} className="w-full h-10 bg-transparent border-none cursor-pointer" />
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">Gradient Type</label>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => handleChange('gradientType', 'linear')} className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.gradientType === 'linear' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>Linear</button>
+                                        <button onClick={() => handleChange('gradientType', 'radial')} className={`flex-1 py-1.5 text-xs font-bold rounded border ${settings.gradientType === 'radial' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>Radial</button>
+                                    </div>
+                                </div>
+
+                                {settings.gradientType === 'linear' && (
+                                    <div className="space-y-1">
+                                        <label className="flex justify-between text-xs text-slate-300"><span>Angle</span> <span>{settings.gradientAngle}°</span></label>
+                                        <input type="range" min="0" max="360" step="5" value={settings.gradientAngle} onChange={(e) => handleChange('gradientAngle', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* IMAGE Mode Controls */}
+                        {settings.backgroundMode === 'image' && (
+                            <div className="animate-in fade-in space-y-4">
+                                <div className="space-y-2">
+                                    <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">Custom Image</label>
+                                    <input type="file" ref={bgImageInputRef} className="hidden" accept="image/*" onChange={handleBackgroundImageUpload} />
+                                    <button 
+                                        onClick={() => bgImageInputRef.current?.click()} 
+                                        disabled={isProcessingImage}
+                                        className={`w-full py-2 text-xs font-bold rounded border transition text-white ${isProcessingImage ? 'bg-slate-600 border-slate-500 cursor-wait' : 'bg-indigo-700 hover:bg-indigo-600 border-indigo-500'}`}
+                                    >
+                                        {isProcessingImage ? 'Processing...' : 'Select File'}
+                                    </button>
+                                    <p className="text-[9px] text-slate-500">Images are auto-resized to 1920px max for performance.</p>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <label className="flex justify-between text-xs text-slate-300"><span>Gamma / Brightness</span> <span>{settings.bgImageGamma.toFixed(2)}</span></label>
+                                    <input type="range" min="0.1" max="2.0" step="0.05" value={settings.bgImageGamma} onChange={(e) => handleChange('bgImageGamma', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                                </div>
+
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">Tint Overlay</label>
+                                    <div className="flex items-center gap-3 mb-2">
+                                        <input type="color" value={settings.bgImageTint} onChange={(e) => handleChange('bgImageTint', e.target.value)} className="w-10 h-8 bg-transparent border-none cursor-pointer" />
+                                        <div className="flex-1">
+                                            <input type="range" min="0" max="1" step="0.05" value={settings.bgImageTintStrength} onChange={(e) => handleChange('bgImageTintStrength', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-between text-[9px] text-slate-500">
+                                        <span>Color</span>
+                                        <span>Opacity: {(settings.bgImageTintStrength * 100).toFixed(0)}%</span>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs text-slate-300">Tile Image</span>
+                                    <input type="checkbox" checked={settings.backgroundTiling} onChange={(e) => handleChange('backgroundTiling', e.target.checked)} className="w-4 h-4 rounded border-slate-600 text-indigo-500" />
+                                </div>
+                                
+                                <div className="space-y-1">
+                                    <label className="flex justify-between text-xs text-slate-300"><span>Y Offset</span> <span>{settings.backgroundYOffset}px</span></label>
+                                    <input type="range" min="-1000" max="1000" step="10" value={settings.backgroundYOffset} onChange={(e) => handleChange('backgroundYOffset', parseInt(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
+                                </div>
+                            </div>
+                        )}
                     </div>
                   </div>
                 </div>
