@@ -136,11 +136,11 @@ const InstrumentCluster: React.FC<Props> = ({
                 <div className="w-8 h-1 bg-slate-600 rounded-full" />
             </div>
 
-            {/* Strings (Blue) - Moved to Top */}
-            {renderInstrument(2, "Strings", 'normal', onSust, MODE_COLORS[2])}
+            {/* Voice (Yellow) - Top */}
+            {renderInstrument(4, "Voice", 'brass', onVoice, MODE_COLORS[4])}
 
-            {/* Brass (Yellow) - Moved Below Strings */}
-            {renderInstrument(4, "Brass", 'brass', onVoice, MODE_COLORS[4])}
+            {/* Strings (Blue) */}
+            {renderInstrument(2, "Strings", 'normal', onSust, MODE_COLORS[2])}
 
             {/* Plucked (Orange) */}
             {renderInstrument(3, "Plucked", 'strum', onPluck, MODE_COLORS[3])}

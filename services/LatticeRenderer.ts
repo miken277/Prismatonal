@@ -26,19 +26,20 @@ export interface RenderState {
     nodeTriggerHistory: Map<string, number>;
     globalBend: number;
     effectiveScale: number;
-    centerOffset: number; // New: Fixed offset from virtual scroll center
+    dynamicSize: number;
     view: ViewPort;
     time: number;
     latchMode: number;
 }
 
+// Priority for concentric rings (Lower = Inner Ring)
 const MODE_PRIORITY: Record<string | number, number> = {
-    0: 0, 
-    3: 1, 
-    'arp': 2, 
-    2: 3, 
-    4: 4, 
-    1: 5  
+    0: 0, // Touch/Default (Innermost)
+    3: 1, // Plucked
+    'arp': 2, // Arpeggiator 
+    2: 3, // Strings
+    4: 4, // Voice (New, Yellow)
+    1: 5  // Drone (Outermost)
 };
 
 export class LatticeRenderer {
@@ -57,7 +58,7 @@ export class LatticeRenderer {
     }
 
     private renderStatic(canvas: HTMLCanvasElement, state: RenderState) {
-        const { data, settings, effectiveScale, centerOffset, view } = state;
+        const { data, settings, effectiveScale, dynamicSize } = state;
         
         const deps = JSON.stringify({
             tuning: settings.tuningSystem,
@@ -70,10 +71,10 @@ export class LatticeRenderer {
             shape: settings.buttonShape,
             textScale: settings.nodeTextSizeScale,
             fractionBar: settings.showFractionBar,
+            canvasSize: dynamicSize,
             scale: effectiveScale,
             nodesLen: data.nodes.length,
-            linesLen: data.lines.length,
-            vx: view.x, vy: view.y, vw: view.w, vh: view.h // Redraw on scroll
+            linesLen: data.lines.length
         });
 
         if (deps === this.prevStaticDeps) return;
@@ -85,43 +86,31 @@ export class LatticeRenderer {
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
         const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
         
-        // Ensure accurate sizing
-        if (canvas.width !== view.w * dpr || canvas.height !== view.h * dpr) {
-            canvas.width = view.w * dpr;
-            canvas.height = view.h * dpr;
+        if (canvas.width !== dynamicSize * dpr || canvas.height !== dynamicSize * dpr) {
+            canvas.width = dynamicSize * dpr;
+            canvas.height = dynamicSize * dpr;
         }
         
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.scale(dpr, dpr);
-        
-        // Translate context by scroll position (negative direction)
-        ctx.translate(-view.x, -view.y);
 
+        const centerOffset = dynamicSize / 2;
         const spacing = settings.buttonSpacingScale * effectiveScale;
         const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
         const isDiamond = settings.buttonShape === ButtonShape.DIAMOND;
         const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
 
-        // Culling Boundaries
-        const cullPad = 200;
-        const cullLeft = view.x - cullPad;
-        const cullRight = view.x + view.w + cullPad;
-        const cullTop = view.y - cullPad;
-        const cullBottom = view.y + view.h + cullPad;
-
         // Draw Lines
         const linesByLimit: Record<number, number[]> = {};
         for (const line of data.lines) {
-            const x1 = line.x1 * spacing + centerOffset;
-            const y1 = line.y1 * spacing + centerOffset;
-            const x2 = line.x2 * spacing + centerOffset;
-            const y2 = line.y2 * spacing + centerOffset;
-
-            if (Math.max(x1, x2) < cullLeft || Math.min(x1, x2) > cullRight || Math.max(y1, y2) < cullTop || Math.min(y1, y2) > cullBottom) continue;
-
             if (!linesByLimit[line.limit]) linesByLimit[line.limit] = [];
-            linesByLimit[line.limit].push(x1, y1, x2, y2);
+            linesByLimit[line.limit].push(
+                line.x1 * spacing + centerOffset, 
+                line.y1 * spacing + centerOffset, 
+                line.x2 * spacing + centerOffset, 
+                line.y2 * spacing + centerOffset
+            );
         }
 
         ctx.lineCap = 'round';
@@ -150,9 +139,6 @@ export class LatticeRenderer {
         for (const node of data.nodes) {
             const x = node.x * spacing + centerOffset;
             const y = node.y * spacing + centerOffset;
-            
-            if (x < cullLeft || x > cullRight || y < cullTop || y > cullBottom) continue;
-
             const cTop = isJIOverride ? '#fff' : (settings.colors[node.limitTop] || '#666');
             const cBottom = isJIOverride ? '#eee' : (settings.colors[node.limitBottom] || '#666');
             const topVis = settings.limitVisuals?.[node.limitTop] || { size: 1, opacity: 1 };
@@ -213,7 +199,7 @@ export class LatticeRenderer {
     private renderDynamic(bgCanvas: HTMLCanvasElement, activeCanvas: HTMLCanvasElement, state: RenderState) {
         const { 
             data, settings, visualLatchedNodes, activeLines, brightenedLines, 
-            activeCursors, cursorPositions, effectiveScale, centerOffset, view, time, latchMode 
+            activeCursors, cursorPositions, effectiveScale, dynamicSize, view, time, latchMode 
         } = state;
 
         if (this.cachedDataNodes !== data.nodes) {
@@ -228,26 +214,27 @@ export class LatticeRenderer {
         const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
         const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2.0);
 
-        if (bgCanvas.width !== view.w * dpr || bgCanvas.height !== view.h * dpr) {
-            bgCanvas.width = view.w * dpr;
-            bgCanvas.height = view.h * dpr;
-            activeCanvas.width = view.w * dpr;
-            activeCanvas.height = view.h * dpr;
+        if (bgCanvas.width !== dynamicSize * dpr || bgCanvas.height !== dynamicSize * dpr) {
+            bgCanvas.width = dynamicSize * dpr;
+            bgCanvas.height = dynamicSize * dpr;
+            activeCanvas.width = dynamicSize * dpr;
+            activeCanvas.height = dynamicSize * dpr;
+            bgCtx.scale(dpr, dpr);
+            activeCtx.scale(dpr, dpr);
         }
-        
-        bgCtx.setTransform(1, 0, 0, 1, 0, 0);
-        activeCtx.setTransform(1, 0, 0, 1, 0, 0);
 
-        // Clear only viewport
-        bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
-        activeCtx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+        // Clear active areas
+        bgCtx.clearRect(view.x, view.y, view.w, view.h);
+        activeCtx.clearRect(view.x, view.y, view.w, view.h);
 
-        // Transform
-        bgCtx.scale(dpr, dpr);
-        activeCtx.scale(dpr, dpr);
-        bgCtx.translate(-view.x, -view.y);
-        activeCtx.translate(-view.x, -view.y);
+        // Optimization: Culling
+        const viewPad = 100;
+        const leftBound = view.x - viewPad;
+        const rightBound = view.x + view.w + viewPad;
+        const topBound = view.y - viewPad;
+        const bottomBound = view.y + view.h + viewPad;
 
+        const centerOffset = dynamicSize / 2;
         const spacing = settings.buttonSpacingScale * effectiveScale;
         const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
         const isDiamond = settings.buttonShape === ButtonShape.DIAMOND;
@@ -257,16 +244,10 @@ export class LatticeRenderer {
         const rawPhase = (time * 0.001 * animationSpeed);
         const flowPhase = settings.voiceLeadingReverseDir ? (1.0 - (rawPhase % 1.0)) : (rawPhase % 1.0);
 
-        const cullPad = 200;
-        const cullLeft = view.x - cullPad;
-        const cullRight = view.x + view.w + cullPad;
-        const cullTop = view.y - cullPad;
-        const cullBottom = view.y + view.h + cullPad;
-
         bgCtx.lineCap = 'round';
         activeCtx.lineCap = 'round';
 
-        // 1. Draw Brightened Lines
+        // 1. Draw Brightened Lines (Background Canvas)
         if (brightenedLines.length > 0) {
             bgCtx.setLineDash([]);
             for (const line of brightenedLines) {
@@ -274,8 +255,7 @@ export class LatticeRenderer {
                 const y1 = line.y1 * spacing + centerOffset;
                 const x2 = line.x2 * spacing + centerOffset;
                 const y2 = line.y2 * spacing + centerOffset;
-                
-                if (Math.max(x1, x2) < cullLeft || Math.min(x1, x2) > cullRight || Math.max(y1, y2) < cullTop || Math.min(y1, y2) > cullBottom) continue;
+                if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
                 
                 const limitColor = isJIOverride ? '#fff' : (settings.colors[line.limit] || '#666');
                 bgCtx.beginPath();
@@ -288,14 +268,14 @@ export class LatticeRenderer {
             }
         }
 
-        // 2. Draw Active Lines
+        // 2. Draw Active Lines (Voice Leading) (Background Canvas)
         bgCtx.setLineDash([]); 
         for (const line of activeLines) {
             const x1 = line.x1 * spacing + centerOffset;
             const y1 = line.y1 * spacing + centerOffset;
             const x2 = line.x2 * spacing + centerOffset;
             const y2 = line.y2 * spacing + centerOffset;
-            if (Math.max(x1, x2) < cullLeft || Math.min(x1, x2) > cullRight || Math.max(y1, y2) < cullTop || Math.min(y1, y2) > cullBottom) continue;
+            if (Math.max(x1, x2) < leftBound || Math.min(x1, x2) > rightBound || Math.max(y1, y2) < topBound || Math.min(y1, y2) > bottomBound) continue;
             
             const limitColor = isJIOverride ? '#fff' : (settings.colors[line.limit] || '#666');
             bgCtx.beginPath();
@@ -329,15 +309,14 @@ export class LatticeRenderer {
             }
         }
 
-        // 3. Draw Active Nodes
+        // 3. Draw Active Nodes with Concentric Rings
         for (const [id, activations] of visualLatchedNodes.entries()) {
              const node = this.cachedNodeMap.get(id);
              if (!node) continue;
              
              const x = node.x * spacing + centerOffset;
              const y = node.y * spacing + centerOffset;
-             
-             if (x < cullLeft || x > cullRight || y < cullTop || y > cullBottom) continue;
+             if (x < leftBound || x > rightBound || y < topBound || y > bottomBound) continue;
              
              const cTop = isJIOverride ? '#fff' : (settings.colors[node.limitTop] || '#666');
              const vis = settings.limitVisuals?.[node.limitTop] || { size: 1 };
@@ -345,6 +324,7 @@ export class LatticeRenderer {
              const zoomScale = settings.latchedZoomScale;
              const baseRad = baseRadius * limitScale * zoomScale;
              
+             // Base Fill
              activeCtx.globalAlpha = 1.0; 
              activeCtx.beginPath();
              if (isDiamond) {
@@ -367,6 +347,7 @@ export class LatticeRenderer {
              }
              activeCtx.fill();
 
+             // Concentric Rings for Active Modes
              const uniqueModes = new Set<number>();
              activations.forEach(a => uniqueModes.add(a.mode));
              
@@ -379,6 +360,7 @@ export class LatticeRenderer {
              
              sortedModes.forEach((mode, index) => {
                  const color = MODE_COLORS[mode as keyof typeof MODE_COLORS] || '#ffffff';
+                 // Offset starts slightly outside the node
                  const currentRadius = baseRad + ringGap + (index * (ringWidth + ringGap));
                  
                  activeCtx.beginPath();
@@ -396,12 +378,14 @@ export class LatticeRenderer {
                  activeCtx.lineWidth = ringWidth;
                  activeCtx.globalAlpha = 0.8;
                  
+                 // Add glow for active rings
                  activeCtx.shadowBlur = 8 * effectiveScale;
                  activeCtx.shadowColor = color;
                  activeCtx.stroke();
                  activeCtx.shadowBlur = 0;
              });
 
+             // Label Redraw (on top of fill)
              const combinedScale = settings.buttonSizeScale * limitScale * zoomScale;
              if (combinedScale > 0.4) {
                 activeCtx.fillStyle = isJIOverride ? '#000' : 'white';
@@ -423,7 +407,7 @@ export class LatticeRenderer {
              }
         }
 
-        // 4. Draw Cursors
+        // 4. Draw Cursors / Pitch Bend Lines (Active Canvas)
         if (settings.isPitchBendEnabled && latchMode !== 3) {
             activeCursors.forEach(c => {
                 if (c.originNodeId) { 
@@ -433,13 +417,6 @@ export class LatticeRenderer {
                          const ny = node.y * spacing + centerOffset;
                          const pos = cursorPositions.get(c.pointerId);
                          if (!pos) return;
-                         // cursorPositions stores world coordinates (relative to scroll container)
-                         // We need to apply scroll translation to it to draw on viewport canvas? 
-                         // No, cursorPositions in TonalityDiamond are calculated as:
-                         // x = viewportX + scrollLeft.
-                         // Render translate = -scrollLeft.
-                         // So drawing at (x,y) draws at viewportX. Correct.
-                         
                          const cx = pos.x;
                          const cy = pos.y;
                          

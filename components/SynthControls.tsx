@@ -100,7 +100,7 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
           case 'normal': return 'STRINGS';
           case 'latch': return 'DRONE';
           case 'strum': return 'PLUCKED';
-          case 'brass': return 'BRASS';
+          case 'brass': return 'VOICE';
           case 'arpeggio': return 'ARP';
           default: return mode;
       }
