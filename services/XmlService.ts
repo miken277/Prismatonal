@@ -1,3 +1,4 @@
+
 import { StoreState } from '../types';
 
 export class XmlService {
@@ -5,9 +6,16 @@ export class XmlService {
     static exportState(state: StoreState): string {
         const { settings, presets, userBank } = state;
         
+        // Clone settings to strip heavy background data
+        const settingsForExport = { ...settings };
+        
+        // Exclude background presets and active background image data from export
+        // to keep file size manageable and allow for separate distribution of assets.
+        settingsForExport.backgroundPresets = [];
+        settingsForExport.backgroundImageData = null;
+        
         // Wrap large data structures in CDATA for safe XML inclusion of JSON
-        // Ensure all critical data (Settings including Chords/Arps, Presets, UserBank) is captured.
-        const settingsJson = JSON.stringify(settings);
+        const settingsJson = JSON.stringify(settingsForExport);
         const presetsJson = JSON.stringify(presets);
         const userBankJson = JSON.stringify(userBank);
 
@@ -43,7 +51,11 @@ export class XmlService {
                     const partialState: Partial<StoreState> = {};
 
                     if (settingsNode && settingsNode.textContent) {
-                        partialState.settings = JSON.parse(settingsNode.textContent);
+                        const parsedSettings = JSON.parse(settingsNode.textContent);
+                        // If imported settings have empty backgrounds (due to export logic), 
+                        // we might want to preserve existing ones or handle it gracefully.
+                        // For now, we assume import overrides settings logic handled in Store.ts migration.
+                        partialState.settings = parsedSettings;
                     }
 
                     if (presetsNode && presetsNode.textContent) {

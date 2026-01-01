@@ -22,7 +22,10 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
   const [midiDevices, setMidiDevices] = useState<MidiDevice[]>([]);
   const { exportXML, importXML } = useStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const bgImageInputRef = useRef<HTMLInputElement>(null);
+  
+  // Background Management Refs
+  const bgPresetInputRef = useRef<HTMLInputElement>(null);
+  const [targetSlotId, setTargetSlotId] = useState<string | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
 
   useEffect(() => {
@@ -109,27 +112,73 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
       });
   };
 
-  const handleBackgroundImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Trigger file dialog for a specific slot
+  const requestUploadForSlot = (id: string) => {
+      setTargetSlotId(id);
+      bgPresetInputRef.current?.click();
+  };
+
+  // Handle file selection
+  const handlePresetImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (file && targetSlotId) {
       try {
           setIsProcessingImage(true);
           const base64 = await processImageFile(file);
           
-          // Apply changes
+          // Update the preset in settings
+          const newPresets = settings.backgroundPresets.map(p => {
+              if (p.id === targetSlotId) {
+                  return { ...p, data: base64 };
+              }
+              return p;
+          });
+
+          // Also set as active if it was just uploaded
           handleUpdate({
+              backgroundPresets: newPresets,
               backgroundImageData: base64,
               backgroundMode: 'image'
           });
           
       } catch (err) {
           console.error("Image processing failed:", err);
-          alert("Failed to process image. Try a smaller file.");
+          alert("Failed to process image.");
       } finally {
           setIsProcessingImage(false);
-          if (bgImageInputRef.current) bgImageInputRef.current.value = '';
+          setTargetSlotId(null);
+          if (bgPresetInputRef.current) bgPresetInputRef.current.value = '';
       }
     }
+  };
+
+  const updatePresetName = (id: string, newName: string) => {
+      const newPresets = settings.backgroundPresets.map(p => {
+          if (p.id === id) return { ...p, name: newName };
+          return p;
+      });
+      handleUpdate({ backgroundPresets: newPresets });
+  };
+
+  const clearPresetSlot = (id: string) => {
+      if (window.confirm("Clear this background slot?")) {
+          const newPresets = settings.backgroundPresets.map(p => {
+              if (p.id === id) return { ...p, data: null, name: 'Empty Slot' };
+              return p;
+          });
+          handleUpdate({ backgroundPresets: newPresets });
+      }
+  };
+
+  const handleDeveloperExport = () => {
+      const json = JSON.stringify(settings.backgroundPresets, null, 2);
+      navigator.clipboard.writeText(json).then(() => {
+          alert("Background Config Copied to Clipboard!\n\nPaste this into 'constants.ts' to persist these images in the source code.");
+      }).catch(err => {
+          console.error('Failed to copy', err);
+          console.log(json);
+          alert("Failed to copy to clipboard. Config dumped to console.");
+      });
   };
 
   return (
@@ -247,11 +296,11 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                     <h3 className="font-semibold text-pink-400 border-b border-slate-700 pb-1">Background</h3>
                     
                     <div className="bg-slate-900/40 p-4 rounded border border-slate-700/50 space-y-6">
-                        {/* Mode Selector */}
+                        {/* Mode Selector - Reordered: Image First */}
                         <div>
                             <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Background Mode</label>
                             <div className="flex bg-slate-800 rounded p-1 border border-slate-600">
-                                {(['solid', 'gradient', 'image'] as BackgroundMode[]).map(mode => (
+                                {(['image', 'solid', 'gradient'] as BackgroundMode[]).map(mode => (
                                     <button 
                                         key={mode} 
                                         onClick={() => handleChange('backgroundMode', mode)} 
@@ -310,54 +359,106 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         {/* IMAGE Mode Controls */}
                         {settings.backgroundMode === 'image' && (
                             <div className="animate-in fade-in space-y-4">
+                                
+                                {/* Hidden input for preset uploads */}
+                                <input type="file" ref={bgPresetInputRef} className="hidden" accept="image/*" onChange={handlePresetImageUpload} />
+
                                 <div>
-                                    <label className="block text-[10px] text-slate-500 font-bold mb-2 uppercase">Preset Backgrounds</label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {DEFAULT_BACKGROUNDS.map((bg, idx) => (
-                                            <button 
-                                                key={idx}
-                                                onClick={() => {
-                                                    handleUpdate({ 
-                                                        backgroundImageData: bg.data,
-                                                        backgroundMode: 'image'
-                                                    });
-                                                }}
-                                                className={`relative h-20 rounded overflow-hidden border-2 transition-all group ${settings.backgroundImageData === bg.data ? 'border-indigo-500 shadow-lg' : 'border-slate-700 hover:border-slate-500'}`}
-                                            >
-                                                <div 
-                                                    className="absolute inset-0" 
-                                                    style={{ 
-                                                        backgroundImage: `url("${bg.data}")`, 
-                                                        backgroundSize: 'cover',
-                                                        backgroundPosition: 'center'
-                                                    }}
-                                                />
-                                                <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors" />
-                                                <span className="absolute bottom-1 left-2 text-[10px] font-bold text-white text-shadow">{bg.name}</span>
-                                                {settings.backgroundImageData === bg.data && (
-                                                    <div className="absolute top-1 right-1 bg-indigo-600 rounded-full p-0.5">
-                                                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                                                    </div>
-                                                )}
-                                            </button>
-                                        ))}
+                                    <div className="flex justify-between items-end mb-2">
+                                        <label className="block text-[10px] text-slate-500 font-bold uppercase">Background Library</label>
+                                        <button 
+                                            onClick={handleDeveloperExport}
+                                            className="text-[9px] font-bold text-indigo-400 hover:text-white bg-indigo-900/30 hover:bg-indigo-600 px-2 py-0.5 rounded border border-indigo-500/30 transition-colors"
+                                            title="Export current background presets as JSON for source code persistence"
+                                        >
+                                            Copy Config
+                                        </button>
                                     </div>
+                                    <div className="grid grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-1">
+                                        {(settings.backgroundPresets && settings.backgroundPresets.length > 0 ? settings.backgroundPresets : DEFAULT_BACKGROUNDS).map((bg, idx) => {
+                                            const isActive = settings.backgroundImageData === bg.data && bg.data !== null;
+                                            const isEmpty = !bg.data;
+                                            
+                                            return (
+                                                <div key={bg.id || idx} className={`relative flex flex-col bg-slate-800 rounded border transition-all group ${isActive ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 hover:border-slate-500'}`}>
+                                                    
+                                                    {/* Image Area */}
+                                                    <div 
+                                                        className="h-24 w-full relative bg-slate-900 cursor-pointer overflow-hidden rounded-t"
+                                                        onClick={() => {
+                                                            if (!isEmpty) {
+                                                                handleUpdate({ 
+                                                                    backgroundImageData: bg.data,
+                                                                    backgroundMode: 'image'
+                                                                });
+                                                            } else {
+                                                                requestUploadForSlot(bg.id);
+                                                            }
+                                                        }}
+                                                    >
+                                                        {isEmpty ? (
+                                                            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600 group-hover:text-slate-400 transition-colors">
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                                                <span className="text-[9px] font-bold uppercase">Upload</span>
+                                                            </div>
+                                                        ) : (
+                                                            <div 
+                                                                className="absolute inset-0 transition-transform group-hover:scale-105 duration-500" 
+                                                                style={{ 
+                                                                    backgroundImage: `url("${bg.data}")`, 
+                                                                    backgroundSize: 'cover',
+                                                                    backgroundPosition: 'center'
+                                                                }}
+                                                            />
+                                                        )}
+                                                        
+                                                        {/* Hover Overlay Controls */}
+                                                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                                            <button 
+                                                                onClick={(e) => { e.stopPropagation(); requestUploadForSlot(bg.id); }}
+                                                                className="p-1.5 bg-slate-700 hover:bg-blue-600 text-white rounded-full transition-colors shadow-lg border border-white/20"
+                                                                title="Replace Image"
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                                                            </button>
+                                                            {!isEmpty && (
+                                                                <button 
+                                                                    onClick={(e) => { e.stopPropagation(); clearPresetSlot(bg.id); }}
+                                                                    className="p-1.5 bg-slate-700 hover:bg-red-600 text-white rounded-full transition-colors shadow-lg border border-white/20"
+                                                                    title="Clear Slot"
+                                                                >
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                                                </button>
+                                                            )}
+                                                        </div>
+
+                                                        {isActive && (
+                                                            <div className="absolute top-1 right-1 bg-indigo-600 rounded-full p-0.5 shadow border border-white/30 z-10">
+                                                                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Name Input */}
+                                                    <div className="p-1.5 bg-slate-800/80 border-t border-slate-700">
+                                                        <input 
+                                                            type="text" 
+                                                            value={bg.name}
+                                                            onChange={(e) => updatePresetName(bg.id, e.target.value)}
+                                                            className="w-full bg-transparent text-[10px] text-center font-bold text-slate-300 focus:text-white focus:outline-none border-b border-transparent focus:border-slate-500 placeholder-slate-600"
+                                                            placeholder="Name..."
+                                                        />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <p className="text-[9px] text-slate-500 mt-2 italic text-center">
+                                        Images are auto-resized to 1080p max. Library is local to this browser.
+                                    </p>
                                 </div>
 
-                                <div className="space-y-2 border-t border-slate-700 pt-4">
-                                    <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">Custom Image</label>
-                                    <input type="file" ref={bgImageInputRef} className="hidden" accept="image/*" onChange={handleBackgroundImageUpload} />
-                                    <button 
-                                        onClick={() => bgImageInputRef.current?.click()} 
-                                        disabled={isProcessingImage}
-                                        className={`w-full py-2 text-xs font-bold rounded border transition text-white ${isProcessingImage ? 'bg-slate-600 border-slate-500 cursor-wait' : 'bg-slate-700 hover:bg-slate-600 border-slate-600'}`}
-                                    >
-                                        {isProcessingImage ? 'Processing...' : 'Upload File'}
-                                    </button>
-                                    <p className="text-[9px] text-slate-500">Images are auto-resized/compressed to fit browser storage.</p>
-                                </div>
-
-                                <div className="space-y-1">
+                                <div className="space-y-1 pt-4 border-t border-slate-700">
                                     <label className="flex justify-between text-xs text-slate-300"><span>Gamma / Brightness</span> <span>{settings.bgImageGamma.toFixed(2)}</span></label>
                                     <input type="range" min="0.1" max="2.0" step="0.05" value={settings.bgImageGamma} onChange={(e) => handleChange('bgImageGamma', parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer" />
                                 </div>

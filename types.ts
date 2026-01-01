@@ -1,5 +1,4 @@
 
-
 export enum LimitType {
   LIMIT_2 = 2,
   LIMIT_3 = 3,
@@ -143,6 +142,12 @@ export interface KeyMappings {
     spatialScaleDown: string;
 }
 
+export interface BackgroundPreset {
+  id: string;
+  name: string;
+  data: string | null; // Base64 or null if empty
+}
+
 export interface AppSettings {
   // Global Tuning
   tuningSystem: TuningSystem;
@@ -242,6 +247,7 @@ export interface AppSettings {
 
   // --- Visuals - Background ---
   backgroundMode: BackgroundMode;
+  backgroundPresets: BackgroundPreset[];
   
   // Solid
   solidColor: string; // Hex color for solid background

@@ -1,5 +1,5 @@
 
-import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, ReverbType, ArpeggioDefinition, KeyMappings } from './types';
+import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, ReverbType, ArpeggioDefinition, KeyMappings, BackgroundPreset } from './types';
 
 export const DEFAULT_COLORS: LimitColorMap = {
   1: '#EF4444', // Red (Unity)
@@ -150,15 +150,35 @@ const COSMIC_SVG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My
 // 2. Neural Grid: Connected nodes on a dark background
 const NEURAL_SVG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMDAnIGhlaWdodD0nMTAwJyB2aWV3Qm94PScwIDAgMTAwIDEwMCc+PHJlY3Qgd2lkdGg9JzEwMCcgaGVpZ2h0PScxMDAnIGZpbGw9JyMwZjE3MmEnLz48cGF0aCBkPSdNMCA1MCBMMTAwIDUwIE01MCAwIEw1MCAxMDAnIHN0cm9rZT0nIzM4YmRmOCcgc3Ryb2tlLXdpZHRoPScxJyBvcGFjaXR5PScwLjInLz48Y2lyY2xlIGN4PSc1MCcgY3k9JzUwJyByPScyJyBmaWxsPScjMzhiZGY4JyBvcGFjaXR5PScwLjUnLz48L3N2Zz4=";
 
-export const DEFAULT_BACKGROUNDS = [
+/**
+ * === BACKGROUND PRESETS CONFIGURATION ===
+ * 
+ * To persist your custom backgrounds in the source code:
+ * 1. Upload and name your backgrounds in the App (Settings -> Visuals).
+ * 2. Click the "Copy Config" button above the background grid.
+ * 3. Paste the copied JSON array below, replacing the existing DEFAULT_BACKGROUNDS array.
+ * 
+ * Alternatively, place images in your project's 'public' folder and reference them by path:
+ * { id: 'my-bg-1', name: 'My Background', data: '/backgrounds/space.jpg' }
+ */
+export const DEFAULT_BACKGROUNDS: BackgroundPreset[] = [
     {
+        id: 'default-1',
         name: 'Cosmic Geometry',
         data: COSMIC_SVG
     },
     {
+        id: 'default-2',
         name: 'Neural Grid',
         data: NEURAL_SVG
-    }
+    },
+    // User Slots (Empty by default)
+    { id: 'user-1', name: 'User Slot 1', data: null },
+    { id: 'user-2', name: 'User Slot 2', data: null },
+    { id: 'user-3', name: 'User Slot 3', data: null },
+    { id: 'user-4', name: 'User Slot 4', data: null },
+    { id: 'user-5', name: 'User Slot 5', data: null },
+    { id: 'user-6', name: 'User Slot 6', data: null },
 ];
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -212,6 +232,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   
   // Background & Overlay
   backgroundMode: 'image', // Updated Default
+  backgroundPresets: DEFAULT_BACKGROUNDS,
   solidColor: '#0f172a', // Default dark slate
   gradientColorStart: '#0f172a',
   gradientColorEnd: '#1e1b4b', // Deep indigo
@@ -393,16 +414,33 @@ const PLUCKED_PATCHES = [
 ];
 
 const STRINGS_PATCHES = [
-    p("Solo Violin", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 5, lfoDelay: 0.3 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 4, gain: 0.4, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.2, filterCutoff: 800 }, { spread: 0.3, reverbType: 'hall', reverbMix: 0.4, compressorThreshold: -15, portamento: 0.2 }),
+    // Solo Violin - Improved
+    p("Solo Violin", "Strings",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.7, attack: 0.25, decay: 1.5, sustain: 0.9, release: 0.4, filterCutoff: 2800, filterResonance: 1.5, lfoTarget: 'pitch', lfoRate: 6.0, lfoDepth: 8, lfoDelay: 0.5 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 5, gain: 0.4, attack: 0.3, decay: 1.5, sustain: 0.9, release: 0.4, filterCutoff: 3000 },
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 0, fineDetune: -5, gain: 0.2, attack: 0.2, sustain: 0.8, filterCutoff: 2000 },
+        { spread: 0.2, reverbType: 'hall', reverbMix: 0.3, portamento: 0.15 }
+    ),
     p("Cello Section", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.5, attack: 0.4, release: 0.8, filterCutoff: 1000 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1205, gain: 0.4, attack: 0.5, release: 0.9, filterCutoff: 800 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1195, gain: 0.4, attack: 0.4, release: 0.8 }, { spread: 0.6, reverbType: 'hall', reverbMix: 0.6 }),
-    p("Pizzicato", "Strings", { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.8, attack: 0.01, decay: 0.25, sustain: 0, release: 0.25 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.3, attack: 0.01, decay: 0.2, sustain: 0 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.2, attack: 0.02, decay: 0.15, sustain: 0, filterCutoff: 1200 }, { spread: 0.4, reverbType: 'room', reverbMix: 0.2 }),
     p("Tremolo Strings", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.2, sustain: 0.8, lfoTarget: 'tremolo', lfoRate: 6, lfoDepth: 40 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 5, gain: 0.5, attack: 0.25, sustain: 0.8, lfoTarget: 'tremolo', lfoRate: 6.2, lfoDepth: 40 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.3 }, { spread: 0.7, reverbType: 'hall', reverbMix: 0.5 }),
-    p("Synth Strings 80s", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 0.5, release: 1.0, fineDetune: -8 }, { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 0.5, release: 1.0, fineDetune: 8 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, gain: 0.1, attack: 0.5, release: 1.0, filterCutoff: 4000 }, { spread: 0.8, stereoPanSpeed: 0.2, stereoPanDepth: 0.3, reverbType: 'plate', reverbMix: 0.6 }),
     p("Cinematic Swell", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 1.5, decay: 2.0, sustain: 1.0, release: 2.0, filterCutoff: 600, lfoTarget: 'filter', lfoRate: 0.1, lfoDepth: 60 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 7, gain: 0.4, attack: 1.8, release: 2.5 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.4, attack: 1.0, release: 3.0 }, { spread: 0.9, reverbType: 'cathedral', reverbMix: 0.8 }),
-    p("Chamber Quartet", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.3, decay: 0.5, sustain: 0.7, filterCutoff: 1500 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 3, gain: 0.4, attack: 0.35, sustain: 0.7 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -5, gain: 0.2, filterCutoff: 1000 }, { spread: 0.5, reverbType: 'room', reverbMix: 0.35 })
+    // Chamber Quartet - Improved
+    p("Chamber Quartet", "Strings",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.5, decay: 1.0, sustain: 0.9, release: 1.2, filterCutoff: 2200 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 12, gain: 0.4, attack: 0.6, sustain: 0.9, release: 1.5 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: -12, gain: 0.4, attack: 0.7, sustain: 0.9, release: 1.5 },
+        { spread: 0.7, reverbType: 'hall', reverbMix: 0.5, delayMix: 0.2, stereoPanSpeed: 0.1, stereoPanDepth: 0.2 }
+    )
 ];
 
 const ATMOSPHERE_PATCHES = [
+    // Bagpipe (Relocated and Tuned for Drone)
+    p("Bagpipe", "Drone",
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.05, decay: 0.1, sustain: 1.0, release: 0.2, fineDetune: -10, filterCutoff: 3000, filterResonance: 2.0 }, // Bright Chanter 1
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.05, decay: 0.1, sustain: 1.0, release: 0.2, fineDetune: 10, filterCutoff: 3000, filterResonance: 1.5 }, // Bright Chanter 2
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.6, attack: 0.1, sustain: 1.0, release: 0.5, filterCutoff: 800 }, // Drone
+        { spread: 0.4, reverbType: 'plate', reverbMix: 0.3, compressorThreshold: -10 }
+    ),
     p("Wind Chimes", "Atmosphere", { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.5, attack: 0.01, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 5, lfoDepth: 100 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3102, gain: 0.4, attack: 0.05, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 7, lfoDepth: 100 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, gain: 0.3, attack: 0.02, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 3, lfoDepth: 100 }, { spread: 0.9, reverbType: 'shimmer', reverbMix: 0.85, delayMix: 0.5, delayTime: 0.33, delayFeedback: 0.6 }),
     p("Dark Drone", "Atmosphere", { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2400, gain: 0.5, filterCutoff: 150, filterResonance: 10, lfoTarget: 'filter', lfoRate: 0.05, lfoDepth: 40 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.4, filterCutoff: 200, filterResonance: 8, lfoTarget: 'filter', lfoRate: 0.07, lfoDepth: 30 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2405, gain: 0.3, filterCutoff: 100 }, { spread: 0.7, reverbType: 'cathedral', reverbMix: 0.9, compressorThreshold: -25 }),
     p("Swamp", "Atmosphere", { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.6, lfoTarget: 'pitch', lfoRate: 6, lfoDepth: 20, filterCutoff: 600 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.4, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 15 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, filterCutoff: 400 }, { spread: 0.6, reverbType: 'plate', reverbMix: 0.6 }),
