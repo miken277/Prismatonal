@@ -1,7 +1,7 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { AppSettings, ButtonShape, BackgroundMode } from '../types';
-import { DEFAULT_COLORS } from '../constants';
+import { DEFAULT_COLORS, DEFAULT_BACKGROUNDS } from '../constants';
 import { midiService, MidiDevice } from '../services/MidiService';
 import { useStore } from '../services/Store'; 
 import TonalityTab from './settings/TonalityTab';
@@ -70,7 +70,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
               URL.revokeObjectURL(url);
               const canvas = document.createElement('canvas');
               
-              // Resize logic: Max 1920px width or height to save space
+              // Smart Resize: Limit largest dimension to 1920px to save space
               const MAX_DIM = 1920;
               let width = img.width;
               let height = img.height;
@@ -92,7 +92,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
               
               if (ctx) {
                   ctx.drawImage(img, 0, 0, width, height);
-                  // Compress to JPEG at 0.7 quality to ensure it fits in LocalStorage
+                  // Compress to JPEG 0.7 for optimal storage size
                   const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
                   resolve(dataUrl);
               } else {
@@ -124,7 +124,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
           
       } catch (err) {
           console.error("Image processing failed:", err);
-          alert("Failed to process image. Please try a smaller file.");
+          alert("Failed to process image. Try a smaller file.");
       } finally {
           setIsProcessingImage(false);
           if (bgImageInputRef.current) bgImageInputRef.current.value = '';
@@ -310,17 +310,51 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                         {/* IMAGE Mode Controls */}
                         {settings.backgroundMode === 'image' && (
                             <div className="animate-in fade-in space-y-4">
-                                <div className="space-y-2">
+                                <div>
+                                    <label className="block text-[10px] text-slate-500 font-bold mb-2 uppercase">Preset Backgrounds</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {DEFAULT_BACKGROUNDS.map((bg, idx) => (
+                                            <button 
+                                                key={idx}
+                                                onClick={() => {
+                                                    handleUpdate({ 
+                                                        backgroundImageData: bg.data,
+                                                        backgroundMode: 'image'
+                                                    });
+                                                }}
+                                                className={`relative h-20 rounded overflow-hidden border-2 transition-all group ${settings.backgroundImageData === bg.data ? 'border-indigo-500 shadow-lg' : 'border-slate-700 hover:border-slate-500'}`}
+                                            >
+                                                <div 
+                                                    className="absolute inset-0" 
+                                                    style={{ 
+                                                        backgroundImage: `url("${bg.data}")`, 
+                                                        backgroundSize: 'cover',
+                                                        backgroundPosition: 'center'
+                                                    }}
+                                                />
+                                                <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors" />
+                                                <span className="absolute bottom-1 left-2 text-[10px] font-bold text-white text-shadow">{bg.name}</span>
+                                                {settings.backgroundImageData === bg.data && (
+                                                    <div className="absolute top-1 right-1 bg-indigo-600 rounded-full p-0.5">
+                                                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                    </div>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2 border-t border-slate-700 pt-4">
                                     <label className="block text-[10px] text-slate-500 font-bold mb-1 uppercase">Custom Image</label>
                                     <input type="file" ref={bgImageInputRef} className="hidden" accept="image/*" onChange={handleBackgroundImageUpload} />
                                     <button 
                                         onClick={() => bgImageInputRef.current?.click()} 
                                         disabled={isProcessingImage}
-                                        className={`w-full py-2 text-xs font-bold rounded border transition text-white ${isProcessingImage ? 'bg-slate-600 border-slate-500 cursor-wait' : 'bg-indigo-700 hover:bg-indigo-600 border-indigo-500'}`}
+                                        className={`w-full py-2 text-xs font-bold rounded border transition text-white ${isProcessingImage ? 'bg-slate-600 border-slate-500 cursor-wait' : 'bg-slate-700 hover:bg-slate-600 border-slate-600'}`}
                                     >
-                                        {isProcessingImage ? 'Processing...' : 'Select File'}
+                                        {isProcessingImage ? 'Processing...' : 'Upload File'}
                                     </button>
-                                    <p className="text-[9px] text-slate-500">Images are auto-resized to 1920px max for performance.</p>
+                                    <p className="text-[9px] text-slate-500">Images are auto-resized/compressed to fit browser storage.</p>
                                 </div>
 
                                 <div className="space-y-1">
