@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDivision, ArpeggioStep, PresetState, PlayMode, SynthPreset } from '../types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
@@ -213,10 +212,6 @@ const FloatingControls: React.FC<Props> = ({
       touchAction: 'none' as React.CSSProperties['touchAction'],
   });
 
-  const isPluckedActive = latchMode === 3;
-  const isBendLocked = isPluckedActive;
-  const isSustainLocked = isPluckedActive;
-
   const labelStyle = { 
       fontSize: 20 * uiScale, 
       width: 120 * uiScale,
@@ -346,20 +341,18 @@ const FloatingControls: React.FC<Props> = ({
       
       {/* Bend */}
       <button 
-        disabled={isBendLocked}
-        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isBendEnabled ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''} ${isBendLocked ? 'opacity-40 cursor-not-allowed grayscale' : ''}`} 
+        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isBendEnabled ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} 
         style={{ ...draggableStyle('bend'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} 
-        onPointerDown={(e) => !isBendLocked && handleButtonPress(e, 'bend', onBend)}
+        onPointerDown={(e) => handleButtonPress(e, 'bend', onBend)}
       >
         BEND
       </button>
 
       {/* Sust */}
       <button 
-        disabled={isSustainLocked}
-        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${sustColorClass} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''} ${isSustainLocked ? 'opacity-40 cursor-not-allowed grayscale' : ''}`} 
+        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${sustColorClass} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} 
         style={{ ...draggableStyle('sust'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} 
-        onPointerDown={(e) => !isSustainLocked && handleButtonPress(e, 'sust', onSustainToggle)} 
+        onPointerDown={(e) => handleButtonPress(e, 'sust', onSustainToggle)} 
         title="Sustain Notes"
       >
         SUST

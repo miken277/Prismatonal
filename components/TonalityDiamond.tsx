@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType, SynthPreset } from '../types';
 import { generateLattice } from '../services/LatticeService';
@@ -220,9 +219,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       audioLatchedNodes.forEach((v, k) => visual.set(k, [...v]));
 
       activeCursors.forEach(cursor => {
-          const isSustainingInstrument = latchMode === 1 || latchMode === 2 || latchMode === 4;
+          const isSustainingInstrument = latchMode >= 1; // All instruments can now sustain
           const isSustainActive = isCurrentSustainEnabled;
-          const isBendEnabled = settings.isPitchBendEnabled && latchMode !== 3; 
+          const isBendEnabled = settings.isPitchBendEnabled;
           
           const isHybridMode = isSustainingInstrument && isSustainActive && isBendEnabled;
           if (isHybridMode) return; 
@@ -589,7 +588,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       switch(mode) {
           case 1: return { preset: 'latch', playback: isStrumEnabled ? 'trigger' : 'gate' };
           case 2: return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
-          case 3: return { preset: 'strum', playback: 'trigger' };
+          case 3: return { preset: 'strum', playback: isStrumEnabled ? 'trigger' : 'gate' };
           case 4: return { preset: 'brass', playback: isStrumEnabled ? 'trigger' : 'gate' };
           default: return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
       }
@@ -622,9 +621,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             onNodeTrigger(hitNode.id, hitNode.ratio, hitNode.n, hitNode.d, hitNode.maxPrime);
         }
 
-        const isSustainingInstrument = latchMode === 1 || latchMode === 2 || latchMode === 4;
+        const isSustainingInstrument = latchMode >= 1;
         const isSustainActive = isCurrentSustainEnabled;
-        const isBendEnabled = settings.isPitchBendEnabled && latchMode !== 3; 
+        const isBendEnabled = settings.isPitchBendEnabled; 
 
         if (isSustainingInstrument && isSustainActive) {
              setPersistentLatches((prev: Map<string, Map<number, number>>) => {
@@ -643,7 +642,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              });
         }
 
-        if (isBendEnabled || !isSustainActive || latchMode === 3) {
+        if (isBendEnabled || !isSustainActive) {
              const newCursor: ActiveCursor = {
                 pointerId: e.pointerId,
                 originNodeId: nodeId, 
@@ -718,9 +717,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
     const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
     
-    const isSustainingInstrument = latchMode === 1 || latchMode === 2 || latchMode === 4;
+    const isSustainingInstrument = latchMode >= 1;
     const isSustainActive = isCurrentSustainEnabled;
-    const isBendEnabled = settingsRef.current.isPitchBendEnabled && latchMode !== 3; 
+    const isBendEnabled = settingsRef.current.isPitchBendEnabled; 
     
     const isBending = isBendEnabled && !!cursor.originNodeId;
 
@@ -835,7 +834,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
         const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
         
-        const isBendEnabled = settingsRef.current.isPitchBendEnabled && latchMode !== 3; 
+        const isBendEnabled = settingsRef.current.isPitchBendEnabled; 
 
         if (cursor.originNodeId && isBendEnabled) {
             const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;

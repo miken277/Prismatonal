@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
@@ -307,15 +306,12 @@ const App: React.FC = () => {
       // 3. Restore new mode's sustain state
       let nextSustainState = sustainStates[newMode] ?? false;
       
-      // FORCE RESETs for specific modes if desired defaults
-      if (newMode === 3) nextSustainState = false; // Plucked no sustain
-      // Removed forced reset for Brass (Mode 4) to allow sustain state persistence
+      // DECOUPLED: Do NOT force Bend off or sustain off for any mode.
+      // We respect the user's previous choice or default state for each mode.
 
       updateSettings(prev => ({
           ...prev,
           isSustainEnabled: nextSustainState,
-          // DECOUPLED: Do NOT force Bend off when switching instruments or toggling sustain
-          // We respect the current global bend setting unless explicitly changed
       }));
   };
 

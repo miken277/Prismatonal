@@ -457,23 +457,69 @@ const PLUCKED_PATCHES = [
 ];
 
 const STRINGS_PATCHES = [
-    // Solo Violin - Improved
+    // Solo Violin - Expressive, bowed texture with bite
     p("Solo Violin", "Strings",
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.7, attack: 0.25, decay: 1.5, sustain: 0.9, release: 0.4, filterCutoff: 2800, filterResonance: 1.5, lfoTarget: 'pitch', lfoRate: 6.0, lfoDepth: 8, lfoDelay: 0.5 },
-        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 5, gain: 0.4, attack: 0.3, decay: 1.5, sustain: 0.9, release: 0.4, filterCutoff: 3000 },
-        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 0, fineDetune: -5, gain: 0.2, attack: 0.2, sustain: 0.8, filterCutoff: 2000 },
-        { spread: 0.2, reverbType: 'hall', reverbMix: 0.3, portamento: 0.15 }
+        // Osc 1: Body (Sawtooth, Lowpass)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.8, attack: 0.1, decay: 0.5, sustain: 0.8, release: 0.4, filterCutoff: 2200, lfoTarget: 'pitch', lfoRate: 5.5, lfoDepth: 10, lfoDelay: 0.3 },
+        // Osc 2: Bow Bite (Bandpass Sawtooth + Env Mod)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, coarseDetune: 0, fineDetune: 5, attack: 0.05, decay: 0.2, sustain: 0.4, release: 0.3, filterType: 'bandpass', filterCutoff: 3000, filterResonance: 2.0 },
+        // Osc 3: Sub/Body Resonance
+        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.3, fineDetune: -5, attack: 0.1, sustain: 0.8 },
+        { 
+            spread: 0.2, 
+            reverbType: 'plate', 
+            reverbMix: 0.3, 
+            portamento: 0.15,
+            modMatrix: [
+                { id: 'bow-bite', enabled: true, source: 'env2', target: 'osc2_cutoff', amount: 40 }
+            ]
+        }
     ),
-    p("Cello Section", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.5, attack: 0.4, release: 0.8, filterCutoff: 1000 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1205, gain: 0.4, attack: 0.5, release: 0.9, filterCutoff: 800 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1195, gain: 0.4, attack: 0.4, release: 0.8 }, { spread: 0.6, reverbType: 'hall', reverbMix: 0.6 }),
-    p("Tremolo Strings", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.2, sustain: 0.8, lfoTarget: 'tremolo', lfoRate: 6, lfoDepth: 40 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 5, gain: 0.5, attack: 0.25, sustain: 0.8, lfoTarget: 'tremolo', lfoRate: 6.2, lfoDepth: 40 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.3 }, { spread: 0.7, reverbType: 'hall', reverbMix: 0.5 }),
-    p("Cinematic Swell", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 1.5, decay: 2.0, sustain: 1.0, release: 2.0, filterCutoff: 600, lfoTarget: 'filter', lfoRate: 0.1, lfoDepth: 60 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 7, gain: 0.4, attack: 1.8, release: 2.5 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.4, attack: 1.0, release: 3.0 }, { spread: 0.9, reverbType: 'cathedral', reverbMix: 0.8 }),
-    // Chamber Quartet - Improved
+    // Tremolo Strings - Rapid, rhythmic bowing for tension
+    p("Tremolo Strings", "Strings",
+        // Osc 1: Sawtooth Tremolo L (6Hz)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.1, sustain: 1.0, release: 0.5, lfoTarget: 'tremolo', lfoRate: 6.0, lfoDepth: 60 },
+        // Osc 2: Sawtooth Tremolo R (6.5Hz - Async width)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, coarseDetune: 4, lfoTarget: 'tremolo', lfoRate: 6.5, lfoDepth: 60 },
+        // Osc 3: Fundamental Anchor
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.4, coarseDetune: 0, sustain: 1.0 },
+        { spread: 0.8, reverbType: 'hall', reverbMix: 0.5 }
+    ),
+    // Cinematic Swell - Slow evolving texture
+    p("Cinematic Swell", "Strings",
+        // Osc 1: Bright Saw Swell (Filter opens up)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 2.0, decay: 2.0, sustain: 1.0, release: 3.0, filterCutoff: 300 },
+        // Osc 2: Wide Detune Saw
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, coarseDetune: 10, attack: 2.5, sustain: 1.0, release: 3.0 },
+        // Osc 3: Deep Sub
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.4, coarseDetune: -1200, attack: 3.0, sustain: 1.0, release: 4.0, filterCutoff: 400 },
+        { 
+            spread: 0.9, 
+            reverbType: 'cathedral', 
+            reverbMix: 0.7,
+            modMatrix: [
+                { id: 'swell-filter', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 80 }
+            ]
+        }
+    ),
+    // Chamber Quartet - Realistic small ensemble
     p("Chamber Quartet", "Strings",
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.5, decay: 1.0, sustain: 0.9, release: 1.2, filterCutoff: 2200 },
-        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 12, gain: 0.4, attack: 0.6, sustain: 0.9, release: 1.5 },
-        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: -12, gain: 0.4, attack: 0.7, sustain: 0.9, release: 1.5 },
-        { spread: 0.7, reverbType: 'hall', reverbMix: 0.5, delayMix: 0.2, stereoPanSpeed: 0.1, stereoPanDepth: 0.2 }
-    )
+        // Osc 1: Cello/Viola Body
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 0.4, decay: 1.0, sustain: 0.9, release: 1.0, filterCutoff: 2500, lfoTarget: 'pitch', lfoRate: 5.0, lfoDepth: 5, lfoDelay: 0.5 },
+        // Osc 2: Violin 1 (High)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, fineDetune: 10, attack: 0.3, sustain: 0.9, release: 1.2 },
+        // Osc 3: Violin 2 (Low)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, fineDetune: -10, attack: 0.5, sustain: 0.9, release: 1.2 },
+        { 
+            spread: 0.6, 
+            reverbType: 'hall', 
+            reverbMix: 0.4, 
+            delayMix: 0.1, 
+            stereoPanSpeed: 0.1, 
+            stereoPanDepth: 0.2 
+        }
+    ),
+    p("Cello Section", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.5, attack: 0.4, release: 0.8, filterCutoff: 1000 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1205, gain: 0.4, attack: 0.5, release: 0.9, filterCutoff: 800 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1195, gain: 0.4, attack: 0.4, release: 0.8 }, { spread: 0.6, reverbType: 'hall', reverbMix: 0.6 })
 ];
 
 const ATMOSPHERE_PATCHES = [
@@ -484,12 +530,48 @@ const ATMOSPHERE_PATCHES = [
         { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.6, attack: 0.1, sustain: 1.0, release: 0.5, filterCutoff: 800 }, // Drone
         { spread: 0.4, reverbType: 'plate', reverbMix: 0.3, compressorThreshold: -10 }
     ),
-    p("Wind Chimes", "Atmosphere", { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.5, attack: 0.01, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 5, lfoDepth: 100 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3102, gain: 0.4, attack: 0.05, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 7, lfoDepth: 100 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3600, gain: 0.3, attack: 0.02, decay: 0.5, sustain: 1.0, lfoTarget: 'tremolo', lfoRate: 3, lfoDepth: 100 }, { spread: 0.9, reverbType: 'shimmer', reverbMix: 0.85, delayMix: 0.5, delayTime: 0.33, delayFeedback: 0.6 }),
+    // Wind Chimes - Generative Texture using Polyrhythmic LFOs on Gain
+    p("Wind Chimes", "Atmosphere",
+        // Osc 1: Root + 2 oct
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.5, lfoTarget: 'tremolo', lfoRate: 0.2, lfoDepth: 100 }, 
+        // Osc 2: + 2 oct + 5th (approx)
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3102, gain: 0.4, lfoTarget: 'tremolo', lfoRate: 0.3, lfoDepth: 100 }, 
+        // Osc 3: + 3 oct + 2nd (approx)
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 3800, gain: 0.3, lfoTarget: 'tremolo', lfoRate: 0.5, lfoDepth: 100 }, 
+        { spread: 0.9, reverbType: 'shimmer', reverbMix: 0.8, delayMix: 0.5 }
+    ),
     p("Dark Drone", "Atmosphere", { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2400, gain: 0.5, filterCutoff: 150, filterResonance: 10, lfoTarget: 'filter', lfoRate: 0.05, lfoDepth: 40 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.4, filterCutoff: 200, filterResonance: 8, lfoTarget: 'filter', lfoRate: 0.07, lfoDepth: 30 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2405, gain: 0.3, filterCutoff: 100 }, { spread: 0.7, reverbType: 'cathedral', reverbMix: 0.9, compressorThreshold: -25 }),
     p("Swamp", "Atmosphere", { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.6, lfoTarget: 'pitch', lfoRate: 6, lfoDepth: 20, filterCutoff: 600 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.4, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 15 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, filterCutoff: 400 }, { spread: 0.6, reverbType: 'plate', reverbMix: 0.6 }),
-    p("Industrial", "Atmosphere", { enabled: true, waveform: WaveformType.SQUARE, gain: 0.6, coarseDetune: -1200, lfoTarget: 'pitch', lfoRate: 50, lfoDepth: 5 }, { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, coarseDetune: -2400, filterCutoff: 800, filterResonance: 15, lfoTarget: 'filter', lfoRate: 8, lfoDepth: 30 }, { enabled: true, waveform: WaveformType.SINE, gain: 0.7, coarseDetune: -1200, lfoTarget: 'tremolo', lfoRate: 15, lfoDepth: 60 }, { spread: 0.5, reverbType: 'plate', reverbMix: 0.5, compressorThreshold: -15, compressorRatio: 12 }),
-    p("Glass Texture", "Atmosphere", { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.6, attack: 0.5, release: 2.0, lfoTarget: 'pitch', lfoRate: 6, lfoDepth: 15 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1900, gain: 0.4, attack: 1.0, release: 2.5, lfoTarget: 'tremolo', lfoRate: 8, lfoDepth: 20 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.3, attack: 1.5, release: 3.0, filterCutoff: 4000, filterResonance: 5 }, { spread: 0.8, reverbType: 'plate', reverbMix: 0.7, delayMix: 0.4 }),
-    p("Abyss", "Atmosphere", { enabled: true, waveform: WaveformType.SINE, coarseDetune: -2400, gain: 0.9, attack: 2.0, release: 6.0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: -1200, gain: 0.5, attack: 3.0, release: 6.0 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -3600, gain: 0.3, filterCutoff: 120, filterResonance: 0, lfoTarget: 'filter', lfoRate: 0.05, lfoDepth: 30 }, { spread: 0.6, reverbType: 'cathedral', reverbMix: 0.95, stereoPanSpeed: 0.1, stereoPanDepth: 0.6 })
+    // Industrial - Rhythmic, metallic, gritty
+    p("Industrial", "Atmosphere",
+        // Osc 1: Low Drone Saw
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.6, filterCutoff: 400, filterResonance: 8, lfoTarget: 'filter', lfoRate: 0.5, lfoDepth: 40 }, 
+        // Osc 2: Mechanical Rhythmic Square (Fast Tremolo)
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1190, gain: 0.4, lfoTarget: 'tremolo', lfoRate: 12, lfoDepth: 80 }, 
+        // Osc 3: Steam Bursts (Noise with slow Tremolo)
+        { enabled: true, waveform: WaveformType.NOISE, gain: 0.2, filterType: 'bandpass', filterCutoff: 2000, filterResonance: 5, lfoTarget: 'tremolo', lfoRate: 0.2, lfoDepth: 100 }, 
+        { spread: 0.3, reverbType: 'room', reverbMix: 0.4, compressorThreshold: -10, compressorRatio: 12 }
+    ),
+    // Glass Texture - High pitch, crystalline, fragile, shimmering
+    p("Glass Texture", "Atmosphere",
+        // Osc 1: Base Tone (Triangle)
+        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.5, attack: 1.5, decay: 4.0, sustain: 1.0, release: 4.0, filterCutoff: 4000 },
+        // Osc 2: Shimmering High (Sine + 1 Oct)
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1205, gain: 0.3, lfoTarget: 'tremolo', lfoRate: 6, lfoDepth: 30 }, 
+        // Osc 3: Ethereal Inharmonic (Sine + 19 semitones)
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1902, gain: 0.2, lfoTarget: 'pitch', lfoRate: 0.5, lfoDepth: 15 }, 
+        { spread: 0.5, reverbType: 'plate', reverbMix: 0.6, delayMix: 0.2 }
+    ),
+    // Abyss - Deep, underwater, rumbling
+    p("Abyss", "Atmosphere",
+        // Osc 1: Sub Bass Sine
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: -2400, gain: 0.8, attack: 4.0, release: 8.0 },
+        // Osc 2: Drifting Triangle
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.4, lfoTarget: 'pitch', lfoRate: 0.2, lfoDepth: 10 }, 
+        // Osc 3: Rumbling Filtered Saw
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2405, gain: 0.15, filterCutoff: 100, lfoTarget: 'filter', lfoRate: 0.1, lfoDepth: 50 }, 
+        { spread: 0.8, reverbType: 'cathedral', reverbMix: 0.9, reverbSize: 8.0, compressorThreshold: -15 }
+    )
 ];
 
 const ETHEREAL_PADS = [
