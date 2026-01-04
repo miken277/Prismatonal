@@ -810,7 +810,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
       const msg = e.data;
       if (msg.type === 'update_preset') {
         const { mode, data } = msg;
-        if (mode && this.presets[mode]) {
+        if (mode) {
             this.presets[mode] = this.normalizePreset(data);
         }
       } else if (msg.type === 'config') {

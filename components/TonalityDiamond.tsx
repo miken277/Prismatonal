@@ -1,6 +1,6 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType } from '../types';
+import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType, SynthPreset } from '../types';
 import { generateLattice } from '../services/LatticeService';
 import { getPitchRatioFromScreenDelta, PITCH_SCALE } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
@@ -142,7 +142,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               if (chord.soundConfig) audioEngine.registerPreset(`chord-${id}`, chord.soundConfig);
               if (chord.soundConfigs) {
                   Object.entries(chord.soundConfigs).forEach(([mode, preset]) => {
-                      audioEngine.registerPreset(`chord-${id}-${mode}`, preset);
+                      const p = preset as SynthPreset;
+                      if (!p) return;
+
+                      // Use the ID from the preset object if available (set in App.tsx)
+                      // Otherwise fall back to constructed ID
+                      const safeId = p.id && String(p.id).startsWith('chord-') 
+                          ? String(p.id) 
+                          : `chord-${id}-${mode}`;
+                          
+                      audioEngine.registerPreset(safeId, p);
                   });
               }
           }
@@ -173,13 +182,22 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             chordDef.nodes.forEach(n => {
                 let mode = defaultChordMode;
                 let presetId = `chord-${chordId}`; 
+                
                 if (n.voiceMode) {
                     if (n.voiceMode === 'latch') mode = 1;
                     else if (n.voiceMode === 'normal') mode = 2;
                     else if (n.voiceMode === 'strum') mode = 3;
                     else if (n.voiceMode === 'brass') mode = 4;
 
-                    if (chordDef.soundConfigs && chordDef.soundConfigs[n.voiceMode]) presetId = `chord-${chordId}-${n.voiceMode}`;
+                    if (chordDef.soundConfigs && chordDef.soundConfigs[n.voiceMode]) {
+                        const specificPreset = chordDef.soundConfigs[n.voiceMode];
+                        // If specific ID exists (timestamped), use it
+                        if (specificPreset?.id && String(specificPreset.id).startsWith('chord-')) {
+                            presetId = String(specificPreset.id);
+                        } else {
+                            presetId = `chord-${chordId}-${n.voiceMode}`;
+                        }
+                    }
                     else if (chordDef.soundConfig) presetId = `chord-${chordId}`;
                     else presetId = n.voiceMode;
                 } else {

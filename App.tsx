@@ -370,7 +370,7 @@ const App: React.FC = () => {
           
           if (slotIndex !== -1) {
               const newChords = [...settings.savedChords];
-              
+              const uniqueTimestamp = Date.now();
               const soundConfigs: Partial<Record<PlayMode, SynthPreset>> = {};
               const usedModes = new Set<PlayMode>();
 
@@ -379,7 +379,7 @@ const App: React.FC = () => {
                   if (mode === 1) modeStr = 'latch';
                   else if (mode === 2) modeStr = 'normal';
                   else if (mode === 3) modeStr = 'strum';
-                  else if (mode === 4) modeStr = 'brass'; // Use brass instead of voice
+                  else if (mode === 4) modeStr = 'brass'; 
                   
                   usedModes.add(modeStr);
                   
@@ -392,8 +392,13 @@ const App: React.FC = () => {
               });
 
               // Capture snapshot of presets for all used modes
+              // IMPORTANT: Clone the presets so future edits to global patches don't affect this chord
               usedModes.forEach(m => {
                   soundConfigs[m] = JSON.parse(JSON.stringify(presets[m]));
+                  // Tag the preset with a unique ID to ensure the worklet treats it as a new distinct sound
+                  if (soundConfigs[m]) {
+                      soundConfigs[m]!.id = `chord-${newChords[slotIndex].id}-${m}-${uniqueTimestamp}`;
+                  }
               });
 
               newChords[slotIndex] = {
@@ -402,7 +407,6 @@ const App: React.FC = () => {
                   visible: true,
                   position: { x: 0, y: 0 },
                   soundConfigs: soundConfigs,
-                  // Clear legacy single config
                   soundConfig: undefined 
               };
               updateSettings(prev => ({ ...prev, savedChords: newChords }));
