@@ -151,7 +151,18 @@ export const generateLattice = (
                       const pRat = PRIME_RATIOS[prime as 3|5|7|11|13];
                       const nextFrac = dir === 1 ? current.ratio.mul(pRat).normalize() : current.ratio.mul(new Fraction(pRat.d, pRat.n)).normalize();
                       
-                      const compLimit = settings.limitComplexities[prime as 3|5|7|11|13];
+                      // Complexity Filter: Use the MAX PRIME IDENTITY of the *result* to determine the limit.
+                      // This ensures that a node with a factor of 7 (even if reached via 3-limit axis)
+                      // is checked against the 7-limit complexity setting (e.g. 50).
+                      const maxP = Math.max(getMaxPrime(nextFrac.n), getMaxPrime(nextFrac.d));
+                      let compLimit = 10000; // Default high for safe limits (e.g. 1/1, 2/1)
+                      
+                      // @ts-ignore
+                      if (settings.limitComplexities[maxP]) {
+                          // @ts-ignore
+                          compLimit = settings.limitComplexities[maxP];
+                      }
+
                       if (nextFrac.n <= compLimit && nextFrac.d <= compLimit) {
                           visitedLocal.add(key);
                           localQueue.push({ coords: nextCoords, ratio: nextFrac });
