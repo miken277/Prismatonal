@@ -309,7 +309,7 @@ const App: React.FC = () => {
       
       // FORCE RESETs for specific modes if desired defaults
       if (newMode === 3) nextSustainState = false; // Plucked no sustain
-      if (newMode === 4) nextSustainState = false; // Voice starts clean
+      // Removed forced reset for Brass (Mode 4) to allow sustain state persistence
 
       updateSettings(prev => ({
           ...prev,
@@ -582,7 +582,7 @@ const App: React.FC = () => {
           else if (key === map.modeDrone.toLowerCase()) handleDroneSelect();
           else if (key === map.modeStrings.toLowerCase()) handleStringSelect();
           else if (key === map.modePlucked.toLowerCase()) handlePluckedSelect();
-          else if (key === map.modeVoice.toLowerCase()) handleVoiceSelect(); // New Mapping
+          else if (key === map.modeBrass.toLowerCase()) handleVoiceSelect(); // New Mapping
           else if (key === map.sustain.toLowerCase()) handleSustainToggle();
           else if (key === map.bend.toLowerCase()) handleBendToggle();
           

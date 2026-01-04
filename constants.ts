@@ -512,7 +512,7 @@ const BRASS_PATCHES = [
         { enabled: true, waveform: WaveformType.SINE, gain: 0.5, filterType: 'peak', filterCutoff: 1200, filterResonance: 1.5 },
         // Osc 3: F3 (Peak) - Shine
         { enabled: true, waveform: WaveformType.SINE, gain: 0.25, filterType: 'peak', filterCutoff: 2500, filterResonance: 2.0 }, 
-        { spread: 0.3, reverbType: 'hall', reverbMix: 0.35, portamento: 0.1, resonatorMix: 0.5, resonatorSweep: 0.2, noiseGain: 0.03, noiseCutoff: 2000 }
+        { spread: 0.3, reverbType: 'hall', reverbMix: 0.35, portamento: 0.1, resonatorMix: 0.5, resonatorSweep: 0.2, noiseGain: 0.006, noiseCutoff: 2000 }
     ),
     
     // 2. Muted Trumpet
@@ -521,13 +521,13 @@ const BRASS_PATCHES = [
         { enabled: true, waveform: WaveformType.GLOTTAL, gain: 0.5, attack: 0.05, decay: 0.1, sustain: 0.9, release: 0.2, filterType: 'lowpass', filterCutoff: 500, filterResonance: 0.8 }, 
         { enabled: true, waveform: WaveformType.SINE, gain: 0.4, filterType: 'peak', filterCutoff: 1500, filterResonance: 3.0 },
         { enabled: true, waveform: WaveformType.SINE, gain: 0.15, filterType: 'peak', filterCutoff: 3000, filterResonance: 1.5 }, 
-        { spread: 0.2, reverbType: 'room', reverbMix: 0.2, portamento: 0.05, resonatorMix: 0.7, resonatorSweep: 0.9, noiseGain: 0.05, noiseCutoff: 5000 }
+        { spread: 0.2, reverbType: 'room', reverbMix: 0.2, portamento: 0.05, resonatorMix: 0.7, resonatorSweep: 0.9, noiseGain: 0.01, noiseCutoff: 5000 }
     ),
     
     // 3. Low Brass Swell
     // Slow attack, deep body
     p("Low Brass Swell", "Brass",
-        { enabled: true, waveform: WaveformType.GLOTTAL, coarseDetune: -1200, gain: 0.6, attack: 0.8, decay: 0.5, sustain: 1.0, release: 1.0, filterType: 'lowpass', filterCutoff: 350, filterResonance: 0.3 },
+        { enabled: true, waveform: WaveformType.GLOTTAL, coarseDetune: -1200, gain: 0.6, attack: 0.8, decay: 0.5, sustain: 1.0, release: 1.0, filterType: 'lowpass', filterCutoff: 350, filterResonance: 0.3 }, 
         { enabled: true, waveform: WaveformType.SINE, gain: 0.5, filterType: 'peak', filterCutoff: 600, filterResonance: 2.5 }, 
         { enabled: true, waveform: WaveformType.SINE, gain: 0.3, filterType: 'peak', filterCutoff: 1800, filterResonance: 1.5 }, 
         { spread: 0.5, reverbType: 'cathedral', reverbMix: 0.6, portamento: 0.2, resonatorMix: 0.4, resonatorSweep: 0.1 }

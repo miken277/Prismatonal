@@ -69,31 +69,32 @@ const EffectsPanel: React.FC<Props> = ({ preset, isReverbEditable, onUpdate, onR
 
                     <div className="pt-2 border-t border-slate-600/50 mt-2">
                         <label className="flex justify-between text-xs mb-1 text-slate-300">
-                            <span>Breath Noise</span> 
-                            <span>{((preset.aspirationGain || 0) * 100).toFixed(0)}%</span>
+                            <span>Breath / Noise Gain</span> 
+                            {/* Display with 1 decimal place for fine tuning */}
+                            <span>{((preset.noiseGain !== undefined ? preset.noiseGain : (preset.aspirationGain || 0)) * 100).toFixed(1)}%</span>
                         </label>
                         <input 
                             type="range" 
                             min="0" 
-                            max="1" 
-                            step="0.01" 
-                            value={preset.aspirationGain || 0} 
-                            onChange={(e) => onUpdate('aspirationGain', parseFloat(e.target.value))} 
+                            max="0.25" // Lower max to allow fine control of subtle noise (0.6% etc)
+                            step="0.001" // Fine steps
+                            value={preset.noiseGain !== undefined ? preset.noiseGain : (preset.aspirationGain || 0)} 
+                            onChange={(e) => onUpdate('noiseGain', parseFloat(e.target.value))} 
                             className="w-full h-1 bg-slate-500 rounded appearance-none cursor-pointer" 
                         />
                     </div>
                     <div>
                         <label className="flex justify-between text-xs mb-1 text-slate-300">
-                            <span>Breath Color</span> 
-                            <span>{(preset.aspirationCutoff || 2000).toFixed(0)} Hz</span>
+                            <span>Noise Filter Cutoff</span> 
+                            <span>{(preset.noiseCutoff || preset.aspirationCutoff || 2000).toFixed(0)} Hz</span>
                         </label>
                         <input 
                             type="range" 
                             min="500" 
                             max="8000" 
                             step="100" 
-                            value={preset.aspirationCutoff || 2000} 
-                            onChange={(e) => onUpdate('aspirationCutoff', parseFloat(e.target.value))} 
+                            value={preset.noiseCutoff || preset.aspirationCutoff || 2000} 
+                            onChange={(e) => onUpdate('noiseCutoff', parseFloat(e.target.value))} 
                             className="w-full h-1 bg-slate-600 rounded appearance-none cursor-pointer" 
                         />
                     </div>
