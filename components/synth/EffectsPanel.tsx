@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { SynthPreset, ReverbType } from '../../types';
 import { REVERB_DEFAULTS } from '../../constants';
@@ -27,30 +26,30 @@ const EffectsPanel: React.FC<Props> = ({ preset, isReverbEditable, onUpdate, onR
                 </div>
             </div>
 
-            {/* Formant Filter Section */}
+            {/* Resonator / Body Section */}
             <div className="bg-slate-900/50 p-3 rounded border border-slate-700">
-                <h4 className="text-xs font-bold text-yellow-500 uppercase mb-3">Vocal Formant Filter</h4>
+                <h4 className="text-xs font-bold text-yellow-500 uppercase mb-3">Acoustic Body (Resonator)</h4>
                 <div className="space-y-3">
                     <div>
                         <label className="flex justify-between text-xs mb-1 text-slate-300">
-                            <span>Mix</span> 
-                            <span>{((preset.formantStrength || 0) * 100).toFixed(0)}%</span>
+                            <span>Resonator Mix</span> 
+                            <span>{((preset.resonatorMix !== undefined ? preset.resonatorMix : (preset.formantStrength || 0)) * 100).toFixed(0)}%</span>
                         </label>
                         <input 
                             type="range" 
                             min="0" 
                             max="1" 
                             step="0.01" 
-                            value={preset.formantStrength || 0} 
-                            onChange={(e) => onUpdate('formantStrength', parseFloat(e.target.value))} 
+                            value={preset.resonatorMix !== undefined ? preset.resonatorMix : (preset.formantStrength || 0)} 
+                            onChange={(e) => onUpdate('resonatorMix', parseFloat(e.target.value))} 
                             className="w-full h-1 bg-yellow-600 rounded appearance-none cursor-pointer" 
                         />
                     </div>
                     <div>
                         <label className="flex justify-between text-xs mb-1 text-slate-300">
-                            <span>Vowel</span> 
+                            <span>Body Size / Color</span> 
                             <span className="font-mono text-yellow-400 font-bold">
-                                {['A', 'E', 'I', 'O', 'U'][Math.min(4, Math.floor((preset.vowel || 0) * 5))]}
+                                {(preset.resonatorSweep || preset.vowel || 0).toFixed(2)}
                             </span>
                         </label>
                         <input 
@@ -58,12 +57,12 @@ const EffectsPanel: React.FC<Props> = ({ preset, isReverbEditable, onUpdate, onR
                             min="0" 
                             max="1" 
                             step="0.01" 
-                            value={preset.vowel || 0} 
-                            onChange={(e) => onUpdate('vowel', parseFloat(e.target.value))} 
-                            className="w-full h-1 bg-gradient-to-r from-red-500 via-green-500 to-blue-500 rounded appearance-none cursor-pointer" 
+                            value={preset.resonatorSweep !== undefined ? preset.resonatorSweep : (preset.vowel || 0)} 
+                            onChange={(e) => onUpdate('resonatorSweep', parseFloat(e.target.value))} 
+                            className="w-full h-1 bg-gradient-to-r from-red-500 via-yellow-500 to-blue-500 rounded appearance-none cursor-pointer" 
                         />
                         <div className="flex justify-between text-[8px] text-slate-500 mt-1 uppercase font-bold px-1">
-                            <span>A</span><span>E</span><span>I</span><span>O</span><span>U</span>
+                            <span>Closed</span><span>Neutral</span><span>Open</span>
                         </div>
                     </div>
 
@@ -76,8 +75,8 @@ const EffectsPanel: React.FC<Props> = ({ preset, isReverbEditable, onUpdate, onR
                         <input 
                             type="range" 
                             min="0" 
-                            max="0.25" // Lower max to allow fine control of subtle noise (0.6% etc)
-                            step="0.001" // Fine steps
+                            max="0.4" // Lower max to allow fine control
+                            step="0.001" 
                             value={preset.noiseGain !== undefined ? preset.noiseGain : (preset.aspirationGain || 0)} 
                             onChange={(e) => onUpdate('noiseGain', parseFloat(e.target.value))} 
                             className="w-full h-1 bg-slate-500 rounded appearance-none cursor-pointer" 
@@ -85,18 +84,37 @@ const EffectsPanel: React.FC<Props> = ({ preset, isReverbEditable, onUpdate, onR
                     </div>
                     <div>
                         <label className="flex justify-between text-xs mb-1 text-slate-300">
-                            <span>Noise Filter Cutoff</span> 
-                            <span>{(preset.noiseCutoff || preset.aspirationCutoff || 2000).toFixed(0)} Hz</span>
+                            <span>Noise Filter (Highpass)</span> 
+                            <span>{(preset.noiseCutoff || preset.aspirationCutoff || 4000).toFixed(0)} Hz</span>
                         </label>
                         <input 
                             type="range" 
                             min="500" 
                             max="8000" 
                             step="100" 
-                            value={preset.noiseCutoff || preset.aspirationCutoff || 2000} 
+                            value={preset.noiseCutoff || preset.aspirationCutoff || 4000} 
                             onChange={(e) => onUpdate('noiseCutoff', parseFloat(e.target.value))} 
                             className="w-full h-1 bg-slate-600 rounded appearance-none cursor-pointer" 
                         />
+                    </div>
+                </div>
+            </div>
+
+            {/* Dynamics (Compressor) */}
+            <div className="bg-slate-900/50 p-3 rounded border border-slate-700">
+                <h4 className="text-xs font-bold text-red-400 uppercase mb-3">Dynamics (Compressor)</h4>
+                <div className="space-y-3">
+                    <div>
+                        <label className="flex justify-between text-xs mb-1 text-slate-300"><span>Threshold</span> <span>{preset.compressorThreshold ?? -20} dB</span></label>
+                        <input type="range" min="-60" max="0" step="1" value={preset.compressorThreshold ?? -20} onChange={(e) => onUpdate('compressorThreshold', parseFloat(e.target.value))} className="w-full h-1 bg-red-600 rounded appearance-none cursor-pointer" />
+                    </div>
+                    <div>
+                        <label className="flex justify-between text-xs mb-1 text-slate-300"><span>Ratio</span> <span>{preset.compressorRatio ?? 12}:1</span></label>
+                        <input type="range" min="1" max="20" step="0.5" value={preset.compressorRatio ?? 12} onChange={(e) => onUpdate('compressorRatio', parseFloat(e.target.value))} className="w-full h-1 bg-red-600 rounded appearance-none cursor-pointer" />
+                    </div>
+                    <div>
+                        <label className="flex justify-between text-xs mb-1 text-slate-300"><span>Release</span> <span>{(preset.compressorRelease ?? 0.25).toFixed(2)}s</span></label>
+                        <input type="range" min="0.01" max="1.0" step="0.01" value={preset.compressorRelease ?? 0.25} onChange={(e) => onUpdate('compressorRelease', parseFloat(e.target.value))} className="w-full h-1 bg-red-600 rounded appearance-none cursor-pointer" />
                     </div>
                 </div>
             </div>

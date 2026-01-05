@@ -1,10 +1,10 @@
-
 import { ArpeggioStep, ArpConfig } from '../types';
 import { audioEngine } from './AudioEngine';
 import { midiService } from './MidiService';
 import { store } from './Store';
 
 type OnStepCallback = (stepIndex: number) => void;
+type OnNoteCallback = (nodeId: string, active: boolean) => void;
 
 class ArpeggiatorService {
     private isRunning: boolean = false;
@@ -19,16 +19,20 @@ class ArpeggiatorService {
     private playbackQueue: { nodeId: string, ratio: number, originalIndex: number, muted?: boolean }[] = [];
     
     private onStepCallback: OnStepCallback | null = null;
+    private onNoteCallback: OnNoteCallback | null = null; // New visual callback
+
     private lastPlayedVoiceId: string | null = null;
+    private lastPlayedNodeId: string | null = null; // Track node for visual off
     private lastNoteOffTimer: number | null = null;
 
-    public start(steps: ArpeggioStep[], config: ArpConfig, bpm: number, onStep?: OnStepCallback) {
+    public start(steps: ArpeggioStep[], config: ArpConfig, bpm: number, onStep?: OnStepCallback, onNote?: OnNoteCallback) {
         this.stop();
         if (steps.length === 0) return;
 
         this.baseSteps = steps;
         this.currentConfig = config;
         this.onStepCallback = onStep || null;
+        this.onNoteCallback = onNote || null;
         this.isRunning = true;
         this.currentStepIndex = 0;
 
@@ -58,7 +62,14 @@ class ArpeggiatorService {
         if (this.lastPlayedVoiceId) {
             audioEngine.stopVoice(this.lastPlayedVoiceId);
             midiService.noteOff(this.lastPlayedVoiceId);
+            
+            // Visual feedback OFF
+            if (this.lastPlayedNodeId && this.onNoteCallback) {
+                this.onNoteCallback(this.lastPlayedNodeId, false);
+            }
+
             this.lastPlayedVoiceId = null;
+            this.lastPlayedNodeId = null;
         }
     }
 
@@ -188,7 +199,14 @@ class ArpeggiatorService {
             if (state.settings.midiEnabled) {
                 midiService.noteOn(voiceId, step.ratio, state.settings.baseFrequency, state.settings.midiPitchBendRange);
             }
+            
+            // Visual feedback ON
+            if (this.onNoteCallback) {
+                this.onNoteCallback(step.nodeId, true);
+            }
+
             this.lastPlayedVoiceId = voiceId;
+            this.lastPlayedNodeId = step.nodeId;
         }
 
         if (this.onStepCallback) {

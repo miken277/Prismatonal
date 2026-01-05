@@ -63,6 +63,7 @@ const DUMMY_OSC_CONFIG = {
     filterType: 'lowpass',
     lfoRate: 1,
     lfoDepth: 0,
+    lfoWaveform: 'sine',
     lfoTarget: 'none',
     lfoDelay: 0
 };
@@ -122,6 +123,7 @@ class SVF {
     // Safe Cutoff range: 20Hz to Nyquist (approx)
     const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.45));
     
+    // Chamberlin SVF tuning
     let f = 2.0 * Math.sin(Math.PI * safeCutoff / sampleRate);
     const q = 1.0 / (res + 0.5);
 
@@ -130,32 +132,17 @@ class SVF {
     this.band += f * this.high;
     this.notch = this.high + this.low;
 
-    // 0=Low, 1=High, 2=Band, 3=Notch
-    if (type === 0) return this.low;
-    if (type === 1) return this.high;
-    if (type === 2) return this.band;
-    if (type === 3) return this.notch;
-    
-    // 4=Peak: Mix of Low/High and Band.
-    // For a peak filter in SVF: Output = Low + High + (Band * Gain)
-    // If Gain is high, we boost at cutoff.
-    if (type === 4) {
-        return this.low + this.high + (this.band * peakGain);
+    // 0=Low, 1=High, 2=Band, 3=Notch, 4=Peak, 5=LowShelf, 6=HighShelf
+    switch((type|0)) {
+        case 0: return this.low;
+        case 1: return this.high;
+        case 2: return this.band;
+        case 3: return this.notch;
+        case 4: return this.low + this.high + (this.band * peakGain);
+        case 5: return (this.low * peakGain) + this.high + this.band;
+        case 6: return this.low + (this.high * peakGain) + this.band;
+        default: return this.low;
     }
-    
-    // 5=LowShelf: Boost/Cut Lows
-    // Output = (Low * Gain) + High + Band
-    if (type === 5) {
-        return (this.low * peakGain) + this.high + this.band;
-    }
-
-    // 6=HighShelf: Boost/Cut Highs
-    // Output = Low + (High * Gain) + Band
-    if (type === 6) {
-        return this.low + (this.high * peakGain) + this.band;
-    }
-
-    return this.low; 
   }
 }
 
@@ -206,7 +193,8 @@ class ResonatorBank {
         // Bandpass processing with moderate Q (Resonance ~ 4-8)
         const res = 4.0; 
 
-        const out1 = this.f1.process(input, f1_freq, res, sampleRate, 2); // 2 = Band
+        // SVF Type 2 = Bandpass
+        const out1 = this.f1.process(input, f1_freq, res, sampleRate, 2); 
         const out2 = this.f2.process(input, f2_freq, res, sampleRate, 2);
         const out3 = this.f3.process(input, f3_freq, res, sampleRate, 2);
 
@@ -339,7 +327,7 @@ class Oscillator {
         sample -= this.blep.get(phase2, dt * freq);
         break;
       case 'noise':
-        // Simple White Noise
+        // White Noise
         sample = (Math.random() * 2.0) - 1.0;
         break;
     }
@@ -377,6 +365,7 @@ class Voice {
     
     this.envs = [ new Envelope(), new Envelope(), new Envelope() ];
     this.lfoPhases = [0.0, 0.0, 0.0];
+    this.lfoRandoms = [0.0, 0.0, 0.0]; // Hold values for S&H (Noise LFO)
     this.envVals = new Float32Array(3);
     this.lfoVals = new Float32Array(3);
   }
@@ -408,6 +397,10 @@ class Voice {
     this.resonator.reset();
     this.noiseFilter.reset();
     this.lfoPhases.fill(0.0);
+    // Initialize randoms
+    this.lfoRandoms[0] = (Math.random() * 2.0) - 1.0;
+    this.lfoRandoms[1] = (Math.random() * 2.0) - 1.0;
+    this.lfoRandoms[2] = (Math.random() * 2.0) - 1.0;
   }
 
   release() {
@@ -493,6 +486,11 @@ class Voice {
     const lfoRate1 = osc1.lfoRate || 0;
     const lfoRate2 = osc2.lfoRate || 0;
     const lfoRate3 = osc3.lfoRate || 0;
+    
+    // Pre-calculate LFO types
+    const lfoType1 = osc1.lfoWaveform || 'sine';
+    const lfoType2 = osc2.lfoWaveform || 'sine';
+    const lfoType3 = osc3.lfoWaveform || 'sine';
 
     // OPTIMIZATION: Pre-calculate static frequencies if no modulation
     // Apply globalBend to the base frequency here
@@ -548,25 +546,64 @@ class Voice {
         const env1 = this.envs[0].process(osc1, dt);
         this.envVals[0] = env1;
         if (this.envs[0].stage !== 'idle') anyEnvActive = true;
+        
         this.lfoPhases[0] += lfoRate1 * dt;
-        if (this.lfoPhases[0] >= 1.0) this.lfoPhases[0] -= 1.0;
-        this.lfoVals[0] = Math.sin(TWO_PI * this.lfoPhases[0]) * lfoFade1;
+        if (this.lfoPhases[0] >= 1.0) {
+            this.lfoPhases[0] -= 1.0;
+            this.lfoRandoms[0] = (Math.random() * 2.0) - 1.0; // New random value on cycle reset
+        }
+        let lfoVal1 = 0;
+        switch(lfoType1) {
+            case 'sine': lfoVal1 = Math.sin(TWO_PI * this.lfoPhases[0]); break;
+            case 'triangle': { const p = this.lfoPhases[0]; if(p < 0.25) lfoVal1 = 4 * p; else if(p < 0.75) lfoVal1 = 2 - 4 * p; else lfoVal1 = 4 * p - 4; break; }
+            case 'square': lfoVal1 = this.lfoPhases[0] < 0.5 ? 1.0 : -1.0; break;
+            case 'sawtooth': lfoVal1 = (2.0 * this.lfoPhases[0]) - 1.0; break;
+            case 'noise': lfoVal1 = this.lfoRandoms[0]; break;
+            default: lfoVal1 = Math.sin(TWO_PI * this.lfoPhases[0]);
+        }
+        this.lfoVals[0] = lfoVal1 * lfoFade1;
 
         // OSC 2
         const env2 = this.envs[1].process(osc2, dt);
         this.envVals[1] = env2;
         if (this.envs[1].stage !== 'idle') anyEnvActive = true;
+        
         this.lfoPhases[1] += lfoRate2 * dt;
-        if (this.lfoPhases[1] >= 1.0) this.lfoPhases[1] -= 1.0;
-        this.lfoVals[1] = Math.sin(TWO_PI * this.lfoPhases[1]) * lfoFade2;
+        if (this.lfoPhases[1] >= 1.0) {
+            this.lfoPhases[1] -= 1.0;
+            this.lfoRandoms[1] = (Math.random() * 2.0) - 1.0;
+        }
+        let lfoVal2 = 0;
+        switch(lfoType2) {
+            case 'sine': lfoVal2 = Math.sin(TWO_PI * this.lfoPhases[1]); break;
+            case 'triangle': { const p = this.lfoPhases[1]; if(p < 0.25) lfoVal2 = 4 * p; else if(p < 0.75) lfoVal2 = 2 - 4 * p; else lfoVal2 = 4 * p - 4; break; }
+            case 'square': lfoVal2 = this.lfoPhases[1] < 0.5 ? 1.0 : -1.0; break;
+            case 'sawtooth': lfoVal2 = (2.0 * this.lfoPhases[1]) - 1.0; break;
+            case 'noise': lfoVal2 = this.lfoRandoms[1]; break;
+            default: lfoVal2 = Math.sin(TWO_PI * this.lfoPhases[1]);
+        }
+        this.lfoVals[1] = lfoVal2 * lfoFade2;
 
         // OSC 3
         const env3 = this.envs[2].process(osc3, dt);
         this.envVals[2] = env3;
         if (this.envs[2].stage !== 'idle') anyEnvActive = true;
+        
         this.lfoPhases[2] += lfoRate3 * dt;
-        if (this.lfoPhases[2] >= 1.0) this.lfoPhases[2] -= 1.0;
-        this.lfoVals[2] = Math.sin(TWO_PI * this.lfoPhases[2]) * lfoFade3;
+        if (this.lfoPhases[2] >= 1.0) {
+            this.lfoPhases[2] -= 1.0;
+            this.lfoRandoms[2] = (Math.random() * 2.0) - 1.0;
+        }
+        let lfoVal3 = 0;
+        switch(lfoType3) {
+            case 'sine': lfoVal3 = Math.sin(TWO_PI * this.lfoPhases[2]); break;
+            case 'triangle': { const p = this.lfoPhases[2]; if(p < 0.25) lfoVal3 = 4 * p; else if(p < 0.75) lfoVal3 = 2 - 4 * p; else lfoVal3 = 4 * p - 4; break; }
+            case 'square': lfoVal3 = this.lfoPhases[2] < 0.5 ? 1.0 : -1.0; break;
+            case 'sawtooth': lfoVal3 = (2.0 * this.lfoPhases[2]) - 1.0; break;
+            case 'noise': lfoVal3 = this.lfoRandoms[2]; break;
+            default: lfoVal3 = Math.sin(TWO_PI * this.lfoPhases[2]);
+        }
+        this.lfoVals[2] = lfoVal3 * lfoFade3;
 
         if (!anyEnvActive && s === len - 1) {
             this.active = false;

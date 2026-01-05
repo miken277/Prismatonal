@@ -292,7 +292,7 @@ export interface AppSettings {
   enableKeyboardShortcuts: boolean;
   keyMappings: KeyMappings;
   strumDuration: number; // seconds, 0.1 to 2.0
-  recordScreenActivity: boolean; // New Setting: Toggle for video capture
+  enableAudioRecording: boolean; // Renamed from recordScreenActivity
 
   // UI Relocation & Scaling
   uiUnlocked: boolean;
@@ -339,6 +339,7 @@ export interface OscillatorConfig {
   // LFO
   lfoRate: number; // Hz
   lfoDepth: number; // Amount 0-100
+  lfoWaveform: 'sine' | 'triangle' | 'square' | 'sawtooth' | 'noise'; // New LFO Shape
   lfoTarget: 'none' | 'pitch' | 'filter' | 'tremolo';
   lfoDelay: number; // Fade in time (seconds)
 }

@@ -12,6 +12,7 @@ export interface TonalityDiamondHandle {
   increaseDepth: () => void;
   decreaseDepth: () => void;
   getLatchedNodes: () => { node: LatticeNode, mode: number }[];
+  triggerVisual: (nodeId: string, active: boolean) => void; // New method
 }
 
 interface Props {
@@ -38,7 +39,7 @@ interface ActiveCursor {
 }
 
 interface NodeActivation {
-    mode: number;
+    mode: number | string; // Updated to support 'arp' as string
     timestamp: number;
     presetId: string;
 }
@@ -93,6 +94,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [persistentLatches, setPersistentLatches] = useState<Map<string, Map<number, number>>>(new Map());
+  const [externalTriggers, setExternalTriggers] = useState<Map<string, number>>(new Map()); // nodeId -> timestamp
   const nodeTriggerHistory = useRef<Map<string, number>>(new Map());
 
   // Notify parent of active modes
@@ -143,13 +145,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                   Object.entries(chord.soundConfigs).forEach(([mode, preset]) => {
                       const p = preset as SynthPreset;
                       if (!p) return;
-
-                      // Use the ID from the preset object if available (set in App.tsx)
-                      // Otherwise fall back to constructed ID
                       const safeId = p.id && String(p.id).startsWith('chord-') 
                           ? String(p.id) 
                           : `chord-${id}-${mode}`;
-                          
                       audioEngine.registerPreset(safeId, p);
                   });
               }
@@ -190,7 +188,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
                     if (chordDef.soundConfigs && chordDef.soundConfigs[n.voiceMode]) {
                         const specificPreset = chordDef.soundConfigs[n.voiceMode];
-                        // If specific ID exists (timestamped), use it
                         if (specificPreset?.id && String(specificPreset.id).startsWith('chord-')) {
                             presetId = String(specificPreset.id);
                         } else {
@@ -219,7 +216,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       audioLatchedNodes.forEach((v, k) => visual.set(k, [...v]));
 
       activeCursors.forEach(cursor => {
-          const isSustainingInstrument = latchMode >= 1; // All instruments can now sustain
+          const isSustainingInstrument = latchMode >= 1; 
           const isSustainActive = isCurrentSustainEnabled;
           const isBendEnabled = settings.isPitchBendEnabled;
           
@@ -231,13 +228,23 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               const nodeId = cursor.hoverNodeId;
               if (!visual.has(nodeId)) visual.set(nodeId, []);
               const list = visual.get(nodeId)!;
+              // Mode derived from current LatchMode for immediate feedback
               const activation = { mode: latchMode, timestamp: Date.now(), presetId: 'cursor' };
               list.push(activation);
               list.sort((a, b) => a.timestamp - b.timestamp);
           }
       });
+
+      // Add External Triggers (Arp)
+      externalTriggers.forEach((timestamp, nodeId) => {
+          if (!visual.has(nodeId)) visual.set(nodeId, []);
+          const list = visual.get(nodeId)!;
+          // 'arp' mode renders Red
+          list.push({ mode: 'arp', timestamp, presetId: 'arpeggio' });
+      });
+
       return visual;
-  }, [audioLatchedNodes, activeCursors, settings.isPitchBendEnabled, latchMode, isCurrentSustainEnabled]);
+  }, [audioLatchedNodes, activeCursors, settings.isPitchBendEnabled, latchMode, isCurrentSustainEnabled, externalTriggers]);
 
   const activeLines = useMemo(() => {
     const latched = visualLatchedNodes;
@@ -391,6 +398,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             }
         });
         return result;
+    },
+    triggerVisual: (nodeId: string, active: boolean) => {
+        setExternalTriggers(prev => {
+            const next = new Map(prev);
+            if (active) next.set(nodeId, Date.now());
+            else next.delete(nodeId);
+            return next;
+        });
     }
   }));
 
@@ -406,13 +421,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   useEffect(() => {
       if (isInitialLoad && !isGenerating && data.nodes.length > 0) {
-          // Delay centering slightly to ensure layout is done
           requestAnimationFrame(centerScroll);
           setIsInitialLoad(false);
       }
   }, [isGenerating, data.nodes.length, isInitialLoad]);
 
-  // Handle Zoom Stabilization
   useLayoutEffect(() => {
       const container = scrollContainerRef.current;
       if (!container) return;
@@ -433,7 +446,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           const centerX_from_origin = (currentScrollLeft + viewW / 2) - CENTER_OFFSET;
           const centerY_from_origin = (currentScrollTop + viewH / 2) - CENTER_OFFSET;
 
-          // Normalize position by spacing
           const normX = centerX_from_origin / oldSpacing;
           const normY = centerY_from_origin / oldSpacing;
 
@@ -500,6 +512,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               if (!wasActive) {
                    const node = nodes.get(nodeId); 
                    if (node) {
+                       // Only audio triggering for persistent nodes. Arp handles its own audio triggers.
                        audioEngine.startVoice(voiceId, node.ratio, settings.baseFrequency, act.presetId, 'latch');
                        if (settings.midiEnabled) midiService.noteOn(voiceId, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                    }
@@ -528,7 +541,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   }, [settings.polyphony]);
 
   const getHitNode = (clientX: number, clientY: number): LatticeNode | null => {
-      // Use clientRect of the scroll container as the viewport reference
       if (!scrollContainerRef.current) return null;
       const rect = scrollContainerRef.current.getBoundingClientRect();
       
@@ -538,7 +550,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const scrollLeft = scrollContainerRef.current.scrollLeft;
       const scrollTop = scrollContainerRef.current.scrollTop;
 
-      // Coordinate in Viewport
       const viewportX = clientX - rect.left;
       const viewportY = clientY - rect.top;
 
@@ -604,7 +615,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       updateRect();
 
       let canvasPos = { x: e.clientX, y: e.clientY };
-      // Store raw client coordinates for move deltas
       cursorPositionsRef.current.set(e.pointerId, canvasPos);
 
       const hitNode = getHitNode(e.clientX, e.clientY);
@@ -690,7 +700,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
     const cursor = activeCursorsRef.current.get(e.pointerId)!;
     
-    // Calculate world coordinate for pitch bend logic
     let worldY = e.clientY;
     if (scrollContainerRef.current) {
         const r = scrollContainerRef.current.getBoundingClientRect();
@@ -699,8 +708,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         worldY = (e.clientY - r.top) - pixelOffset + scrollContainerRef.current.scrollTop;
     }
     
-    // Update raw position for renderer lines
-    // We store Viewport X/Y for lines relative to viewport
     if (scrollContainerRef.current) {
         const r = scrollContainerRef.current.getBoundingClientRect();
         cursorPositionsRef.current.set(e.pointerId, { 
@@ -710,8 +717,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     }
     
     let hasMoved = cursor.hasMoved;
-    // ... move detection threshold ...
-
     const hitNode = getHitNode(e.clientX, e.clientY);
     const hitId = hitNode ? hitNode.id : null;
 
@@ -923,13 +928,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const offset = settings.backgroundYOffset || 0;
       const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
       
-      // Default: Black background
       const baseStyle: React.CSSProperties = {
           position: 'absolute', top: 0, left: 0,
           width: '100%', height: '100%', 
           pointerEvents: 'none',
-          // Note: When using 'fixed' container size, offset is relative to viewport height
-          // Center + Offset
           backgroundPosition: `center calc(50% + ${offset}px)`,
           backgroundRepeat: 'no-repeat', 
           backgroundSize: 'cover',
@@ -970,8 +972,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                   if (settings.bgImageGamma !== 1.0) {
                       baseStyle.filter = `brightness(${settings.bgImageGamma})`;
                   }
-              } else {
-                  // Keep black fallback
               }
               break;
           }
@@ -999,13 +999,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         onPointerLeave={handlePointerUp} 
         onPointerCancel={handlePointerUp}
     >
-        {/* Background Layer: Sticky Container LOCKED to Viewport */}
-        {/* z-0 ensures it's behind everything. overflow-hidden prevents leakage. */}
         <div className="sticky top-0 left-0 w-full h-full z-0 overflow-hidden pointer-events-none">
-             {/* Actual Background Element */}
              <div style={bgStyles.base} className="absolute inset-0 w-full h-full z-0" />
              
-             {/* Bending Wrapper for Canvases: Z-10 to stay above bg but below UI */}
              <div ref={wrapperRef} className="relative w-full h-full z-10">
                 <canvas ref={bgLineCanvasRef} className="absolute top-0 left-0 z-[5]" style={{ width: '100%', height: '100%' }} />
                 <canvas ref={staticCanvasRef} className="absolute top-0 left-0 z-[10]" style={{ width: '100%', height: '100%' }} />
@@ -1014,7 +1010,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              </div>
         </div>
         
-        {/* Massive Spacer for Scrolling Logic - sits effectively "behind" sticky elements in flow but determines scroll height */}
         <div style={{ width: VIRTUAL_SIZE, height: VIRTUAL_SIZE }} className="relative z-[-1]" />
     </div>
   );

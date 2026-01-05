@@ -1,4 +1,3 @@
-
 import React, { useRef, useState, useEffect } from 'react';
 import { AppSettings, ButtonShape, BackgroundMode } from '../types';
 import { DEFAULT_COLORS, DEFAULT_BACKGROUNDS } from '../constants';
@@ -226,6 +225,21 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
                                 {[0.5, 0.75, 1.0, 1.25, 1.5].map(scale => (
                                     <button key={scale} onClick={() => handleChange('uiScale', scale)} className={`flex-1 py-2 text-[10px] font-bold rounded border ${settings.uiScale === scale ? 'bg-pink-600 border-pink-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>
                                         {scale === 1.0 ? '100%' : `${scale * 100}%`}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        
+                        <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-2">
+                            <label className="block text-sm font-semibold text-slate-300">Visual Theme (Skin)</label>
+                            <div className="flex bg-slate-800 rounded p-1 border border-slate-600">
+                                {(['default', 'paper', 'blueprint', 'cyber'] as const).map(skin => (
+                                    <button 
+                                        key={skin} 
+                                        onClick={() => handleChange('activeSkin', skin)} 
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded uppercase transition-colors ${settings.activeSkin === skin ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                                    >
+                                        {skin}
                                     </button>
                                 ))}
                             </div>

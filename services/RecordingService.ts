@@ -1,7 +1,4 @@
-
 import { audioEngine } from './AudioEngine';
-
-export type RecordingMode = 'video-audio' | 'audio-only';
 
 class RecordingService {
     private mediaRecorder: MediaRecorder | null = null;
@@ -14,49 +11,22 @@ class RecordingService {
     constructor() {}
 
     /**
-     * Start recording based on the selected mode.
-     * @param mode 'video-audio' uses getDisplayMedia, 'audio-only' uses WebAudio API
+     * Start audio recording from the synth engine.
      * @returns Promise that resolves when recording successfully starts
      */
-    public async startRecording(mode: RecordingMode): Promise<void> {
+    public async startRecording(): Promise<void> {
         this.recordedChunks = [];
         this.isRecording = true;
 
         try {
-            if (mode === 'video-audio') {
-                await this.startScreenCapture();
-            } else {
-                await this.startAudioCapture();
-            }
+            await this.startAudioCapture();
         } catch (error) {
-            console.error("Failed to start recording:", error);
             this.isRecording = false;
             throw error;
         }
     }
 
-    private async startScreenCapture() {
-        // "Hardware capture" for Audio+Visual
-        // This prompts the user to share a tab or screen.
-        // Important: User must select "Share Audio" in the browser dialog for system audio to be captured.
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({
-            video: {
-                displaySurface: "browser", // Prefer tab sharing
-            } as MediaTrackConstraints, 
-            audio: {
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false
-            }
-        });
-
-        this.stream = displayStream;
-        this.setupMediaRecorder(this.stream, 'video/webm;codecs=vp9,opus');
-    }
-
     private async startAudioCapture() {
-        // "Hardware capture" equivalent for Audio Only
-        // Creates a virtual destination node in the Web Audio graph
         const ctx = audioEngine.getContext();
         if (!ctx) {
             // Ensure audio is initialized
@@ -66,7 +36,12 @@ class RecordingService {
         const context = audioEngine.getContext();
         if (!context) throw new Error("Audio Context not available");
 
-        this.audioDest = context.createMediaStreamDestination();
+        // Create destination node if needed
+        if (!this.audioDest) {
+            this.audioDest = context.createMediaStreamDestination();
+        }
+        
+        // Connect engine output to our recorder destination
         audioEngine.connectToRecordingDestination(this.audioDest);
         
         this.stream = this.audioDest.stream;
@@ -74,17 +49,10 @@ class RecordingService {
     }
 
     private setupMediaRecorder(stream: MediaStream, mimeTypePreference: string) {
-        // Check supported types
         let mimeType = mimeTypePreference;
         if (!MediaRecorder.isTypeSupported(mimeType)) {
-            // Fallback
-            if (mimeType.startsWith('video')) {
-                mimeType = 'video/mp4';
-                if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
-            } else {
-                mimeType = 'audio/mp4';
-                if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/webm'; 
-            }
+            mimeType = 'audio/mp4';
+            if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/webm'; 
         }
 
         this.mediaRecorder = new MediaRecorder(stream, { mimeType });
@@ -99,45 +67,34 @@ class RecordingService {
             this.finalizeRecording();
         };
 
-        // If the user stops sharing via the browser UI, stop the recorder
-        stream.getVideoTracks().forEach(track => {
-            track.onended = () => {
-                if (this.isRecording) this.stopRecording();
-            };
-        });
-
-        this.mediaRecorder.start(100); // Collect chunks every 100ms
+        this.mediaRecorder.start(100); 
     }
 
     public stopRecording() {
-        if (this.mediaRecorder && this.isRecording) {
+        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
             this.mediaRecorder.stop();
-            this.isRecording = false;
         }
+        this.isRecording = false;
         
-        // Stop all tracks to release hardware/indicator
-        if (this.stream) {
-            this.stream.getTracks().forEach(track => track.stop());
-        }
-        
-        // Disconnect audio node if used
-        if (this.audioDest) {
-            this.audioDest.disconnect();
-            this.audioDest = null;
-        }
+        // We do NOT stop tracks here for internal audio destination, 
+        // as that might kill the node for future use or cause context issues.
+        // But we should disconnect from the engine to save CPU if necessary?
+        // AudioEngine.connectToRecordingDestination adds a connection. 
+        // Ideally we disconnect it, but the Web Audio API handles fan-out fine.
+        // Let's leave it connected or manage disconnection in AudioEngine if strict resource management is needed.
     }
 
     private finalizeRecording() {
         if (this.recordedChunks.length === 0) return;
 
         const blob = new Blob(this.recordedChunks, {
-            type: this.mediaRecorder?.mimeType || 'video/webm'
+            type: this.mediaRecorder?.mimeType || 'audio/webm'
         });
         
-        const isVideo = blob.type.startsWith('video');
-        const ext = isVideo ? 'webm' : 'webm'; // Browser MediaRecorder mostly outputs webm containers
+        // Default extension based on mime
+        const ext = blob.type.includes('mp4') ? 'm4a' : 'webm'; 
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const filename = `PrismaTonal_Performance_${timestamp}.${ext}`;
+        const filename = `PrismaTonal_Audio_${timestamp}.${ext}`;
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

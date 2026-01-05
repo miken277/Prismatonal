@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDivision, ArpeggioStep, PresetState, PlayMode, SynthPreset } from '../types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
-import { recordingService } from '../services/RecordingService';
 import ArpeggiatorBar from './controls/ArpeggiatorBar';
 import InstrumentCluster from './controls/InstrumentCluster';
 
@@ -66,8 +65,6 @@ interface Props {
 
   presets?: PresetState;
   onPresetChange?: (mode: PlayMode, preset: SynthPreset) => void;
-  
-  recordScreenActivity?: boolean;
 }
 
 const FloatingControls: React.FC<Props> = ({ 
@@ -85,18 +82,11 @@ const FloatingControls: React.FC<Props> = ({
   isSequencerOpen,
   onToggleSequencer,
   presets,
-  onPresetChange,
-  recordScreenActivity = false
+  onPresetChange
 }) => {
   
   const [isFlashingRed, setIsFlashingRed] = useState(false);
   
-  // Recording State - Sync initial state from service
-  const [isRecording, setIsRecording] = useState(recordingService.isRecording);
-  const [recDuration, setRecDuration] = useState(0);
-  const recTimerRef = useRef<number | null>(null);
-  const recSyncTimerRef = useRef<number | null>(null);
-
   useEffect(() => {
       if (recordingFlash > 0) {
           setIsFlashingRed(true);
@@ -104,49 +94,6 @@ const FloatingControls: React.FC<Props> = ({
           return () => clearTimeout(t);
       }
   }, [recordingFlash]);
-
-  // Clean up recording timers
-  useEffect(() => {
-      return () => {
-          if (recTimerRef.current) clearInterval(recTimerRef.current);
-          if (recSyncTimerRef.current) clearInterval(recSyncTimerRef.current);
-      };
-  }, []);
-
-  const handleToggleRecord = async () => {
-      if (isRecording) {
-          handleStopRecord();
-      } else {
-          try {
-              const mode = recordScreenActivity ? 'video-audio' : 'audio-only';
-              await recordingService.startRecording(mode);
-              setIsRecording(true);
-              setRecDuration(0);
-              
-              recTimerRef.current = window.setInterval(() => {
-                  setRecDuration(prev => prev + 1);
-              }, 1000);
-
-              // Safety check for external stop (e.g. browser UI)
-              recSyncTimerRef.current = window.setInterval(() => {
-                  if (!recordingService.isRecording) {
-                      handleStopRecord();
-                  }
-              }, 1000);
-
-          } catch (e) {
-              console.error("Failed to start recording", e);
-              alert("Failed to start recording.");
-          }
-      }
-  };
-
-  const handleStopRecord = () => {
-      recordingService.stopRecording();
-      setIsRecording(false);
-      if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
-      if (recSyncTimerRef.current) { clearInterval(recSyncTimerRef.current); recSyncTimerRef.current = null; }
-  };
 
   const handleDrag = (e: React.PointerEvent, key: keyof AppSettings['uiPositions']) => {
     if (!uiUnlocked) return;
@@ -309,9 +256,6 @@ const FloatingControls: React.FC<Props> = ({
           onStopAll={onStopAll}
           isSequencerOpen={isSequencerOpen}
           onToggleSequencer={onToggleSequencer}
-          isRecording={isRecording}
-          recDuration={recDuration}
-          onToggleRecord={handleToggleRecord}
           uiScale={uiScale}
           position={uiPositions.arpeggioBar}
           isConstrained={isConstrained}

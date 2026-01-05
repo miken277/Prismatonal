@@ -3,7 +3,7 @@ import { LatticeNode, LatticeLine, AppSettings, ButtonShape } from '../types';
 import { MODE_COLORS } from '../constants';
 
 interface NodeActivation {
-    mode: number;
+    mode: number | string;
     timestamp: number;
     presetId: string;
 }
@@ -41,6 +41,16 @@ const MODE_PRIORITY: Record<string | number, number> = {
     1: 5  
 };
 
+interface SkinColors {
+    bg: string;
+    line: string;
+    lineDim: string;
+    nodeText: string;
+    nodeStroke: string;
+    nodeFill: (limit: number, colorMap: Record<number, string>) => string | CanvasGradient;
+    shadow: string;
+}
+
 export class LatticeRenderer {
     private prevStaticDeps: string = "";
     private cachedDataNodes: LatticeNode[] | null = null;
@@ -54,6 +64,52 @@ export class LatticeRenderer {
     ) {
         this.renderStatic(staticCanvas, state);
         this.renderDynamic(bgCanvas, activeCanvas, state);
+    }
+
+    private getSkinConfig(skin: string, ctx: CanvasRenderingContext2D): SkinColors {
+        switch (skin) {
+            case 'paper':
+                return {
+                    bg: '#f8fafc', // Slate-50
+                    line: '#94a3b8', // Slate-400
+                    lineDim: 'rgba(148, 163, 184, 0.2)',
+                    nodeText: '#334155', // Slate-700
+                    nodeStroke: '#334155',
+                    nodeFill: () => '#ffffff',
+                    shadow: 'rgba(0,0,0,0.1)'
+                };
+            case 'blueprint':
+                return {
+                    bg: '#1e3a8a', // Blue-900
+                    line: 'rgba(147, 197, 253, 0.4)', // Blue-300
+                    lineDim: 'rgba(147, 197, 253, 0.1)',
+                    nodeText: '#dbeafe', // Blue-100
+                    nodeStroke: '#93c5fd',
+                    nodeFill: () => '#172554', // Blue-950
+                    shadow: 'rgba(0,0,0,0.3)'
+                };
+            case 'cyber':
+                return {
+                    bg: '#000000',
+                    line: '#333333',
+                    lineDim: '#111111',
+                    nodeText: '#ffffff',
+                    nodeStroke: '#444444',
+                    nodeFill: () => '#000000',
+                    shadow: '#00ff00'
+                };
+            case 'default':
+            default:
+                return {
+                    bg: 'transparent',
+                    line: '#666',
+                    lineDim: 'rgba(255,255,255,0.1)',
+                    nodeText: '#ffffff',
+                    nodeStroke: 'transparent',
+                    nodeFill: (limit, map) => map[limit] || '#666',
+                    shadow: 'black'
+                };
+        }
     }
 
     private renderStatic(canvas: HTMLCanvasElement, state: RenderState) {
@@ -99,7 +155,9 @@ export class LatticeRenderer {
         const spacing = settings.buttonSpacingScale * effectiveScale;
         const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
         const isDiamond = settings.buttonShape === ButtonShape.DIAMOND;
-        const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
+        
+        const skin = this.getSkinConfig(settings.activeSkin, ctx);
+        const isFlatSkin = settings.activeSkin !== 'default';
 
         const cullPad = 200;
         const cullLeft = view.x - cullPad;
@@ -125,7 +183,12 @@ export class LatticeRenderer {
         for (const limitStr in linesByLimit) {
             const limit = parseInt(limitStr);
             const coords = linesByLimit[limit];
-            const color = isJIOverride ? '#fff' : (settings.colors[limit] || '#666');
+            
+            let color = settings.colors[limit] || '#666';
+            if (isFlatSkin) {
+                color = limit === 1 ? skin.line : skin.lineDim;
+            }
+
             const visualSettings = settings.limitVisuals?.[limit] || { size: 1, opacity: 1 };
             
             ctx.beginPath();
@@ -135,7 +198,7 @@ export class LatticeRenderer {
             }
             ctx.lineWidth = (limit === 1 ? 3 : 1) * visualSettings.size * effectiveScale; 
             ctx.strokeStyle = color;
-            ctx.globalAlpha = (isJIOverride ? 0.15 : 0.3) * visualSettings.opacity; 
+            ctx.globalAlpha = isFlatSkin ? 1.0 : 0.3 * visualSettings.opacity;
             
             if (limit === 1) ctx.setLineDash([5 * effectiveScale, 5 * effectiveScale]);
             else ctx.setLineDash([]);
@@ -150,8 +213,6 @@ export class LatticeRenderer {
             
             if (x < cullLeft || x > cullRight || y < cullTop || y > cullBottom) continue;
 
-            const cTop = isJIOverride ? '#fff' : (settings.colors[node.limitTop] || '#666');
-            const cBottom = isJIOverride ? '#eee' : (settings.colors[node.limitBottom] || '#666');
             const topVis = settings.limitVisuals?.[node.limitTop] || { size: 1, opacity: 1 };
             const limitScale = topVis.size;
             const limitOpacity = topVis.opacity;
@@ -170,13 +231,16 @@ export class LatticeRenderer {
             }
             ctx.closePath();
 
-            if (isJIOverride) {
-                ctx.fillStyle = '#111';
+            if (isFlatSkin) {
+                ctx.fillStyle = skin.nodeFill(node.limitTop, settings.colors) as string;
                 ctx.fill();
                 ctx.lineWidth = 2 * effectiveScale;
-                ctx.strokeStyle = '#fff';
+                ctx.strokeStyle = skin.nodeStroke;
                 ctx.stroke();
             } else {
+                // Default Gradient
+                const cTop = settings.colors[node.limitTop] || '#666';
+                const cBottom = settings.colors[node.limitBottom] || '#666';
                 const grad = ctx.createLinearGradient(x, y - radius, x, y + radius);
                 grad.addColorStop(0.45, cTop);
                 grad.addColorStop(0.55, cBottom);
@@ -186,7 +250,7 @@ export class LatticeRenderer {
 
             const combinedScale = settings.buttonSizeScale * limitScale;
             if (combinedScale > 0.4) {
-                ctx.fillStyle = isJIOverride ? '#fff' : 'white';
+                ctx.fillStyle = skin.nodeText;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 let fontSize = Math.max(10, Math.min(18, 14 * combinedScale)) * settings.nodeTextSizeScale * effectiveScale;
@@ -199,7 +263,8 @@ export class LatticeRenderer {
                     ctx.moveTo(x - (radius * 0.4), y);
                     ctx.lineTo(x + (radius * 0.4), y);
                     ctx.lineWidth = 1 * effectiveScale;
-                    ctx.strokeStyle = isJIOverride ? 'rgba(255,255,255,0.4)' : `rgba(255,255,255,${0.8 * limitOpacity})`;
+                    ctx.strokeStyle = isFlatSkin ? 'rgba(0,0,0,0.2)' : `rgba(255,255,255,${0.8 * limitOpacity})`;
+                    if (settings.activeSkin === 'cyber') ctx.strokeStyle = '#fff';
                     ctx.stroke();
                 }
                 ctx.fillText(node.d.toString(), x, y + (radius * spacingY));
@@ -248,7 +313,9 @@ export class LatticeRenderer {
         const spacing = settings.buttonSpacingScale * effectiveScale;
         const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
         const isDiamond = settings.buttonShape === ButtonShape.DIAMOND;
-        const isJIOverride = settings.tuningSystem === 'ji' && settings.layoutApproach !== 'lattice' && settings.layoutApproach !== 'diamond';
+        
+        const skin = this.getSkinConfig(settings.activeSkin, activeCtx);
+        const isFlatSkin = settings.activeSkin !== 'default';
 
         const animationSpeed = (settings.voiceLeadingAnimationSpeed || 2.0) * 0.33;
         const rawPhase = (time * 0.001 * animationSpeed);
@@ -274,13 +341,15 @@ export class LatticeRenderer {
                 
                 if (Math.max(x1, x2) < cullLeft || Math.min(x1, x2) > cullRight || Math.max(y1, y2) < cullTop || Math.min(y1, y2) > cullBottom) continue;
                 
-                const limitColor = isJIOverride ? '#fff' : (settings.colors[line.limit] || '#666');
+                let limitColor = settings.colors[line.limit] || '#666';
+                if (isFlatSkin) limitColor = skin.line;
+
                 bgCtx.beginPath();
                 bgCtx.moveTo(x1, y1);
                 bgCtx.lineTo(x2, y2);
                 bgCtx.lineWidth = (settings.lineBrighteningWidth || 1.0) * effectiveScale;
                 bgCtx.strokeStyle = limitColor;
-                bgCtx.globalAlpha = isJIOverride ? 0.4 : 0.8; 
+                bgCtx.globalAlpha = isFlatSkin ? 0.6 : 0.8; 
                 bgCtx.stroke();
             }
         }
@@ -294,11 +363,13 @@ export class LatticeRenderer {
             const y2 = line.y2 * spacing + centerOffset;
             if (Math.max(x1, x2) < cullLeft || Math.min(x1, x2) > cullRight || Math.max(y1, y2) < cullTop || Math.min(y1, y2) > cullBottom) continue;
             
-            const limitColor = isJIOverride ? '#fff' : (settings.colors[line.limit] || '#666');
+            let limitColor = settings.colors[line.limit] || '#666';
+            if (isFlatSkin) limitColor = skin.nodeStroke;
+
             bgCtx.beginPath();
             bgCtx.moveTo(x1, y1);
             bgCtx.lineTo(x2, y2);
-            bgCtx.lineWidth = (isJIOverride ? 2 : 4) * effectiveScale;
+            bgCtx.lineWidth = (isFlatSkin ? 2 : 4) * effectiveScale;
             bgCtx.strokeStyle = limitColor;
             bgCtx.globalAlpha = 1.0;
             bgCtx.stroke();
@@ -306,14 +377,17 @@ export class LatticeRenderer {
             if (settings.isVoiceLeadingAnimationEnabled) {
                 const grad = bgCtx.createLinearGradient(x1, y1, x2, y2);
                 const p = flowPhase;
-                grad.addColorStop(0, 'rgba(255,255,255,0)');
+                const bright = isFlatSkin ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)';
+                const clear = 'rgba(255,255,255,0)';
+                
+                grad.addColorStop(0, clear);
                 const pulseWidth = 0.2;
                 const start = Math.max(0, p - pulseWidth);
                 const end = Math.min(1, p + pulseWidth);
-                if (start > 0) grad.addColorStop(start, 'rgba(255,255,255,0)');
-                grad.addColorStop(p, isJIOverride ? 'rgba(255,255,255,1.0)' : 'rgba(255,255,255,0.7)'); 
-                if (end < 1) grad.addColorStop(end, 'rgba(255,255,255,0)');
-                grad.addColorStop(1, 'rgba(255,255,255,0)');
+                if (start > 0) grad.addColorStop(start, clear);
+                grad.addColorStop(p, bright); 
+                if (end < 1) grad.addColorStop(end, clear);
+                grad.addColorStop(1, clear);
                 
                 bgCtx.strokeStyle = grad;
                 bgCtx.lineWidth = 10 * (0.5 + settings.voiceLeadingGlowAmount) * effectiveScale;
@@ -336,7 +410,8 @@ export class LatticeRenderer {
              
              if (x < cullLeft || x > cullRight || y < cullTop || y > cullBottom) continue;
              
-             const cTop = isJIOverride ? '#fff' : (settings.colors[node.limitTop] || '#666');
+             const cTop = settings.colors[node.limitTop] || '#666';
+             const cBottom = settings.colors[node.limitBottom] || '#666';
              const vis = settings.limitVisuals?.[node.limitTop] || { size: 1 };
              const limitScale = vis.size;
              const zoomScale = settings.latchedZoomScale;
@@ -354,19 +429,22 @@ export class LatticeRenderer {
              }
              activeCtx.closePath();
              
-             if (isJIOverride) {
-                 activeCtx.fillStyle = '#fff';
+             if (isFlatSkin) {
+                 activeCtx.fillStyle = '#ffffff'; 
+                 if (settings.activeSkin === 'cyber') activeCtx.fillStyle = '#000000';
+                 if (settings.activeSkin === 'blueprint') activeCtx.fillStyle = '#dbeafe';
              } else {
                  const grad = activeCtx.createLinearGradient(x, y - baseRad, x, y + baseRad);
                  grad.addColorStop(0.45, cTop);
-                 grad.addColorStop(0.55, settings.colors[node.limitBottom] || '#666');
+                 grad.addColorStop(0.55, cBottom);
                  activeCtx.fillStyle = grad;
              }
              activeCtx.fill();
 
-             const uniqueModes = new Set<number>();
+             const uniqueModes = new Set<number | string>();
              activations.forEach(a => uniqueModes.add(a.mode));
              
+             // Sort: Standard modes (numbers) first, then 'arp'
              const sortedModes = Array.from(uniqueModes).sort((a, b) => {
                  return (MODE_PRIORITY[a] ?? 99) - (MODE_PRIORITY[b] ?? 99);
              });
@@ -376,6 +454,28 @@ export class LatticeRenderer {
              
              sortedModes.forEach((mode, index) => {
                  const color = MODE_COLORS[mode as keyof typeof MODE_COLORS] || '#ffffff';
+                 
+                 // Special FX for Strum (3) and Arp
+                 // Strum Ripple: If mode is 3, find the activation time and draw an expanding ring
+                 if (mode === 3 || mode === 'arp') {
+                     const activation = activations.find(a => a.mode === mode);
+                     if (activation) {
+                         const age = time - activation.timestamp;
+                         if (age < 500) { // 500ms ripple
+                             const rippleProgress = age / 500;
+                             const rippleRadius = baseRad + (rippleProgress * 40 * effectiveScale);
+                             const rippleAlpha = 1.0 - rippleProgress;
+                             
+                             activeCtx.beginPath();
+                             activeCtx.arc(x, y, rippleRadius, 0, Math.PI * 2);
+                             activeCtx.strokeStyle = color;
+                             activeCtx.lineWidth = 2 * effectiveScale;
+                             activeCtx.globalAlpha = rippleAlpha;
+                             activeCtx.stroke();
+                         }
+                     }
+                 }
+
                  const currentRadius = baseRad + ringGap + (index * (ringWidth + ringGap));
                  
                  activeCtx.beginPath();
@@ -401,7 +501,9 @@ export class LatticeRenderer {
 
              const combinedScale = settings.buttonSizeScale * limitScale * zoomScale;
              if (combinedScale > 0.4) {
-                activeCtx.fillStyle = isJIOverride ? '#000' : 'white';
+                activeCtx.fillStyle = isFlatSkin ? skin.nodeStroke : 'white';
+                if (settings.activeSkin === 'cyber') activeCtx.fillStyle = '#00ff00';
+                
                 activeCtx.textAlign = 'center';
                 activeCtx.textBaseline = 'middle';
                 let fontSize = Math.max(12, Math.min(22, 16 * combinedScale)) * settings.nodeTextSizeScale * effectiveScale;
@@ -413,7 +515,7 @@ export class LatticeRenderer {
                     activeCtx.moveTo(x - (baseRad * 0.4), y);
                     activeCtx.lineTo(x + (baseRad * 0.4), y);
                     activeCtx.lineWidth = 1 * effectiveScale;
-                    activeCtx.strokeStyle = isJIOverride ? 'rgba(0,0,0,0.5)' : 'white';
+                    activeCtx.strokeStyle = isFlatSkin ? 'rgba(0,0,0,0.5)' : 'white';
                     activeCtx.stroke();
                 }
                 activeCtx.fillText(node.d.toString(), x, y + (baseRad * spacingY));
@@ -437,7 +539,7 @@ export class LatticeRenderer {
                          activeCtx.beginPath();
                          activeCtx.moveTo(nx, ny);
                          activeCtx.lineTo(cx, cy);
-                         activeCtx.strokeStyle = isJIOverride ? '#fff' : 'white';
+                         activeCtx.strokeStyle = isFlatSkin ? skin.nodeStroke : 'white';
                          activeCtx.lineWidth = 2 * effectiveScale;
                          activeCtx.globalAlpha = 0.5;
                          activeCtx.stroke();

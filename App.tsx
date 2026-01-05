@@ -4,6 +4,7 @@ import SettingsModal from './components/SettingsModal';
 import SynthControls from './components/SynthControls';
 import FloatingControls from './components/FloatingControls';
 import LimitLayerControls from './components/LimitLayerControls';
+import RecordingControls from './components/RecordingControls';
 import { audioEngine } from './services/AudioEngine';
 import { midiService } from './services/MidiService';
 import { useStore } from './services/Store';
@@ -469,7 +470,13 @@ const App: React.FC = () => {
       updateSettings(prev => ({ ...prev, arpeggios: newArps }));
 
       if (newIsPlaying) {
-          arpeggiatorService.start(arp.steps, arp.config, settings.arpBpm, (step) => setCurrentArpStep(step));
+          arpeggiatorService.start(
+              arp.steps, 
+              arp.config, 
+              settings.arpBpm, 
+              (step) => setCurrentArpStep(step),
+              (nodeId, active) => diamondRef.current?.triggerVisual(nodeId, active) // Visual Callback
+          );
       } else {
           arpeggiatorService.stop();
       }
@@ -533,7 +540,13 @@ const App: React.FC = () => {
       updateSettings(prev => ({ ...prev, arpeggios: newArps }));
 
       if (newArps[arpIndex].isPlaying) {
-          arpeggiatorService.start(newArps[arpIndex].steps, newArps[arpIndex].config, settings.arpBpm, (step) => setCurrentArpStep(step));
+          arpeggiatorService.start(
+              newArps[arpIndex].steps, 
+              newArps[arpIndex].config, 
+              settings.arpBpm, 
+              (step) => setCurrentArpStep(step),
+              (nodeId, active) => diamondRef.current?.triggerVisual(nodeId, active)
+          );
       }
   };
 
@@ -546,7 +559,13 @@ const App: React.FC = () => {
       
       const firstValid = newArps.find(a => a.steps.length > 0);
       if (firstValid) {
-          arpeggiatorService.start(firstValid.steps, firstValid.config, settings.arpBpm, (step) => setCurrentArpStep(step));
+          arpeggiatorService.start(
+              firstValid.steps, 
+              firstValid.config, 
+              settings.arpBpm, 
+              (step) => setCurrentArpStep(step),
+              (nodeId, active) => diamondRef.current?.triggerVisual(nodeId, active)
+          );
       }
   };
 
@@ -712,6 +731,9 @@ const App: React.FC = () => {
       />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} updateSettings={updateSettings} />
       <SynthControls isOpen={isSynthOpen} onClose={() => setIsSynthOpen(false)} presets={presets} onChange={setPreset} />
+      
+      {/* Recording Controls - Rendered at root for universal access */}
+      <RecordingControls />
     </div>
   );
 };

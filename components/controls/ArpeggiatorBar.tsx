@@ -1,7 +1,5 @@
-
 import React, { useState } from 'react';
 import { ArpeggioDefinition, ArpeggioStep, ArpConfig, ArpDivision } from '../../types';
-import { recordingService } from '../../services/RecordingService';
 import { DEFAULT_COLORS } from '../../constants';
 import { getMaxPrime } from '../../services/LatticeService';
 
@@ -19,9 +17,6 @@ interface Props {
     onStopAll?: () => void;
     isSequencerOpen: boolean;
     onToggleSequencer: () => void;
-    isRecording: boolean;
-    recDuration: number;
-    onToggleRecord: () => void;
     
     // UI Props
     uiScale: number;
@@ -35,7 +30,7 @@ interface Props {
 const ArpeggiatorBar: React.FC<Props> = ({
     arpeggios, arpBpm, onArpToggle, onArpBpmChange, onArpRowConfigChange, onArpPatternUpdate,
     recordingArpId, currentArpStep, onPlayAll, onStopAll,
-    isSequencerOpen, onToggleSequencer, isRecording, recDuration, onToggleRecord,
+    isSequencerOpen, onToggleSequencer,
     uiScale, position, isConstrained, width, onDragStart, isFlashingRed
 }) => {
     const [isHovered, setIsHovered] = useState(false);
@@ -81,12 +76,6 @@ const ArpeggiatorBar: React.FC<Props> = ({
         }
     };
 
-    const formatRecTime = (secs: number) => {
-        const m = Math.floor(secs / 60);
-        const s = secs % 60;
-        return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    };
-
     return (
         <div 
             className={`absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl overflow-visible cursor-move`}
@@ -105,14 +94,6 @@ const ArpeggiatorBar: React.FC<Props> = ({
             <div className="w-full flex flex-col gap-2">
                  <div className={`flex items-center justify-between px-1 h-6 ${isConstrained ? 'flex-wrap h-auto gap-y-2' : ''}`}>
                      <span className="text-[12px] font-bold text-slate-400 uppercase tracking-widest mr-2">ARPEGGIATOR</span>
-                     
-                     {/* REC Indicator when panel closed */}
-                     {isRecording && !isSequencerOpen && (
-                         <div className="flex items-center gap-1 bg-red-900/50 px-2 py-0.5 rounded border border-red-500/50 mr-2 animate-pulse shadow-[0_0_8px_red]">
-                             <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                             <span className="text-[9px] font-bold text-red-200">REC</span>
-                         </div>
-                     )}
     
                      <div className="flex items-center gap-2">
                          <div className="flex items-center bg-slate-800/50 rounded border border-slate-700/50 overflow-hidden h-5">
@@ -214,7 +195,6 @@ const ArpeggiatorBar: React.FC<Props> = ({
                                     onPointerDown={(e) => { 
                                         e.stopPropagation(); 
                                         onStopAll(); 
-                                        if(isRecording) onToggleRecord(); // Use toggle to stop
                                     }}
                                 >
                                     STOP ALL
@@ -343,17 +323,6 @@ const ArpeggiatorBar: React.FC<Props> = ({
                              {recordingArpId && (
                                  <span className="text-[10px] text-red-400 animate-pulse">Rec: {recordingArpId}</span>
                              )}
-                         </div>
-                         
-                         <div className="flex items-center gap-2">
-                             {/* Integrated Recording Button */}
-                             <button 
-                                onClick={onToggleRecord}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-all border ${isRecording ? 'bg-red-900/80 border-red-500 text-white animate-pulse' : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-slate-300'}`}
-                             >
-                                 <div className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500' : 'bg-red-500/70'}`}></div>
-                                 {isRecording ? `REC ${formatRecTime(recDuration)}` : 'Record Audio'}
-                             </button>
                          </div>
                     </div>
                 </div>

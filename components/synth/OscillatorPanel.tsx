@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { OscillatorConfig, WaveformType, FilterType } from '../../types';
 
@@ -123,11 +122,28 @@ const OscillatorPanel: React.FC<Props> = ({ label, config, isPrimary = false, on
                 {/* LFO */}
                 <div className="p-3 bg-slate-900/50 rounded border border-slate-700">
                     <h3 className="text-xs font-bold text-pink-400 uppercase mb-3">LFO</h3>
+                    
                     <div className="flex gap-2 mb-4 text-[10px]">
                         {(['none', 'pitch', 'filter', 'tremolo'] as const).map(target => (
                              <button key={target} onClick={() => onUpdate('lfoTarget', target)} className={`flex-1 py-1 rounded border capitalize font-bold transition-colors ${config.lfoTarget === target ? 'bg-pink-600 border-pink-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400 hover:bg-slate-600'}`}>{target}</button>
                         ))}
                     </div>
+
+                    <div className="mb-4">
+                        <label className="block text-[10px] text-slate-400 font-bold mb-1 uppercase">LFO Waveform</label>
+                        <div className="flex bg-slate-800 rounded border border-slate-600 overflow-hidden">
+                            {(['sine', 'triangle', 'square', 'sawtooth', 'noise'] as const).map(w => (
+                                <button 
+                                    key={w} 
+                                    onClick={() => onUpdate('lfoWaveform', w)} 
+                                    className={`flex-1 py-1 text-[9px] uppercase font-bold transition-colors ${config.lfoWaveform === w ? 'bg-pink-600 text-white' : 'text-slate-400 hover:bg-slate-700'}`}
+                                >
+                                    {w.substr(0, 3)}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     <div className="space-y-2">
                         <div>
                             <label className="flex justify-between text-xs mb-1 text-slate-300">
@@ -136,8 +152,7 @@ const OscillatorPanel: React.FC<Props> = ({ label, config, isPrimary = false, on
                                     {config.lfoRate > 100 ? config.lfoRate.toFixed(0) : config.lfoRate} Hz
                                 </span>
                             </label>
-                            {/* Extended range to 200Hz for FM effects */}
-                            <input type="range" min="0.1" max="200" step="0.1" value={config.lfoRate} onChange={(e) => onUpdate('lfoRate', parseFloat(e.target.value))} className="w-full h-1 bg-pink-500 rounded appearance-none cursor-pointer" />
+                            <input type="range" min="0.1" max="150" step="0.1" value={config.lfoRate} onChange={(e) => onUpdate('lfoRate', parseFloat(e.target.value))} className="w-full h-1 bg-pink-500 rounded appearance-none cursor-pointer" />
                         </div>
                         <div>
                             <label className="flex justify-between text-xs mb-1 text-slate-300"><span>Depth</span> <span>{config.lfoDepth}</span></label>

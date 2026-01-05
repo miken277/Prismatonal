@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { AppSettings, KeyMappings } from '../../types';
 
@@ -127,10 +126,10 @@ const BehaviorTab: React.FC<Props> = ({ settings, updateSettings }) => {
                 <div className="space-y-4">
                   <label className="flex items-center justify-between cursor-pointer">
                     <div className="space-y-1">
-                        <span className="text-sm font-semibold text-white">Record screen activity</span>
-                        <p className="text-[10px] text-slate-500">Include visual capture when recording audio.</p>
+                        <span className="text-sm font-semibold text-white">Enable Audio Capture</span>
+                        <p className="text-[10px] text-slate-500">Allow the application to record internal audio output. Requires microphone permission on some browsers.</p>
                     </div>
-                    <input type="checkbox" checked={settings.recordScreenActivity} onChange={(e) => handleChange('recordScreenActivity', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
+                    <input type="checkbox" checked={settings.enableAudioRecording} onChange={(e) => handleChange('enableAudioRecording', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
                   </label>
                 </div>
               </div>

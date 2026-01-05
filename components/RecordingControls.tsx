@@ -1,16 +1,15 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { recordingService, RecordingMode } from '../services/RecordingService';
+import { recordingService } from '../services/RecordingService';
+import { useStore } from '../services/Store';
 
 const RecordingControls: React.FC = () => {
+  const { settings } = useStore();
   const [isRecording, setIsRecording] = useState(false);
-  const [mode, setMode] = useState<RecordingMode>('video-audio');
   const [duration, setDuration] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   const timerRef = useRef<number | null>(null);
-  const syncTimerRef = useRef<number | null>(null);
 
   // Format seconds to MM:SS
   const formatTime = (secs: number) => {
@@ -25,25 +24,19 @@ const RecordingControls: React.FC = () => {
     } else {
       setErrorMsg(null);
       try {
-        await recordingService.startRecording(mode);
+        await recordingService.startRecording();
         setIsRecording(true);
         setDuration(0);
         
-        // Start Duration Timer
         timerRef.current = window.setInterval(() => {
           setDuration(prev => prev + 1);
         }, 1000);
 
-        // Start Safety Sync Timer (checks if browser stopped sharing externally via system UI)
-        syncTimerRef.current = window.setInterval(() => {
-            if (!recordingService.isRecording) {
-                handleStop();
-            }
-        }, 1000);
-
-      } catch (e) {
-        console.error(e);
-        setErrorMsg("Capture Failed");
+      } catch (e: any) {
+        console.error("Recording Error:", e);
+        let msg = "Capture Failed";
+        if (e.name === 'NotAllowedError') msg = "Permission Denied";
+        setErrorMsg(msg);
         setTimeout(() => setErrorMsg(null), 3000);
       }
     }
@@ -57,48 +50,28 @@ const RecordingControls: React.FC = () => {
         clearInterval(timerRef.current);
         timerRef.current = null;
     }
-    if (syncTimerRef.current) {
-        clearInterval(syncTimerRef.current);
-        syncTimerRef.current = null;
-    }
   };
 
-  // Cleanup on unmount
   useEffect(() => {
       return () => {
           if (timerRef.current) clearInterval(timerRef.current);
-          if (syncTimerRef.current) clearInterval(syncTimerRef.current);
       };
   }, []);
+
+  if (!settings.enableAudioRecording) return null;
 
   return (
     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[160] transition-all duration-300 flex flex-col items-center gap-2 pointer-events-none">
         
         {/* Error Toast */}
         {errorMsg && (
-            <div className="bg-red-900/90 text-red-200 text-[10px] font-bold px-3 py-1 rounded-full animate-bounce shadow-lg pointer-events-auto border border-red-700">
+            <div className="bg-red-900/90 text-red-200 text-[10px] font-bold px-3 py-1 rounded-full animate-bounce shadow-lg pointer-events-auto border border-red-700 whitespace-nowrap">
                 {errorMsg}
             </div>
         )}
 
         <div className={`pointer-events-auto bg-slate-900/90 backdrop-blur-md border border-slate-700/60 rounded-full shadow-2xl flex items-center overflow-hidden transition-all ease-out duration-300 ${isExpanded || isRecording ? 'px-1 py-1 pr-4' : 'px-1 py-1'} ${isRecording ? 'border-red-900/50 shadow-[0_0_20px_rgba(220,38,38,0.2)]' : ''}`}>
             
-            {/* Mode Selection (Visible on Hover/Expand) */}
-            <div className={`flex items-center gap-1 overflow-hidden transition-all duration-300 ${isExpanded && !isRecording ? 'w-auto opacity-100 mr-2' : 'w-0 opacity-0'}`}>
-                <button 
-                    onClick={() => setMode('video-audio')}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[9px] font-bold uppercase whitespace-nowrap transition-colors ${mode === 'video-audio' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                >
-                    Screen
-                </button>
-                <button 
-                    onClick={() => setMode('audio-only')}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[9px] font-bold uppercase whitespace-nowrap transition-colors ${mode === 'audio-only' ? 'bg-purple-600 text-white shadow-sm' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                >
-                    Audio
-                </button>
-            </div>
-
             {/* Main Record Button (Compact) */}
             <button 
                 onClick={handleToggleRecord}
@@ -112,7 +85,9 @@ const RecordingControls: React.FC = () => {
                 )}
             </button>
 
-            {/* Recording Status Text */}
+            {/* Status / Info Section */}
+            
+            {/* Recording Status (Visible when Recording) */}
             {isRecording && (
                 <div className="flex flex-col ml-3 mr-1">
                     <span className="text-[9px] font-mono font-bold text-red-400 animate-pulse leading-none tracking-wider mb-0.5">REC</span>
@@ -120,11 +95,11 @@ const RecordingControls: React.FC = () => {
                 </div>
             )}
             
-            {/* Label (Visible on Hover/Expand) */}
+            {/* Idle Label (Visible on Hover/Expand) */}
             {isExpanded && !isRecording && (
                 <div className="ml-2 flex flex-col justify-center" onMouseLeave={() => setIsExpanded(false)}>
                     <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest leading-none">Record</span>
-                    <span className="text-[8px] text-slate-500 leading-none mt-0.5">{mode === 'video-audio' ? 'A/V' : 'Audio'}</span>
+                    <span className="text-[8px] text-slate-500 leading-none mt-0.5">Internal Audio</span>
                 </div>
             )}
         </div>
