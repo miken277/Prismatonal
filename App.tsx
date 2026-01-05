@@ -29,7 +29,7 @@ const App: React.FC = () => {
   const [latchMode, setLatchMode] = useState<0 | 1 | 2 | 3 | 4>(2);
   
   // Track sustain ON/OFF preference per instrument mode
-  // 1: Drone (Default True), 2: Strings (Default True), 3: Plucked (N/A), 4: Voice (Default False)
+  // 1: Drone (Default True), 2: Strings (Default True), 3: Plucked (Default False, but user can enable), 4: Voice (Default False)
   const [sustainStates, setSustainStates] = useState<{ [key: number]: boolean }>({ 1: true, 2: true, 3: false, 4: false });
 
   // Track which modes currently have active voices sustained
@@ -304,11 +304,9 @@ const App: React.FC = () => {
       setLatchMode(newMode);
       
       // 3. Restore new mode's sustain state
+      // Note: If no previous state exists, defaults are used (defined in useState above)
       let nextSustainState = sustainStates[newMode] ?? false;
       
-      // DECOUPLED: Do NOT force Bend off or sustain off for any mode.
-      // We respect the user's previous choice or default state for each mode.
-
       updateSettings(prev => ({
           ...prev,
           isSustainEnabled: nextSustainState,

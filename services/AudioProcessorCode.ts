@@ -958,7 +958,8 @@ class PrismaProcessor extends AudioWorkletProcessor {
         const v = this.voices[i];
         if (v.active) {
             // Auto-Release Check for Trigger mode
-            if ((v.mode === 'trigger' || v.type === 'strum') && v.releaseTime === 0) {
+            // MODIFIED: Only release if mode is 'trigger'. Do NOT release if preset type is 'strum' but mode is 'gate'.
+            if (v.mode === 'trigger' && v.releaseTime === 0) {
                 if (currentTime - v.startTime >= this.strumDuration) v.release();
             }
 

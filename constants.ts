@@ -383,16 +383,17 @@ const preservedNoiseWash = p("Noise Wash", "Atmosphere",
 );
 
 // --- NEW PATCH BANKS ---
+// Plucked patches now feature Sustain > 0 to allow holding notes (e-bow effect), 
+// but maintain short decay and long release to create "natural decay" on quick release/strum.
 const PLUCKED_PATCHES = [
     // Sitar - Bright, buzzing bridge (Jawari) simulation
     p("Sitar", "Plucked",
-        // Osc 1: Main String with Jawari (Bridge Buzz) - Sawtooth filtered to emphasize harmonics
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.65, attack: 0.02, decay: 3.0, sustain: 0.0, release: 3.0, filterType: 'bandpass', filterCutoff: 2200, filterResonance: 6.0 },
-        // Osc 2: Sympathetic Strings (Tarafdar) - High pitched, shimmering background
-        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1205, gain: 0.2, attack: 0.1, decay: 4.0, sustain: 0.0, release: 4.0, filterType: 'highpass', filterCutoff: 1500 },
-        // Osc 3: Metallic Pluck (Mizrab) - Sharp transient
+        // Osc 1: Main String with Jawari
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.65, attack: 0.02, decay: 0.4, sustain: 0.6, release: 3.0, filterType: 'bandpass', filterCutoff: 2200, filterResonance: 6.0 },
+        // Osc 2: Sympathetic Strings
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1205, gain: 0.2, attack: 0.1, decay: 1.0, sustain: 0.5, release: 4.0, filterType: 'highpass', filterCutoff: 1500 },
+        // Osc 3: Metallic Pluck
         { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 0, gain: 0.5, attack: 0.005, decay: 0.08, sustain: 0.0, release: 0.1 },
-        // Effects: Heavy Resonator for Gourd body, Mod Matrix for the "talking" filter
         {
             spread: 0.4,
             reverbType: 'plate',
@@ -400,26 +401,20 @@ const PLUCKED_PATCHES = [
             delayMix: 0.25,
             delayTime: 0.2,
             delayFeedback: 0.3,
-            resonatorMix: 0.6, // Distinctive gourd body
-            resonatorSweep: 0.85, // Bright/Open resonance
+            resonatorMix: 0.6,
+            resonatorSweep: 0.85,
             modMatrix: [
-                // Envelope 1 modulates Osc 1 cutoff to create the dynamic "twang" of the jawari
                 { id: 'sitar-jawari', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 45 },
-                // LFO 1 creates shimmering interference on sympathetic strings
                 { id: 'sympathetic-shimmer', enabled: true, source: 'lfo1', target: 'osc2_gain', amount: 15 }
             ],
-            // Configure LFO 1 for shimmer
-            osc1: { ...defaultDisabledOsc, enabled: true, waveform: WaveformType.SAWTOOTH, lfoRate: 7, lfoDepth: 0, lfoTarget: 'none', filterType: 'bandpass', filterCutoff: 2200, filterResonance: 6.0, attack: 0.02, decay: 3.0, sustain: 0.0, release: 3.0 } 
+            osc1: { ...defaultDisabledOsc, enabled: true, waveform: WaveformType.SAWTOOTH, lfoRate: 7, lfoDepth: 0, lfoTarget: 'none', filterType: 'bandpass', filterCutoff: 2200, filterResonance: 6.0, attack: 0.02, decay: 0.4, sustain: 0.6, release: 3.0 } 
         }
     ),
     // Glass Harp - Ethereal, rubbed glass sound
     p("Glass Harp", "Plucked",
-        // Osc 1: Pure Tone
-        { enabled: true, waveform: WaveformType.SINE, gain: 0.6, attack: 0.05, decay: 2.5, sustain: 0.0, release: 1.0 },
-        // Osc 2: Octave up reinforcement
-        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.4, attack: 0.1, decay: 3.0, sustain: 0.0, release: 1.0 },
-        // Osc 3: Harmonic bloom (5th)
-        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1902, gain: 0.2, attack: 0.2, decay: 4.0, sustain: 0.0, release: 1.0 },
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.6, attack: 0.05, decay: 1.0, sustain: 0.7, release: 2.5 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.4, attack: 0.1, decay: 1.5, sustain: 0.6, release: 3.0 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1902, gain: 0.2, attack: 0.2, decay: 2.0, sustain: 0.4, release: 3.0 },
         { 
             spread: 0.6, 
             reverbType: 'shimmer', 
@@ -429,13 +424,12 @@ const PLUCKED_PATCHES = [
         }
     ),
     p("Classic Harp", "Plucked", 
-        // Osc 1: The "String" body - Sawtooth filtered, bright start, warm trail
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.005, decay: 2.5, sustain: 0.0, release: 2.5, filterCutoff: 400, filterResonance: 1.0 }, 
-        // Osc 2: Fundamental reinforcement - Sine, smooth body
-        { enabled: true, waveform: WaveformType.SINE, gain: 0.6, attack: 0.005, decay: 3.0, sustain: 0.0, release: 3.0 }, 
-        // Osc 3: Transient/Harmonic - Short, high pitch, defines the 'pluck' trigger
+        // Osc 1: The "String" body
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.005, decay: 0.5, sustain: 0.5, release: 3.0, filterCutoff: 400, filterResonance: 1.0 }, 
+        // Osc 2: Fundamental reinforcement
+        { enabled: true, waveform: WaveformType.SINE, gain: 0.6, attack: 0.005, decay: 0.8, sustain: 0.6, release: 3.5 }, 
+        // Osc 3: Transient/Harmonic
         { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, gain: 0.2, attack: 0.005, decay: 0.15, sustain: 0.0, release: 0.15 }, 
-        // FX & Mods: Env3 modulates Osc1 cutoff for a dynamic pluck transient (using the short decay of Osc3's env for the filter of Osc1)
         { 
             spread: 0.5, 
             reverbType: 'room', 
@@ -446,14 +440,14 @@ const PLUCKED_PATCHES = [
             ] 
         }
     ),
-    p("Koto Synth", "Plucked", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, decay: 0.4, sustain: 0, filterCutoff: 3000 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.4, decay: 0.5, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.2, decay: 0.3, sustain: 0 }, { spread: 0.3, reverbType: 'room', reverbMix: 0.2 }),
+    p("Koto Synth", "Plucked", { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, decay: 0.4, sustain: 0.4, release: 1.5, filterCutoff: 3000 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.4, decay: 0.5, sustain: 0.3, release: 1.5 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.2, decay: 0.3, sustain: 0.2, release: 1.0 }, { spread: 0.3, reverbType: 'room', reverbMix: 0.2 }),
     p("Guitar Pluck", "Plucked", 
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.005, decay: 1.2, sustain: 0, release: 1.2, filterCutoff: 600, filterResonance: 0.5 }, 
-        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, attack: 0.005, decay: 1.0, sustain: 0, release: 1.0, filterCutoff: 800 }, 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.005, decay: 0.8, sustain: 0.4, release: 2.0, filterCutoff: 600, filterResonance: 0.5 }, 
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, attack: 0.005, decay: 0.5, sustain: 0.3, release: 1.5, filterCutoff: 800 }, 
         { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.15, decay: 0.2, sustain: 0 }, 
         { spread: 0.2, reverbType: 'room', reverbMix: 0.3, delayMix: 0.2, modMatrix: [{ id: 'gtr-cut', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 60 }] }
     ),
-    p("Kalimba Dream", "Plucked", { enabled: true, waveform: WaveformType.SINE, gain: 0.7, decay: 0.6, sustain: 0 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, gain: 0.3, decay: 0.4, sustain: 0 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.2, decay: 0.2, sustain: 0 }, { spread: 0.4, reverbType: 'plate', reverbMix: 0.25 })
+    p("Kalimba Dream", "Plucked", { enabled: true, waveform: WaveformType.SINE, gain: 0.7, decay: 0.6, sustain: 0.6, release: 1.5 }, { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 1200, gain: 0.3, decay: 0.4, sustain: 0.3, release: 1.2 }, { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.2, decay: 0.2, sustain: 0 }, { spread: 0.4, reverbType: 'plate', reverbMix: 0.25 })
 ];
 
 const STRINGS_PATCHES = [
