@@ -102,6 +102,11 @@ export interface XYPos {
   y: number;
 }
 
+export interface UISize {
+  width: number;
+  height?: number;
+}
+
 export interface KeyMappings {
     // Navigation & View
     center: string;
@@ -313,6 +318,10 @@ export interface AppSettings {
     layers: XYPos;
     arpeggioBar: XYPos;
     instruments: XYPos; // New cluster for Drone/String
+  };
+  uiSizes: {
+    volume: UISize;
+    arpeggioBar: UISize;
   };
 }
 

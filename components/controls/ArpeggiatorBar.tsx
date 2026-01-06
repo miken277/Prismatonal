@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { ArpeggioDefinition, ArpeggioStep, ArpConfig, ArpDivision } from '../../types';
 import { DEFAULT_COLORS } from '../../constants';
@@ -25,13 +26,14 @@ interface Props {
     width: number;
     onDragStart: (e: React.PointerEvent) => void;
     isFlashingRed: boolean;
+    uiUnlocked: boolean;
 }
 
 const ArpeggiatorBar: React.FC<Props> = ({
     arpeggios, arpBpm, onArpToggle, onArpBpmChange, onArpRowConfigChange, onArpPatternUpdate,
     recordingArpId, currentArpStep, onPlayAll, onStopAll,
     isSequencerOpen, onToggleSequencer,
-    uiScale, position, isConstrained, width, onDragStart, isFlashingRed
+    uiScale, position, isConstrained, width, onDragStart, isFlashingRed, uiUnlocked
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -78,12 +80,12 @@ const ArpeggiatorBar: React.FC<Props> = ({
 
     return (
         <div 
-            className={`absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl overflow-visible cursor-move`}
+            className={`absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
             style={{ 
                 left: position.x,
                 top: position.y,
                 width: width,
-                padding: `8px ${8 * uiScale}px`,
+                padding: `3px ${8 * uiScale}px`, // Reduced padding to 3px
                 height: 'auto',
                 touchAction: 'none'
             }}
@@ -92,10 +94,11 @@ const ArpeggiatorBar: React.FC<Props> = ({
             onPointerLeave={() => setIsHovered(false)}
         >
             <div className="w-full flex flex-col gap-2">
-                 <div className={`flex items-center justify-between px-1 h-6 ${isConstrained ? 'flex-wrap h-auto gap-y-2' : ''}`}>
-                     <span className="text-[12px] font-bold text-slate-400 uppercase tracking-widest mr-2">ARPEGGIATOR</span>
+                 {/* Top Row: Label + Controls (Wraps if narrow) */}
+                 <div className="flex flex-wrap items-center justify-between gap-y-2 px-1">
+                     <span className="text-[12px] font-bold text-slate-400 uppercase tracking-widest mr-2 flex-shrink-0">ARPEGGIATOR</span>
     
-                     <div className="flex items-center gap-2">
+                     <div className="flex items-center gap-2 flex-shrink-0">
                          <div className="flex items-center bg-slate-800/50 rounded border border-slate-700/50 overflow-hidden h-5">
                             <button 
                                 className="px-1.5 hover:bg-slate-700 active:bg-slate-600 text-slate-400 hover:text-white transition-colors border-r border-slate-700/30 flex items-center justify-center h-full"
@@ -123,7 +126,8 @@ const ArpeggiatorBar: React.FC<Props> = ({
                      </div>
                  </div>
     
-                 <div className="flex gap-1.5 justify-center flex-wrap w-full">
+                 {/* Button Grid - Start Aligned to handle wrapping cleanly */}
+                 <div className="flex gap-1.5 flex-wrap w-full justify-start">
                      {arpeggios.map(arp => {
                          const isRecordingArp = recordingArpId === arp.id;
                          const isPlaying = arp.isPlaying;
@@ -155,7 +159,7 @@ const ArpeggiatorBar: React.FC<Props> = ({
             </div>
             
             <button 
-                className="w-full h-4 mt-1 bg-slate-800/50 hover:bg-slate-700/50 rounded flex items-center justify-center cursor-pointer transition-colors"
+                className="w-full h-4 mt-1 bg-slate-800/50 hover:bg-slate-700/50 rounded flex items-center justify-center cursor-pointer transition-colors flex-shrink-0"
                 onPointerDown={(e) => { e.stopPropagation(); onToggleSequencer(); }}
             >
                  <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 text-slate-400 transition-transform ${isSequencerOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">

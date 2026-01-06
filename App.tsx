@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import TonalityDiamond, { TonalityDiamondHandle } from './components/TonalityDiamond';
 import SettingsModal from './components/SettingsModal';
@@ -8,7 +9,7 @@ import RecordingControls from './components/RecordingControls';
 import { audioEngine } from './services/AudioEngine';
 import { midiService } from './services/MidiService';
 import { useStore } from './services/Store';
-import { AppSettings, ChordDefinition, XYPos, ArpeggioStep, ArpConfig, ArpeggioDefinition, PlayMode, SynthPreset } from './types';
+import { AppSettings, ChordDefinition, XYPos, ArpeggioStep, ArpConfig, ArpeggioDefinition, PlayMode, SynthPreset, UISize } from './types';
 import { PIXELS_PER_MM, SCROLLBAR_WIDTH } from './constants';
 import { arpeggiatorService } from './services/ArpeggiatorService';
 
@@ -147,7 +148,8 @@ const App: React.FC = () => {
       const baseGap = Math.max(marginPx, 32 * scale); 
 
       // Dimensions
-      const volumeBarWidth = 600 * scale; 
+      // Use dynamic sizes if available, otherwise defaults
+      const volumeBarWidth = (settings.uiSizes?.volume?.width || 600) * scale;
       
       const settingsGroupWidth = 170; 
       const settingsGroupHeight = 40; 
@@ -251,7 +253,7 @@ const App: React.FC = () => {
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [settings.uiScale, settings.uiEdgeMargin, settings.showIncreaseDepthButton]); 
+  }, [settings.uiScale, settings.uiEdgeMargin, settings.showIncreaseDepthButton, settings.uiSizes]); 
 
   useEffect(() => {
     audioEngine.setMasterVolume(masterVolume);
@@ -435,6 +437,13 @@ const App: React.FC = () => {
 
   const handleUiPositionUpdate = (key: keyof AppSettings['uiPositions'], pos: XYPos) => {
       updateSettings(prev => ({ ...prev, uiPositions: { ...prev.uiPositions, [key]: pos } }));
+  };
+
+  const handleUiSizeUpdate = (key: keyof AppSettings['uiSizes'], size: UISize) => {
+      updateSettings(prev => ({ 
+          ...prev, 
+          uiSizes: { ...prev.uiSizes, [key]: size } 
+      }));
   };
 
   // --- Arp Handlers ---
@@ -690,6 +699,7 @@ const App: React.FC = () => {
         showIncreaseDepthButton={settings.showIncreaseDepthButton}
         uiUnlocked={settings.uiUnlocked}
         uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
+        uiSizes={settings.uiSizes} updateSize={handleUiSizeUpdate}
         draggingId={draggingId} setDraggingId={setDraggingId}
         uiScale={effectiveScale}
         
@@ -718,7 +728,7 @@ const App: React.FC = () => {
         onPresetChange={setPreset}
         
         // Pass Recording Setting
-        recordScreenActivity={settings.recordScreenActivity}
+        // recordScreenActivity={settings.recordScreenActivity} // Removed outdated prop
       />
 
       <LimitLayerControls 

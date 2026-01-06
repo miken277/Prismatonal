@@ -1,3 +1,4 @@
+
 import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, OscillatorConfig, SynthPreset, WaveformType, ReverbType, ArpeggioDefinition, KeyMappings, BackgroundPreset } from './types';
 
 export const DEFAULT_COLORS: LimitColorMap = {
@@ -142,6 +143,11 @@ const getDefaults = () => {
 
 const DEFAULT_UI_POSITIONS = getDefaults();
 
+export const DEFAULT_UI_SIZES = {
+    volume: { width: 600, height: 160 }, // Increased from 110 to ensure full coverage by default
+    arpeggioBar: { width: 760 }
+};
+
 // Optimized SVG Patterns (Base64 Encoded)
 // 1. Cosmic Geometry: Concentric circles with radial lines
 const COSMIC_SVG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScyMDAnIGhlaWdodD0nMjAwJyB2aWV3Qm94PScwIDAgMjAwIDIwMCc+PHJlY3Qgd2lkdGg9JzIwMCcgaGVpZ2h0PScyMDAnIGZpbGw9JyMwZjE3MmEnLz48ZyBvcGFjaXR5PScwLjQnPjxjaXJjbGUgY3g9JzEwMCcgY3k9JzEwMCcgcj0nOTAnIGZpbGw9Im5vbmUiIHN0cm9rZT0nIzM4YmRmOCcgc3Ryb2tlLXdpZHRoPScxJy8+PGNpcmNsZSBjeD0nMTAwJyBjeT0nMTAwJyByPSc3MCcgZmlsbD0ibm9uZSIgc3Ryb2tlPScjODE4Y2Y4JyBzdHJva2Utd2lkdGg9JzEnLz48Y2lyY2xlIGN4PScxMDAnIGN5PScxMDAnIHI9JzUwJyBmaWxsPSJub25lIiBzdHJva2U9JyNjMDg0ZmMnIHN0cm9rZS13aWR0aD0nMScvPjxjaXJjbGUgY3g9JzEwMCcgY3k9JzEwMCcgcj0nMzAnIGZpbGw9Im5vbmUiIHN0cm9rZT0nI2Y0NzJiNicgc3Ryb2tlLXdpZHRoPScxJy8+PC9nPjxwYXRoIGQ9J00wIDAgTDIwMCAyMDAgTTIwMCAwIEwwIDIwMCBNMTAwIDAgTTEwMCAyMDAgMTAwIDEwMCBMMjAwIDEwMCcgc3Ryb2tlPScjZmZmZmZmJyBzdHJva2Utd2lkdGg9JzAuNScgb3BhY2l0eT0nMC4yJy8+PC9zdmc+";
@@ -257,10 +263,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   keyMappings: DEFAULT_KEY_MAPPINGS,
   strumDuration: 0.5,
   enableAudioRecording: false, // Renamed from recordScreenActivity
+
+  // UI Relocation & Scaling
   uiUnlocked: false,
   uiScale: 1.0, 
   uiEdgeMargin: 4, 
-  uiPositions: DEFAULT_UI_POSITIONS
+  uiPositions: DEFAULT_UI_POSITIONS,
+  uiSizes: DEFAULT_UI_SIZES,
 };
 
 // Helper for default disabled oscillator

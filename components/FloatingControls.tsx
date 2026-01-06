@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDivision, ArpeggioStep, PresetState, PlayMode, SynthPreset } from '../types';
+import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDivision, ArpeggioStep, PresetState, PlayMode, SynthPreset, UISize } from '../types';
 import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
 import ArpeggiatorBar from './controls/ArpeggiatorBar';
 import InstrumentCluster from './controls/InstrumentCluster';
@@ -38,6 +39,8 @@ interface Props {
   uiUnlocked: boolean;
   uiPositions: AppSettings['uiPositions'];
   updatePosition: (key: keyof AppSettings['uiPositions'], pos: XYPos) => void;
+  uiSizes?: AppSettings['uiSizes'];
+  updateSize?: (key: keyof AppSettings['uiSizes'], size: UISize) => void;
   draggingId: string | null;
   setDraggingId: (id: string | null) => void;
   uiScale?: number;
@@ -72,6 +75,7 @@ const FloatingControls: React.FC<Props> = ({
   onPanic, onOff, onLatch, onSust, onPluck, onVoice, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
+  uiSizes, updateSize,
   draggingId, setDraggingId, uiScale = 1.0,
   arpeggios = [], arpBpm = 120, onArpToggle, onArpBpmChange, onArpRowConfigChange, onArpPatternUpdate, recordingArpId, currentArpStep, recordingFlash = 0,
   onPlayAll, onStopAll,
@@ -134,6 +138,52 @@ const FloatingControls: React.FC<Props> = ({
     window.addEventListener('pointercancel', onUp);
   };
 
+  const handleResize = (e: React.PointerEvent, key: 'volume' | 'arpeggioBar', axis: 'x' | 'y' | 'xy') => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!updateSize || !uiSizes) return;
+
+      const el = e.currentTarget as HTMLElement;
+      el.setPointerCapture(e.pointerId);
+      
+      const startX = e.clientX;
+      const startY = e.clientY;
+      
+      const initialWidth = uiSizes[key]?.width || (key === 'volume' ? 600 : 760);
+      const initialHeight = uiSizes[key]?.height || (key === 'volume' ? 75 : 0); // Decreased default resize start base
+
+      const onMove = (evt: PointerEvent) => {
+          const deltaX = (evt.clientX - startX) / uiScale;
+          const deltaY = (evt.clientY - startY) / uiScale;
+          
+          let newWidth = initialWidth;
+          let newHeight = initialHeight;
+
+          if (axis === 'x' || axis === 'xy') {
+              // Enforce robust minimum widths
+              const minW = key === 'volume' ? 320 : 300; 
+              newWidth = Math.max(minW, initialWidth + deltaX);
+          }
+          if ((axis === 'y' || axis === 'xy') && key === 'volume') {
+              // Allows tight packing down to ~60px
+              const minH = 60; 
+              newHeight = Math.max(minH, initialHeight + deltaY);
+          }
+
+          updateSize(key, { width: newWidth, height: newHeight });
+      };
+
+      const onUp = () => {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          window.removeEventListener('pointercancel', onUp);
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+  };
+
   const handleButtonPress = (e: React.PointerEvent, key: keyof AppSettings['uiPositions'], action?: () => void) => {
       e.stopPropagation();
       if (uiUnlocked) {
@@ -148,10 +198,24 @@ const FloatingControls: React.FC<Props> = ({
   const baseSize = largeBtnSize; 
   const chordSize = baseSize * chordShortcutSizeScale;
   
-  const volumeBarWidth = 600 * uiScale; 
-  const defaultArpBarWidth = 760 * uiScale;
-  const effectiveArpWidth = maxArpWidth ? Math.max(300 * uiScale, Math.min(defaultArpBarWidth, maxArpWidth)) : defaultArpBarWidth;
-  const isConstrained = effectiveArpWidth < defaultArpBarWidth * 0.95;
+  // Volume Bar Dimensions
+  const volumeBaseWidth = uiSizes?.volume?.width || 600;
+  const volumeBaseHeight = uiSizes?.volume?.height || 75;
+  const volumeBarWidth = volumeBaseWidth * uiScale;
+  const volumeBarHeight = volumeBaseHeight * uiScale;
+
+  // Calculate robust minimum height for Volume Bar to prevent overflow
+  // 4 rows * 12px (min per row) + 3 gaps (2px) + 16px padding (8 top+8 bot) + buffer ~ 70px
+  // We use this as a hard floor for the style prop to ensure background always covers content
+  const minRowHeight = 12 * uiScale;
+  const totalMinHeight = (minRowHeight * 4) + (6 * uiScale) + (16 * uiScale);
+
+  // Arp Bar Dimensions
+  const arpBaseWidth = uiSizes?.arpeggioBar?.width || 760;
+  const userArpWidth = arpBaseWidth * uiScale;
+  // Use constraint logic if provided, but respect manual resize if it fits
+  const effectiveArpWidth = maxArpWidth ? Math.min(userArpWidth, maxArpWidth) : userArpWidth;
+  const isConstrained = effectiveArpWidth < (760 * uiScale) * 0.95;
   
   const draggableStyle = (key: string) => ({
       left: uiPositions[key as keyof typeof uiPositions]?.x || 0,
@@ -159,9 +223,10 @@ const FloatingControls: React.FC<Props> = ({
       touchAction: 'none' as React.CSSProperties['touchAction'],
   });
 
+  // INCREASED WIDTH: from 65 to 85 to accommodate "Volume" text comfortably
   const labelStyle = { 
       fontSize: 20 * uiScale, 
-      width: 120 * uiScale,
+      width: 85 * uiScale,
   };
 
   const sliderTrackHeight = 3 * uiScale;
@@ -173,6 +238,9 @@ const FloatingControls: React.FC<Props> = ({
       : (isSustainEnabled 
           ? 'bg-blue-600 text-white border-blue-300 shadow-[0_0_15px_rgba(37,99,235,0.6)]' 
           : 'bg-blue-900/40 text-blue-400 border-blue-500/50 hover:bg-blue-800/60');
+
+  // Resize Handle Style
+  const resizeHandleStyle = "absolute z-50 bg-yellow-500/50 hover:bg-yellow-400 rounded-sm border border-white/50 shadow-sm transition-colors";
 
   return (
     <>
@@ -191,12 +259,19 @@ const FloatingControls: React.FC<Props> = ({
       {/* Unified Audio & View Control (Top Right) */}
       <div 
         className={`absolute bg-slate-900/50 rounded-xl flex flex-col px-3 py-1 gap-0.5 backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-lg ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ ...draggableStyle('volume'), width: volumeBarWidth }}
+        style={{ 
+            ...draggableStyle('volume'), 
+            width: volumeBarWidth,
+            height: Math.max(volumeBarHeight, totalMinHeight), // Enforce robust minimum height
+            justifyContent: 'space-between', // Distribute space between rows
+            padding: '8px 12px' // Increased padding to 8px
+        }}
         onPointerDown={(e) => handleDrag(e, 'volume')}
       >
-        <div className="flex items-center gap-2 w-full h-6">
+        {/* ROW 1: VOLUME - Reduced min-h to 12px */}
+        <div className="flex items-center gap-2 w-full flex-1 min-h-[12px] max-h-7">
              <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Volume</span>
-             <div className="flex-1 min-w-0 flex items-center pl-1">
+             <div className="flex-1 min-w-[50px] flex items-center pl-1">
                 <input 
                     type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-green-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
@@ -205,9 +280,10 @@ const FloatingControls: React.FC<Props> = ({
                 />
              </div>
         </div>
-        <div className="flex items-center gap-2 w-full h-6">
+        {/* ROW 2: REVERB - Reduced min-h to 12px */}
+        <div className="flex items-center gap-2 w-full flex-1 min-h-[12px] max-h-7">
              <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Reverb</span>
-             <div className="flex-1 min-w-0 flex items-center pl-1">
+             <div className="flex-1 min-w-[50px] flex items-center pl-1">
                 <input 
                     type="range" min="0" max="2" step="0.01" value={spatialScale} onChange={(e) => setSpatialScale(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-blue-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
@@ -216,9 +292,10 @@ const FloatingControls: React.FC<Props> = ({
                 />
              </div>
         </div>
-        <div className="flex items-center gap-2 w-full h-6">
+        {/* ROW 3: TONE - Reduced min-h to 12px */}
+        <div className="flex items-center gap-2 w-full flex-1 min-h-[12px] max-h-7">
              <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Tone</span>
-             <div className="flex-1 min-w-0 flex items-center pl-1">
+             <div className="flex-1 min-w-[50px] flex items-center pl-1">
                 <input 
                     type="range" min="0" max="1" step="0.01" value={brightness} onChange={(e) => setBrightness(parseFloat(e.target.value))} disabled={uiUnlocked}
                     className={`prismatonal-slider w-full rounded-lg appearance-none text-yellow-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
@@ -227,9 +304,10 @@ const FloatingControls: React.FC<Props> = ({
                 />
              </div>
         </div>
-        <div className="flex items-center gap-2 w-full h-6">
+        {/* ROW 4: ZOOM - Reduced min-h to 12px */}
+        <div className="flex items-center gap-2 w-full flex-1 min-h-[12px] max-h-7">
              <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Zoom</span>
-             <div className="flex-1 min-w-0 flex items-center pl-1">
+             <div className="flex-1 min-w-[50px] flex items-center pl-1">
                 <input 
                     type="range" min="0.5" max="3.0" step="0.05" value={viewZoom} onChange={(e) => setViewZoom(parseFloat(e.target.value))} disabled={uiUnlocked}
                     onDoubleClick={(e) => { e.stopPropagation(); setViewZoom(1.0); }}
@@ -240,9 +318,50 @@ const FloatingControls: React.FC<Props> = ({
                 />
              </div>
         </div>
+
+        {/* Volume Bar Resize Handles */}
+        {uiUnlocked && (
+            <>
+                {/* Right Handle (Width) */}
+                <div 
+                    className={`${resizeHandleStyle} cursor-ew-resize`}
+                    style={{ top: '10%', bottom: '10%', right: -6, width: 12 }}
+                    onPointerDown={(e) => handleResize(e, 'volume', 'x')}
+                />
+                {/* Bottom Handle (Height) */}
+                <div 
+                    className={`${resizeHandleStyle} cursor-ns-resize`}
+                    style={{ left: '10%', right: '10%', bottom: -6, height: 12 }}
+                    onPointerDown={(e) => handleResize(e, 'volume', 'y')}
+                />
+                {/* Corner Handle (Both) */}
+                <div 
+                    className={`${resizeHandleStyle} cursor-nwse-resize bg-yellow-400`}
+                    style={{ right: -6, bottom: -6, width: 16, height: 16, borderRadius: '50%' }}
+                    onPointerDown={(e) => handleResize(e, 'volume', 'xy')}
+                />
+            </>
+        )}
       </div>
 
       {/* ARPEGGIATOR BAR */}
+      {/* We wrap logic for the handle here because ArpeggiatorBar is a contained component */}
+      <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0 }}>
+          {uiUnlocked && (
+              <div 
+                  className={`${resizeHandleStyle} cursor-ew-resize`}
+                  style={{ 
+                      left: uiPositions.arpeggioBar.x + effectiveArpWidth - 6, 
+                      top: uiPositions.arpeggioBar.y, 
+                      height: 52 * uiScale, // Approx height of arp bar
+                      width: 12,
+                      zIndex: 160 // Above Arp Bar
+                  }}
+                  onPointerDown={(e) => handleResize(e, 'arpeggioBar', 'x')}
+              />
+          )}
+      </div>
+
       <ArpeggiatorBar 
           arpeggios={arpeggios}
           arpBpm={arpBpm}
@@ -262,6 +381,7 @@ const FloatingControls: React.FC<Props> = ({
           width={effectiveArpWidth}
           onDragStart={(e) => handleDrag(e, 'arpeggioBar')}
           isFlashingRed={isFlashingRed}
+          uiUnlocked={uiUnlocked}
       />
 
       {/* INSTRUMENT CLUSTER (Left) */}
@@ -312,7 +432,7 @@ const FloatingControls: React.FC<Props> = ({
 
       {showIncreaseDepthButton && (<button className={`absolute rounded bg-green-600/20 border-2 border-green-500 flex items-center justify-center text-green-500 font-bold backdrop-blur hover:bg-green-600/40 active:bg-green-600 active:text-white transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('decreaseDepth'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'decreaseDepth', onDecreaseDepth)} title="Decrease Depth"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12h-15" /></svg></button>)}
 
-      <div className={`absolute flex items-center gap-2 z-[150] transition-all ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50 rounded-lg p-1 border-dashed border-2 border-yellow-500/50' : ''}`} style={{ ...draggableStyle('chords') }} onPointerDown={(e) => handleDrag(e, 'chords')}>
+      <div className={`absolute flex items-center gap-2 z-[150] transition-all ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50 rounded-xl p-1 bg-slate-900/20 border border-white/10' : ''}`} style={{ ...draggableStyle('chords') }} onPointerDown={(e) => handleDrag(e, 'chords')}>
           <button className="rounded bg-indigo-600/20 border-2 border-indigo-500 flex items-center justify-center text-indigo-500 font-bold backdrop-blur hover:bg-indigo-600/40 active:bg-indigo-600 active:text-white transition-all shadow-[0_0_15px_rgba(99,102,241,0.4)] select-none" style={{ width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'chords', onAddChord)} title="Store Current Chord"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
           
           {!uiUnlocked && savedChords.filter(c => c.visible).map((chord, i) => {
