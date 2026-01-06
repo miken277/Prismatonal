@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { recordingService } from '../services/RecordingService';
 import { useStore } from '../services/Store';
@@ -26,6 +27,7 @@ const RecordingControls: React.FC = () => {
       try {
         await recordingService.startRecording();
         setIsRecording(true);
+        setIsExpanded(false); // Collapse hover text
         setDuration(0);
         
         timerRef.current = window.setInterval(() => {
@@ -60,23 +62,34 @@ const RecordingControls: React.FC = () => {
 
   if (!settings.enableAudioRecording) return null;
 
+  // Center alignment strategy: 
+  // Button (w-8 = 32px) + Padding (p-1 = 4px) => Center is at 20px from left.
+  // We position the container left-1/2 and shift left by 20px. 
+  // This pins the button to the center of the screen, allowing text to expand right.
+
   return (
-    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[160] transition-all duration-300 flex flex-col items-center gap-2 pointer-events-none">
+    <div 
+        className="absolute bottom-6 left-1/2 z-[160] flex flex-col items-start pointer-events-none"
+        style={{ transform: 'translateX(-20px)' }}
+    >
         
-        {/* Error Toast */}
+        {/* Error Toast - Absolute positioning relative to this container to maintain center alignment with button */}
         {errorMsg && (
-            <div className="bg-red-900/90 text-red-200 text-[10px] font-bold px-3 py-1 rounded-full animate-bounce shadow-lg pointer-events-auto border border-red-700 whitespace-nowrap">
+            <div className="absolute bottom-full mb-2 left-[20px] -translate-x-1/2 bg-red-900/90 text-red-200 text-[10px] font-bold px-3 py-1 rounded-full animate-bounce shadow-lg pointer-events-auto border border-red-700 whitespace-nowrap">
                 {errorMsg}
             </div>
         )}
 
-        <div className={`pointer-events-auto bg-slate-900/90 backdrop-blur-md border border-slate-700/60 rounded-full shadow-2xl flex items-center overflow-hidden transition-all ease-out duration-300 ${isExpanded || isRecording ? 'px-1 py-1 pr-4' : 'px-1 py-1'} ${isRecording ? 'border-red-900/50 shadow-[0_0_20px_rgba(220,38,38,0.2)]' : ''}`}>
+        <div 
+            className={`pointer-events-auto bg-slate-900/90 backdrop-blur-md border border-slate-700/60 rounded-full shadow-2xl flex items-center overflow-hidden transition-all ease-out duration-300 p-1 ${isExpanded || isRecording ? 'pr-4' : ''} ${isRecording ? 'border-red-900/50 shadow-[0_0_20px_rgba(220,38,38,0.2)]' : ''}`}
+            onMouseEnter={() => !isRecording && setIsExpanded(true)}
+            onMouseLeave={() => setIsExpanded(false)}
+        >
             
             {/* Main Record Button (Compact) */}
             <button 
                 onClick={handleToggleRecord}
-                onMouseEnter={() => !isRecording && setIsExpanded(true)}
-                className={`relative flex items-center justify-center rounded-full transition-all duration-300 group ${isRecording ? 'w-8 h-8 bg-slate-800 border border-slate-600' : 'w-8 h-8 bg-red-600 hover:bg-red-500 hover:scale-105 shadow-md border border-red-400/50'}`}
+                className={`relative flex items-center justify-center rounded-full transition-all duration-300 group flex-shrink-0 ${isRecording ? 'w-8 h-8 bg-slate-800 border border-slate-600' : 'w-8 h-8 bg-red-600 hover:bg-red-500 hover:scale-105 shadow-md border border-red-400/50'}`}
             >
                 {isRecording ? (
                     <div className="w-2.5 h-2.5 bg-red-500 rounded-sm animate-pulse shadow-[0_0_8px_red]"></div>
@@ -88,20 +101,18 @@ const RecordingControls: React.FC = () => {
             {/* Status / Info Section */}
             
             {/* Recording Status (Visible when Recording) */}
-            {isRecording && (
-                <div className="flex flex-col ml-3 mr-1">
+            <div className={`flex flex-col ml-3 mr-1 transition-all duration-300 overflow-hidden whitespace-nowrap ${isRecording ? 'w-[40px] opacity-100' : 'w-0 opacity-0'}`}>
+                <div className="flex flex-col">
                     <span className="text-[9px] font-mono font-bold text-red-400 animate-pulse leading-none tracking-wider mb-0.5">REC</span>
                     <span className="text-[10px] font-mono font-bold text-white leading-none">{formatTime(duration)}</span>
                 </div>
-            )}
+            </div>
             
             {/* Idle Label (Visible on Hover/Expand) */}
-            {isExpanded && !isRecording && (
-                <div className="ml-2 flex flex-col justify-center" onMouseLeave={() => setIsExpanded(false)}>
-                    <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest leading-none">Record</span>
-                    <span className="text-[8px] text-slate-500 leading-none mt-0.5">Internal Audio</span>
-                </div>
-            )}
+            <div className={`flex flex-col justify-center ml-2 transition-all duration-300 overflow-hidden whitespace-nowrap ${isExpanded && !isRecording ? 'w-[75px] opacity-100' : 'w-0 opacity-0'}`}>
+                <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest leading-none">Record</span>
+                <span className="text-[8px] text-slate-500 leading-none mt-0.5">Internal Audio</span>
+            </div>
         </div>
     </div>
   );

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AppSettings, KeyMappings } from '../../types';
 
@@ -10,6 +11,22 @@ const BehaviorTab: React.FC<Props> = ({ settings, updateSettings }) => {
     const [listeningFor, setListeningFor] = useState<keyof KeyMappings | null>(null);
 
     const handleChange = (key: keyof AppSettings, value: any) => updateSettings({ [key]: value });
+
+    // Hook for handling the enabling of audio capture
+    // This is where you would inject explicit permission requests (e.g. getUserMedia) if expanding to microphone input in the future.
+    const handleToggleAudioRecording = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const isEnabled = e.target.checked;
+        
+        if (isEnabled) {
+            // Optional: Add logic here to request permissions dynamically if needed
+            // e.g., await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // For internal synthesis recording, we just enable the setting
+            handleChange('enableAudioRecording', true);
+        } else {
+            handleChange('enableAudioRecording', false);
+        }
+    };
 
     useEffect(() => {
         const handleBinderKeyDown = (e: KeyboardEvent) => {
@@ -124,12 +141,12 @@ const BehaviorTab: React.FC<Props> = ({ settings, updateSettings }) => {
 
                 <h3 className="font-semibold text-indigo-400 border-b border-slate-700 pb-1 mt-6">Recording</h3>
                 <div className="space-y-4">
-                  <label className="flex items-center justify-between cursor-pointer">
+                  <label className="flex items-center justify-between cursor-pointer bg-slate-900/40 p-3 rounded border border-slate-700/50">
                     <div className="space-y-1">
                         <span className="text-sm font-semibold text-white">Enable Audio Capture</span>
-                        <p className="text-[10px] text-slate-500">Allow the application to record internal audio output. Requires microphone permission on some browsers.</p>
+                        <p className="text-[10px] text-slate-500">Enable internal high-quality audio recording.</p>
                     </div>
-                    <input type="checkbox" checked={settings.enableAudioRecording} onChange={(e) => handleChange('enableAudioRecording', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
+                    <input type="checkbox" checked={settings.enableAudioRecording} onChange={handleToggleAudioRecording} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
                   </label>
                 </div>
               </div>
