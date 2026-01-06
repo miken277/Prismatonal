@@ -151,7 +151,8 @@ export const generateLattice = (
                       const pRat = PRIME_RATIOS[prime as 3|5|7|11|13];
                       const nextFrac = dir === 1 ? current.ratio.mul(pRat).normalize() : current.ratio.mul(new Fraction(pRat.d, pRat.n)).normalize();
                       
-                      const compLimit = settings.limitComplexities[prime as 3|5|7|11|13];
+                      // @ts-ignore
+                      const compLimit = (settings.limitComplexities && settings.limitComplexities[prime as 3|5|7|11|13]) ? settings.limitComplexities[prime as 3|5|7|11|13] : 1000;
                       if (nextFrac.n <= compLimit && nextFrac.d <= compLimit) {
                           visitedLocal.add(key);
                           localQueue.push({ coords: nextCoords, ratio: nextFrac });

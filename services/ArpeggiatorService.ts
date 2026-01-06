@@ -8,8 +8,11 @@ type OnNoteCallback = (nodeId: string, active: boolean) => void;
 
 class ArpeggiatorService {
     private isRunning: boolean = false;
-    private timerId: number | null = null;
     private currentStepIndex: number = 0;
+    
+    // Lookahead Scheduler State
+    private nextNoteTime: number = 0;
+    private timerId: number | null = null;
     
     // The "source" steps from the recording
     private baseSteps: ArpeggioStep[] = [];
@@ -19,11 +22,15 @@ class ArpeggiatorService {
     private playbackQueue: { nodeId: string, ratio: number, originalIndex: number, muted?: boolean }[] = [];
     
     private onStepCallback: OnStepCallback | null = null;
-    private onNoteCallback: OnNoteCallback | null = null; // New visual callback
+    private onNoteCallback: OnNoteCallback | null = null; 
+    
+    // Track active visual nodes to ensure they are cleared on stop
+    private activeVisualNodeIds: Set<string> = new Set();
 
-    private lastPlayedVoiceId: string | null = null;
-    private lastPlayedNodeId: string | null = null; // Track node for visual off
-    private lastNoteOffTimer: number | null = null;
+    // Schedule ahead time (seconds)
+    private readonly scheduleAheadTime = 0.1; // 100ms
+    // Check interval (ms)
+    private readonly lookaheadInterval = 25; // 25ms
 
     public start(steps: ArpeggioStep[], config: ArpConfig, bpm: number, onStep?: OnStepCallback, onNote?: OnNoteCallback) {
         this.stop();
@@ -35,42 +42,188 @@ class ArpeggiatorService {
         this.onNoteCallback = onNote || null;
         this.isRunning = true;
         this.currentStepIndex = 0;
+        this.activeVisualNodeIds.clear();
 
-        this.recalculateQueue();
-        this.scheduleNextStep();
+        const ctx = audioEngine.getContext();
+        if (ctx) {
+            this.nextNoteTime = ctx.currentTime + 0.05; // Start slightly in future
+            this.recalculateQueue();
+            this.schedulerLoop();
+        } else {
+            // Fallback retry if context not ready
+            audioEngine.init().then(() => {
+                const ctx = audioEngine.getContext();
+                if (ctx) {
+                    this.nextNoteTime = ctx.currentTime + 0.05;
+                    this.recalculateQueue();
+                    this.schedulerLoop();
+                }
+            });
+        }
     }
 
     public stop() {
         this.isRunning = false;
         if (this.timerId) {
-            clearTimeout(this.timerId);
+            window.clearTimeout(this.timerId);
             this.timerId = null;
         }
-        if (this.lastNoteOffTimer) {
-            clearTimeout(this.lastNoteOffTimer);
-            this.lastNoteOffTimer = null;
+        
+        // Use stopGroup to clear future scheduled Arp events and trigger release for current ones
+        // This ensures sound tails off naturally (doesn't hard cut like stopAll)
+        audioEngine.stopGroup('arp-'); 
+        
+        // Explicitly clear any active visual feedback
+        if (this.onNoteCallback) {
+            this.activeVisualNodeIds.forEach(id => {
+                this.onNoteCallback!(id, false);
+            });
         }
-        this.stopLastNote();
+        this.activeVisualNodeIds.clear();
+        
         this.currentStepIndex = 0;
     }
 
     public updateBpm(newBpm: number) {
-        // Just continue running, the next schedule will pick up the new BPM from store/args
+        // Scheduler picks up new BPM on next cycle automatically from store (accessed in advanceNoteTime)
     }
 
-    private stopLastNote() {
-        if (this.lastPlayedVoiceId) {
-            audioEngine.stopVoice(this.lastPlayedVoiceId);
-            midiService.noteOff(this.lastPlayedVoiceId);
-            
-            // Visual feedback OFF
-            if (this.lastPlayedNodeId && this.onNoteCallback) {
-                this.onNoteCallback(this.lastPlayedNodeId, false);
-            }
+    private schedulerLoop() {
+        if (!this.isRunning) return;
 
-            this.lastPlayedVoiceId = null;
-            this.lastPlayedNodeId = null;
+        const ctx = audioEngine.getContext();
+        if (!ctx) return;
+
+        const currentTime = ctx.currentTime;
+
+        // Schedule notes falling within the lookahead window
+        while (this.nextNoteTime < currentTime + this.scheduleAheadTime) {
+            this.scheduleNote(this.nextNoteTime);
+            this.advanceNoteTime();
         }
+        
+        this.timerId = window.setTimeout(() => this.schedulerLoop(), this.lookaheadInterval);
+    }
+
+    private advanceNoteTime() {
+        const state = store.getSnapshot();
+        const bpm = state.settings.arpBpm || 120;
+        const config = this.currentConfig;
+        if (!config) return;
+
+        const beatMs = 60000 / bpm; 
+        let div = 0.5; // default 1/8
+        
+        switch(config.division) {
+            case '1/1': div = 4.0; break;
+            case '1/2': div = 2.0; break;
+            case '1/4': div = 1.0; break;
+            case '1/8': div = 0.5; break;
+            case '1/16': div = 0.25; break;
+            case '1/32': div = 0.125; break;
+            case '1/4T': div = 1.0 * (2/3); break;
+            case '1/8T': div = 0.5 * (2/3); break;
+            case '1/16T': div = 0.25 * (2/3); break;
+        }
+        
+        let stepDurationSeconds = (beatMs * div) / 1000;
+
+        // Swing Logic
+        if (config.swing > 0) {
+            const isEvenStep = (this.currentStepIndex % 2) === 0;
+            const swingAmount = (config.swing / 100) * 0.33; 
+            if (isEvenStep) stepDurationSeconds *= (1.0 + swingAmount); 
+            else stepDurationSeconds *= (1.0 - swingAmount);
+        }
+
+        // Humanize Logic
+        if (config.humanize && config.humanize > 0) {
+            const jitterSeconds = (Math.random() - 0.5) * (config.humanize / 1000);
+            stepDurationSeconds += jitterSeconds;
+        }
+
+        this.nextNoteTime += Math.max(0.01, stepDurationSeconds);
+        this.currentStepIndex++;
+    }
+
+    private scheduleNote(time: number) {
+        if (!this.playbackQueue.length || !this.currentConfig) return;
+        
+        const config = this.currentConfig;
+        const patternLength = Math.max(1, config.length || 8);
+        const effectiveLoopLength = Math.min(this.playbackQueue.length, patternLength);
+        
+        const wrappedIndex = this.currentStepIndex % effectiveLoopLength;
+        const step = this.playbackQueue[wrappedIndex];
+
+        const probability = (config.probability !== undefined) ? config.probability : 1.0;
+        const shouldPlay = !step.muted && Math.random() < probability;
+
+        if (shouldPlay) {
+            const voiceId = `arp-${step.nodeId}-${Date.now()}-${Math.random()}`;
+            const state = store.getSnapshot();
+            
+            // Calculate Gate Duration
+            const beatMs = 60000 / (state.settings.arpBpm || 120);
+            // Re-derive division scale for gate calculation
+            let divBase = 0.5;
+             switch(config.division) {
+                case '1/1': divBase = 4.0; break;
+                case '1/2': divBase = 2.0; break;
+                case '1/4': divBase = 1.0; break;
+                case '1/8': divBase = 0.5; break;
+                case '1/16': divBase = 0.25; break;
+                case '1/32': divBase = 0.125; break;
+                case '1/4T': divBase = 1.0 * (2/3); break;
+                case '1/8T': divBase = 0.5 * (2/3); break;
+                case '1/16T': divBase = 0.25 * (2/3); break;
+            }
+            const durationSec = (beatMs * divBase / 1000) * Math.min(1.0, Math.max(0.1, config.gate));
+            const stopTime = time + durationSec;
+
+            // Trigger Audio with precise time
+            audioEngine.startVoice(voiceId, step.ratio, state.settings.baseFrequency, 'arpeggio', 'gate', time);
+            
+            // Schedule Stop
+            audioEngine.stopVoice(voiceId, stopTime);
+
+            const ctx = audioEngine.getContext();
+            const delayMs = Math.max(0, (time - (ctx?.currentTime || 0)) * 1000);
+
+            // Schedule Visuals and MIDI (Best Effort)
+            // Visuals are synced to occur roughly when the sound starts
+            setTimeout(() => {
+                if (!this.isRunning) return;
+                
+                // Visual ON
+                this.activeVisualNodeIds.add(step.nodeId);
+                if (this.onNoteCallback) this.onNoteCallback(step.nodeId, true);
+                
+                // MIDI ON
+                if (state.settings.midiEnabled) {
+                    midiService.noteOn(voiceId, step.ratio, state.settings.baseFrequency, state.settings.midiPitchBendRange);
+                }
+
+                // Schedule OFF
+                setTimeout(() => {
+                    if (!this.isRunning) return;
+                    
+                    if (this.onNoteCallback) this.onNoteCallback(step.nodeId, false);
+                    this.activeVisualNodeIds.delete(step.nodeId);
+                    
+                    if (state.settings.midiEnabled) midiService.noteOff(voiceId);
+                }, durationSec * 1000);
+
+            }, delayMs);
+        }
+        
+        // Step Callback (Visual Playhead)
+        const visualDelay = Math.max(0, (time - (audioEngine.getContext()?.currentTime || 0)) * 1000);
+        setTimeout(() => {
+            if (this.isRunning && this.onStepCallback) {
+                this.onStepCallback(step.originalIndex);
+            }
+        }, visualDelay);
     }
 
     private recalculateQueue() {
@@ -128,102 +281,6 @@ class ArpeggiatorService {
         }
         
         this.playbackQueue = final;
-    }
-
-    private scheduleNextStep() {
-        if (!this.isRunning || !this.currentConfig) return;
-
-        const state = store.getSnapshot();
-        const bpm = state.settings.arpBpm || 120;
-        const config = this.currentConfig;
-
-        // 1. Calculate Note Duration
-        const beatMs = 60000 / bpm; // Duration of 1/4 note
-        let div = 0.5; // default 1/8 relative to 1/4 beat
-        
-        switch(config.division) {
-            case '1/1': div = 4.0; break;
-            case '1/2': div = 2.0; break;
-            case '1/4': div = 1.0; break;
-            case '1/8': div = 0.5; break;
-            case '1/16': div = 0.25; break;
-            case '1/32': div = 0.125; break;
-            case '1/4T': div = 1.0 * (2/3); break;
-            case '1/8T': div = 0.5 * (2/3); break;
-            case '1/16T': div = 0.25 * (2/3); break;
-        }
-        const stepDurationMs = beatMs * div;
-
-        // 2. Calculate Swing
-        let currentDelay = stepDurationMs;
-        if (config.swing > 0) {
-            const isEvenStep = (this.currentStepIndex % 2) !== 0; 
-            const swingAmount = (config.swing / 100) * 0.33; 
-            
-            if (isEvenStep) {
-                currentDelay = stepDurationMs * (1.0 - swingAmount); 
-            } else {
-                currentDelay = stepDurationMs * (1.0 + swingAmount);
-            }
-        }
-
-        // 3. Apply Humanize Jitter
-        if (config.humanize && config.humanize > 0) {
-            const jitter = (Math.random() - 0.5) * config.humanize;
-            currentDelay += jitter;
-            // Ensure we don't go backwards excessively (min delay 10ms)
-            if (currentDelay < 10) currentDelay = 10;
-        }
-
-        // 4. Play Current Step
-        this.recalculateQueue(); 
-        if (this.playbackQueue.length === 0) return;
-
-        const patternLength = Math.max(1, config.length || 8);
-        const effectiveLoopLength = Math.min(this.playbackQueue.length, patternLength);
-        
-        const wrappedIndex = this.currentStepIndex % effectiveLoopLength;
-        const step = this.playbackQueue[wrappedIndex];
-
-        // Trigger Sound
-        if (this.lastPlayedVoiceId) {
-            this.stopLastNote();
-        }
-        
-        const probability = (config.probability !== undefined) ? config.probability : 1.0;
-        const shouldPlay = !step.muted && Math.random() < probability;
-
-        if (shouldPlay) {
-            const voiceId = `arp-${step.nodeId}-${Date.now()}`;
-            audioEngine.startVoice(voiceId, step.ratio, state.settings.baseFrequency, 'arpeggio');
-            if (state.settings.midiEnabled) {
-                midiService.noteOn(voiceId, step.ratio, state.settings.baseFrequency, state.settings.midiPitchBendRange);
-            }
-            
-            // Visual feedback ON
-            if (this.onNoteCallback) {
-                this.onNoteCallback(step.nodeId, true);
-            }
-
-            this.lastPlayedVoiceId = voiceId;
-            this.lastPlayedNodeId = step.nodeId;
-        }
-
-        if (this.onStepCallback) {
-            this.onStepCallback(step.originalIndex);
-        }
-
-        // Schedule Note Off (Gate)
-        const gateLen = stepDurationMs * Math.min(1.0, Math.max(0.1, config.gate));
-        this.lastNoteOffTimer = window.setTimeout(() => {
-            this.stopLastNote();
-        }, gateLen);
-
-        // Schedule Next Step
-        this.timerId = window.setTimeout(() => {
-            this.currentStepIndex++;
-            this.scheduleNextStep();
-        }, currentDelay);
     }
 }
 

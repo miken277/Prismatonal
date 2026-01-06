@@ -842,9 +842,27 @@ class PrismaProcessor extends AudioWorkletProcessor {
     // Mix Buffers
     this.mixBufferL = null;
     this.mixBufferR = null;
+    
+    // Event Queue for Lookahead Scheduling
+    this.eventQueue = [];
 
     this.port.onmessage = (e) => {
       const msg = e.data;
+      
+      // If message has specific timing, queue it
+      if (typeof msg.time === 'number' && msg.time > currentTime) {
+          this.eventQueue.push(msg);
+          // Keep sorted by time
+          this.eventQueue.sort((a, b) => a.time - b.time);
+          return;
+      }
+      
+      // Otherwise process immediately
+      this.handleMessage(msg);
+    };
+  }
+  
+  handleMessage(msg) {
       if (msg.type === 'update_preset') {
         const { mode, data } = msg;
         if (mode) {
@@ -863,8 +881,27 @@ class PrismaProcessor extends AudioWorkletProcessor {
         this.glideVoice(msg.id, msg.freq);
       } else if (msg.type === 'stop_all') {
          this.voices.forEach(v => v.hardStop());
+         this.eventQueue = []; // Clear queue on stop all
+      } else if (msg.type === 'stop_group') {
+         // Stop specific group with release (soft stop) and clear future schedule for them
+         const prefix = msg.prefix;
+         if (prefix) {
+             // 1. Clear future events matching prefix
+             this.eventQueue = this.eventQueue.filter(e => {
+                 if ((e.type === 'note_on' || e.type === 'note_off' || e.type === 'glide') && e.id && typeof e.id === 'string' && e.id.startsWith(prefix)) {
+                     return false;
+                 }
+                 return true;
+             });
+             
+             // 2. Release active voices matching prefix
+             this.voices.forEach(v => {
+                 if (v.active && v.id.startsWith(prefix)) {
+                     v.release(); 
+                 }
+             });
+         }
       }
-    };
   }
 
   normalizePreset(data) {
@@ -956,6 +993,11 @@ class PrismaProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs, parameters) {
+    // Process scheduled events first
+    while (this.eventQueue.length > 0 && this.eventQueue[0].time <= currentTime) {
+        this.handleMessage(this.eventQueue.shift());
+    }
+
     const output = outputs[0];
     const channelL = output[0];
     const channelR = output[1];

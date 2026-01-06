@@ -21,6 +21,7 @@ export interface RenderState {
     visualLatchedNodes: Map<string, NodeActivation[]>;
     activeLines: LatticeLine[];
     brightenedLines: LatticeLine[];
+    harmonicNeighbors: Map<string, number>; // Maps NodeID -> Lowest Limit connecting to it
     activeCursors: Map<number, any>; 
     cursorPositions: Map<number, {x: number, y: number}>;
     nodeTriggerHistory: Map<string, number>;
@@ -165,7 +166,7 @@ export class LatticeRenderer {
         const cullTop = view.y - cullPad;
         const cullBottom = view.y + view.h + cullPad;
 
-        // Draw Lines
+        // Draw Lines with Consonance Weighting
         const linesByLimit: Record<number, number[]> = {};
         for (const line of data.lines) {
             const x1 = line.x1 * spacing + centerOffset;
@@ -191,14 +192,24 @@ export class LatticeRenderer {
 
             const visualSettings = settings.limitVisuals?.[limit] || { size: 1, opacity: 1 };
             
+            // Consonance Weighting Logic
+            let weight = 1.0;
+            let baseAlpha = 0.3;
+
+            if (limit === 1) { weight = 3.0; baseAlpha = 0.5; } // Octave
+            else if (limit === 3) { weight = 2.5; baseAlpha = 0.45; } // P5 (Strong)
+            else if (limit === 5) { weight = 1.8; baseAlpha = 0.35; } // M3 (Medium)
+            else { weight = 0.8; baseAlpha = 0.2; } // 7, 11, 13 etc (Weak)
+
             ctx.beginPath();
             for(let i=0; i<coords.length; i+=4) {
                 ctx.moveTo(coords[i], coords[i+1]);
                 ctx.lineTo(coords[i+2], coords[i+3]);
             }
-            ctx.lineWidth = (limit === 1 ? 3 : 1) * visualSettings.size * effectiveScale; 
+            
+            ctx.lineWidth = weight * visualSettings.size * effectiveScale;
             ctx.strokeStyle = color;
-            ctx.globalAlpha = isFlatSkin ? 1.0 : 0.3 * visualSettings.opacity;
+            ctx.globalAlpha = isFlatSkin ? 1.0 : baseAlpha * visualSettings.opacity;
             
             if (limit === 1) ctx.setLineDash([5 * effectiveScale, 5 * effectiveScale]);
             else ctx.setLineDash([]);
@@ -216,7 +227,7 @@ export class LatticeRenderer {
             const topVis = settings.limitVisuals?.[node.limitTop] || { size: 1, opacity: 1 };
             const limitScale = topVis.size;
             const limitOpacity = topVis.opacity;
-            const radius = baseRadius * limitScale;
+            const radius = Math.max(0, baseRadius * limitScale);
 
             ctx.globalAlpha = 1.0 * limitOpacity;
             
@@ -274,7 +285,7 @@ export class LatticeRenderer {
 
     private renderDynamic(bgCanvas: HTMLCanvasElement, activeCanvas: HTMLCanvasElement, state: RenderState) {
         const { 
-            data, settings, visualLatchedNodes, activeLines, brightenedLines, 
+            data, settings, visualLatchedNodes, activeLines, brightenedLines, harmonicNeighbors,
             activeCursors, cursorPositions, effectiveScale, centerOffset, view, time, latchMode 
         } = state;
 
@@ -329,6 +340,49 @@ export class LatticeRenderer {
 
         bgCtx.lineCap = 'round';
         activeCtx.lineCap = 'round';
+
+        // 0. Draw Harmonic Neighbor Hints
+        // Drawn on activeCtx but behind active nodes (since active nodes are drawn later in this function)
+        // These will overlay the static nodes (z-index 20 vs 10), effectively tinting them
+        if (harmonicNeighbors.size > 0) {
+            for (const [id, limit] of harmonicNeighbors.entries()) {
+                const node = this.cachedNodeMap.get(id);
+                if (!node) continue;
+                
+                const x = node.x * spacing + centerOffset;
+                const y = node.y * spacing + centerOffset;
+                
+                if (x < cullLeft || x > cullRight || y < cullTop || y > cullBottom) continue;
+
+                // Determine highlight color based on limit
+                const color = settings.colors[limit] || '#ffffff';
+                const vis = settings.limitVisuals?.[node.limitTop] || { size: 1 };
+                const limitScale = vis.size;
+                const radius = Math.max(0, baseRadius * limitScale * 1.3); // Slight halo
+
+                activeCtx.beginPath();
+                if (isDiamond) {
+                    activeCtx.moveTo(x, y - radius);
+                    activeCtx.lineTo(x + radius, y);
+                    activeCtx.lineTo(x, y + radius);
+                    activeCtx.lineTo(x - radius, y);
+                } else {
+                    activeCtx.arc(x, y, radius, 0, Math.PI * 2);
+                }
+                activeCtx.closePath();
+
+                // Draw a stroke ring
+                activeCtx.lineWidth = 3 * effectiveScale;
+                activeCtx.strokeStyle = color;
+                activeCtx.globalAlpha = 0.6;
+                activeCtx.stroke();
+                
+                // Draw a fill tint
+                activeCtx.fillStyle = color;
+                activeCtx.globalAlpha = 0.15;
+                activeCtx.fill();
+            }
+        }
 
         // 1. Draw Brightened Lines
         if (brightenedLines.length > 0) {
@@ -415,7 +469,7 @@ export class LatticeRenderer {
              const vis = settings.limitVisuals?.[node.limitTop] || { size: 1 };
              const limitScale = vis.size;
              const zoomScale = settings.latchedZoomScale;
-             const baseRad = baseRadius * limitScale * zoomScale;
+             const baseRad = Math.max(0, baseRadius * limitScale * zoomScale);
              
              activeCtx.globalAlpha = 1.0; 
              activeCtx.beginPath();
@@ -463,7 +517,7 @@ export class LatticeRenderer {
                          const age = time - activation.timestamp;
                          if (age < 500) { // 500ms ripple
                              const rippleProgress = age / 500;
-                             const rippleRadius = baseRad + (rippleProgress * 40 * effectiveScale);
+                             const rippleRadius = Math.max(0, baseRad + (rippleProgress * 40 * effectiveScale));
                              const rippleAlpha = 1.0 - rippleProgress;
                              
                              activeCtx.beginPath();
@@ -476,7 +530,7 @@ export class LatticeRenderer {
                      }
                  }
 
-                 const currentRadius = baseRad + ringGap + (index * (ringWidth + ringGap));
+                 const currentRadius = Math.max(0, baseRad + ringGap + (index * (ringWidth + ringGap)));
                  
                  activeCtx.beginPath();
                  if (isDiamond) {

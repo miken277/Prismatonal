@@ -158,7 +158,7 @@ export const generateLattice = (
                       let compLimit = 10000; // Default high for safe limits (e.g. 1/1, 2/1)
                       
                       // @ts-ignore
-                      if (settings.limitComplexities[maxP]) {
+                      if (settings.limitComplexities && settings.limitComplexities[maxP]) {
                           // @ts-ignore
                           compLimit = settings.limitComplexities[maxP];
                       }

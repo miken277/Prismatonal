@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType, SynthPreset } from '../types';
 import { generateLattice } from '../services/LatticeService';
@@ -91,6 +92,18 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       });
       return grid;
   }, [data.nodes, settings.buttonSpacingScale, effectiveScale]);
+
+  // Create an adjacency map for fast neighbor lookup
+  const adjacencyMap = useMemo(() => {
+      const map = new Map<string, { target: string, limit: number }[]>();
+      data.lines.forEach(line => {
+          if (!map.has(line.sourceId)) map.set(line.sourceId, []);
+          if (!map.has(line.targetId)) map.set(line.targetId, []);
+          map.get(line.sourceId)!.push({ target: line.targetId, limit: line.limit });
+          map.get(line.targetId)!.push({ target: line.sourceId, limit: line.limit });
+      });
+      return map;
+  }, [data.lines]);
 
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [persistentLatches, setPersistentLatches] = useState<Map<string, Map<number, number>>>(new Map());
@@ -246,6 +259,31 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       return visual;
   }, [audioLatchedNodes, activeCursors, settings.isPitchBendEnabled, latchMode, isCurrentSustainEnabled, externalTriggers]);
 
+  // Calculate Harmonic Neighbors for Highlighting
+  const harmonicNeighbors = useMemo(() => {
+      const neighbors = new Map<string, number>();
+      const activeIds = new Set<string>();
+      
+      activeCursors.forEach(c => { if(c.hoverNodeId) activeIds.add(c.hoverNodeId); });
+      visualLatchedNodes.forEach((_, id) => activeIds.add(id));
+      
+      if (activeIds.size === 0) return neighbors;
+
+      activeIds.forEach(sourceId => {
+          const adj = adjacencyMap.get(sourceId);
+          if (adj) {
+              adj.forEach(edge => {
+                  // Filter for consonance (Limit 3 and 5)
+                  if (edge.limit <= 5 && !activeIds.has(edge.target)) {
+                      const current = neighbors.get(edge.target) || 99;
+                      if (edge.limit < current) neighbors.set(edge.target, edge.limit);
+                  }
+              });
+          }
+      });
+      return neighbors;
+  }, [activeCursors, visualLatchedNodes, adjacencyMap]);
+
   const activeLines = useMemo(() => {
     const latched = visualLatchedNodes;
     const lines = data.lines;
@@ -315,6 +353,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const visualLatchedRef = useRef(visualLatchedNodes);
   const activeLinesRef = useRef(activeLines);
   const brightenedLinesRef = useRef(brightenedLines);
+  const harmonicNeighborsRef = useRef(harmonicNeighbors);
   const effectiveScaleRef = useRef(effectiveScale);
   const latchModeRef = useRef(latchMode);
   const nodeMapRef = useRef(nodeMap);
@@ -328,6 +367,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useEffect(() => { visualLatchedRef.current = visualLatchedNodes; }, [visualLatchedNodes]);
   useEffect(() => { activeLinesRef.current = activeLines; }, [activeLines]);
   useEffect(() => { brightenedLinesRef.current = brightenedLines; }, [brightenedLines]);
+  useEffect(() => { harmonicNeighborsRef.current = harmonicNeighbors; }, [harmonicNeighbors]);
   useEffect(() => { effectiveScaleRef.current = effectiveScale; }, [effectiveScale]);
   useEffect(() => { latchModeRef.current = latchMode; }, [latchMode]);
   useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
@@ -903,6 +943,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               visualLatchedNodes: visualLatchedRef.current, 
               activeLines: activeLinesRef.current,
               brightenedLines: brightenedLinesRef.current,
+              harmonicNeighbors: harmonicNeighborsRef.current, // Pass the harmonic neighbors map
               activeCursors: activeCursorsRef.current,
               cursorPositions: cursorPositionsRef.current,
               nodeTriggerHistory: nodeTriggerHistory.current,

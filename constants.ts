@@ -137,7 +137,8 @@ const getDefaults = () => {
         chords: { x: margin + 180, y: h - 48 - margin },
         layers: { x: w - 90 - margin, y: margin + 60 },
         arpeggioBar: { x: margin, y: margin },
-        instruments: { x: margin, y: margin + 60 }
+        instruments: { x: margin, y: margin + 60 },
+        complexity: { x: margin, y: margin + 60 } // Default left position
     };
 };
 
@@ -180,7 +181,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   layoutApproach: 'lattice',
   activeSkin: 'default',
   limitDepths: { 3: 3, 5: 2, 7: 1, 9: 1, 11: 1, 13: 1, 15: 1 },
-  limitComplexities: { 3: 1000, 5: 1000, 7: 50, 9: 50, 11: 50, 13: 50, 15: 50 },
+  // Default to First Two Octaves (Harmonics 1-7) enabled, higher ones disabled
+  enabledIdentities: [1, 3, 5, 7], 
   showIncreaseDepthButton: true,
   centerResetsDepth: false,
   savedChords: generateChordSlots(),
@@ -688,9 +690,10 @@ const ETHEREAL_BASS = [
         // Osc 1: Rumble (Noise LFO on Pitch)
         { enabled: true, waveform: WaveformType.SINE, coarseDetune: -2400, gain: 0.8, lfoWaveform: 'noise', lfoTarget: 'pitch', lfoRate: 15, lfoDepth: 5 }, 
         // Osc 2: Low Drone
-        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.5 }, 
-        { enabled: false }, 
-        { spread: 0.6, stereoPanSpeed: 0.05, stereoPanDepth: 0.5, reverbType: 'cathedral', reverbMix: 0.8, reverbSize: 8.0 }
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.4, lfoTarget: 'pitch', lfoRate: 0.2, lfoDepth: 10 }, 
+        // Osc 3: Rumbling Filtered Saw
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2405, gain: 0.15, filterCutoff: 100, lfoTarget: 'filter', lfoRate: 0.1, lfoDepth: 50 }, 
+        { spread: 0.8, reverbType: 'cathedral', reverbMix: 0.9, reverbSize: 8.0, compressorThreshold: -15 }
     ),
     p("Wobble Void", "Bass", 
         // Osc 1: Wub Wub

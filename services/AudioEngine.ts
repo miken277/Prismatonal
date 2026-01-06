@@ -1,4 +1,5 @@
 
+
 import { SynthPreset, AppSettings, ReverbType, PresetState, PlayMode, PlaybackMode } from '../types';
 import { store } from './Store';
 import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
@@ -7,6 +8,7 @@ import { AUDIO_PROCESSOR_CODE } from './AudioProcessorCode';
 // --- Typed Messages for Worklet ---
 interface WorkletMessageBase {
     type: string;
+    time?: number; // Optional timing for scheduling
 }
 
 interface UpdatePresetMessage extends WorkletMessageBase {
@@ -48,7 +50,12 @@ interface StopAllMessage extends WorkletMessageBase {
     type: 'stop_all';
 }
 
-type AudioWorkletMessage = UpdatePresetMessage | ConfigMessage | NoteOnMessage | NoteOffMessage | GlideMessage | StopAllMessage;
+interface StopGroupMessage extends WorkletMessageBase {
+    type: 'stop_group';
+    prefix: string;
+}
+
+type AudioWorkletMessage = UpdatePresetMessage | ConfigMessage | NoteOnMessage | NoteOffMessage | GlideMessage | StopAllMessage | StopGroupMessage;
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
@@ -553,8 +560,8 @@ class AudioEngine {
       }
   }
 
-  // Updated startVoice: No longer awaits init(). Queues message if needed.
-  public startVoice(id: string, ratio: number, baseFrequency: number, presetSlot: string = 'normal', playbackMode: PlaybackMode = 'gate') {
+  // Updated startVoice to accept optional start time for Lookahead Scheduling
+  public startVoice(id: string, ratio: number, baseFrequency: number, presetSlot: string = 'normal', playbackMode: PlaybackMode = 'gate', time?: number) {
     // Ensure context is running (resume if suspended)
     this.resume();
     
@@ -564,14 +571,16 @@ class AudioEngine {
         id: id, 
         freq: freq,
         voiceType: presetSlot,
-        mode: playbackMode
+        mode: playbackMode,
+        time: time // Pass time if provided
     });
   }
 
-  public stopVoice(id: string) {
+  public stopVoice(id: string, time?: number) {
     this.postMessage({ 
         type: 'note_off', 
-        id: id 
+        id: id,
+        time: time
     });
   }
 
@@ -588,6 +597,10 @@ class AudioEngine {
     this.postMessage({ type: 'stop_all' });
     // Resetting FX is safe to do immediately even if audio isn't running
     if (this.ctx) this.setupFX();
+  }
+
+  public stopGroup(prefix: string) {
+      this.postMessage({ type: 'stop_group', prefix: prefix });
   }
 }
 

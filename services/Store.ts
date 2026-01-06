@@ -40,7 +40,6 @@ class PrismaStore {
                 enableOversampling: (parsed.enableOversampling !== undefined) ? parsed.enableOversampling : safeOversampling,
                 layoutApproach: parsed.layoutApproach || DEFAULT_SETTINGS.layoutApproach,
                 limitDepths: { ...DEFAULT_SETTINGS.limitDepths, ...(parsed.limitDepths || {}) },
-                limitComplexities: { ...DEFAULT_SETTINGS.limitComplexities, ...(parsed.limitComplexities || {}) },
                 colors: { ...DEFAULT_COLORS, ...(parsed.colors || {}) }, 
                 uiPositions: { ...DEFAULT_SETTINGS.uiPositions, ...(parsed.uiPositions || {}) },
                 arpeggios: parsed.arpeggios || DEFAULT_SETTINGS.arpeggios,

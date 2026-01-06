@@ -170,16 +170,9 @@ export interface AppSettings {
     15: number;
   };
 
-  // Individual complexity limits (Max Numerator/Denominator per axis)
-  limitComplexities: {
-    3: number;
-    5: number;
-    7: number;
-    9: number;
-    11: number;
-    13: number;
-    15: number;
-  };
+  // Replaces limitComplexities with toggleable Odd Identities (1, 3, 5, 7, 9, 11, 13, 15)
+  // Stores simple array of enabled identities (e.g. [1, 3, 5])
+  enabledIdentities: number[]; 
   
   // Increase Depth Settings
   showIncreaseDepthButton: boolean;
@@ -318,6 +311,7 @@ export interface AppSettings {
     layers: XYPos;
     arpeggioBar: XYPos;
     instruments: XYPos; // New cluster for Drone/String
+    complexity: XYPos; // New: Complexity Controls
   };
   uiSizes: {
     volume: UISize;
