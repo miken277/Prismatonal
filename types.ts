@@ -74,6 +74,7 @@ export interface ArpeggioStep {
     d?: number;
     muted?: boolean;
     limit?: number; // For quality indication (maxPrime)
+    mode?: number; // The instrument mode (1=Drone, 2=Strings, 3=Plucked, 4=Brass, 5=Keys, 6=Percussion) active during recording
 }
 
 export type ArpDirection = 'order' | 'up' | 'down' | 'updown' | 'random';
@@ -127,7 +128,9 @@ export interface KeyMappings {
     modeDrone: string; // Switch to Drone Mode
     modeStrings: string; // Switch to Strings Mode
     modePlucked: string; // Switch to Plucked Mode
-    modeBrass: string; // Switch to Brass Mode (Renamed from Voice)
+    modeBrass: string; // Switch to Brass Mode
+    modeKeys: string; // Switch to Keys Mode
+    modePercussion: string; // Switch to Percussion Mode (New)
     synth: string; // Toggle Synth Panel
 
     // Chords & Performance
@@ -331,9 +334,13 @@ export interface OscillatorConfig {
   // Envelope
   attack: number;
   decay: number;
-  sustain: number;
+  sustain: number; // Level 0.0 to 1.0
   release: number;
   
+  // Extended Envelope (Finite Sustain)
+  holdDecay?: number; // Time to decay from Sustain Level to 0 while Key Held (0 or undefined = Infinite)
+  pedalDecay?: number; // Time to decay from Current Level to 0 while Sustain Pedal Active (0 or undefined = Infinite)
+
   // Filter
   filterCutoff: number; // Hz
   filterResonance: number; // Q factor
@@ -367,6 +374,7 @@ export interface SynthPreset {
   id: number | string;
   name: string;
   category?: string; // New field for categorization
+  isHeader?: boolean; // New field for UI headers in lists
   
   osc1: OscillatorConfig;
   osc2: OscillatorConfig;
@@ -388,6 +396,7 @@ export interface SynthPreset {
 
   // Expression / Performance
   portamento?: number; // 0 to 1 (Glide time)
+  acousticSustain?: boolean; // Legacy: Maps to pedalDecay in logic if needed, but pedalDecay takes precedence
 
   // Stereo & Pan
   spread?: number; // 0 to 1 (Voice Stereo Width)
@@ -422,7 +431,7 @@ export interface SynthPreset {
 }
 
 // Slot Types
-export type PresetSlot = 'normal' | 'latch' | 'strum' | 'brass' | 'arpeggio';
+export type PresetSlot = 'normal' | 'latch' | 'strum' | 'brass' | 'keys' | 'percussion';
 export type PlayMode = PresetSlot; // Alias for backward compatibility
 export type PlaybackMode = 'gate' | 'trigger' | 'latch'; // Behavior type
 
@@ -431,7 +440,8 @@ export interface PresetState {
     latch: SynthPreset;
     strum: SynthPreset;
     brass: SynthPreset; // Renamed from voice
-    arpeggio: SynthPreset;
+    keys: SynthPreset; // Renamed from arpeggio
+    percussion: SynthPreset; // New Mode
 }
 
 export interface StoreState {

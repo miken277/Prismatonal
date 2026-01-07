@@ -1,8 +1,12 @@
+
 import React, { useState, useEffect } from 'react';
 import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpeggioStep, PresetState, PlayMode, SynthPreset, UISize } from '../types';
-import { MARGIN_3MM, SCROLLBAR_WIDTH } from '../constants';
 import ArpeggiatorBar from './controls/ArpeggiatorBar';
 import InstrumentCluster from './controls/InstrumentCluster';
+import MasterControls from './controls/MasterControls';
+import PerformanceControls from './controls/PerformanceControls';
+import ViewControls from './controls/ViewControls';
+import ChordBar from './controls/ChordBar';
 import { useDragManager } from '../hooks/useDragManager';
 
 interface Props {
@@ -21,7 +25,9 @@ interface Props {
   onSust?: () => void; 
   onPluck?: () => void; 
   onVoice?: () => void; 
-  latchMode: 0 | 1 | 2 | 3 | 4;
+  onKeys?: () => void;
+  onPercussion?: () => void; // New prop
+  latchMode: 0 | 1 | 2 | 3 | 4 | 5 | 6; // Updated type
   onBend: () => void;
   isBendEnabled: boolean;
   onSustainToggle?: () => void;
@@ -61,8 +67,6 @@ interface Props {
   activeSustainedModes?: number[];
   onClearSustain?: (mode: number) => void;
   
-  isShortScreen?: boolean; 
-  
   isSequencerOpen: boolean;
   onToggleSequencer: () => void;
 
@@ -72,7 +76,7 @@ interface Props {
 
 const FloatingControls: React.FC<Props> = ({ 
   volume, setVolume, spatialScale, setSpatialScale, brightness, setBrightness, viewZoom, setViewZoom,
-  onPanic, onOff, onLatch, onSust, onPluck, onVoice, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
+  onPanic, onOff, onLatch, onSust, onPluck, onVoice, onKeys, onPercussion, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
   uiSizes, updateSize,
@@ -150,141 +154,29 @@ const FloatingControls: React.FC<Props> = ({
       window.addEventListener('pointercancel', onUp);
   };
 
-  const handleButtonPress = (e: React.PointerEvent, key: keyof AppSettings['uiPositions'], action?: () => void) => {
-      e.stopPropagation();
-      if (uiUnlocked) {
-          handleDrag(e, key);
-      } else {
-          if (e.button === 0 && action) action();
-      }
-  };
-
-  const largeBtnSize = 80 * uiScale;
-  const perfBtnSize = 92 * uiScale;
-  const baseSize = largeBtnSize; 
-  const chordSize = baseSize * chordShortcutSizeScale;
-  
-  const volumeBaseWidth = uiSizes?.volume?.width || 600;
-  const volumeBaseHeight = uiSizes?.volume?.height || 75;
-  const volumeBarWidth = volumeBaseWidth * uiScale;
-  const volumeBarHeight = volumeBaseHeight * uiScale;
-
-  const minRowHeight = 12 * uiScale;
-  const totalMinHeight = (minRowHeight * 4) + (6 * uiScale) + (16 * uiScale);
-
   const arpBaseWidth = uiSizes?.arpeggioBar?.width || 760;
   const userArpWidth = arpBaseWidth * uiScale;
   const effectiveArpWidth = maxArpWidth ? Math.min(userArpWidth, maxArpWidth) : userArpWidth;
   const isConstrained = effectiveArpWidth < (760 * uiScale) * 0.95;
   
-  const draggableStyle = (key: string) => ({
-      left: uiPositions[key as keyof typeof uiPositions]?.x || 0,
-      top: uiPositions[key as keyof typeof uiPositions]?.y || 0,
-      touchAction: 'none' as React.CSSProperties['touchAction'],
-  });
-
-  const labelStyle = { 
-      fontSize: 20 * uiScale, 
-      width: 85 * uiScale,
-  };
-
-  const sliderTrackHeight = 3 * uiScale;
-
-  const sustColorClass = latchMode === 1 
-      ? (isSustainEnabled 
-          ? 'bg-green-600 text-white border-green-300 shadow-[0_0_15px_rgba(34,197,94,0.6)]' 
-          : 'bg-green-900/40 text-green-400 border-green-500/50 hover:bg-green-800/60')
-      : (isSustainEnabled 
-          ? 'bg-blue-600 text-white border-blue-300 shadow-[0_0_15px_rgba(37,99,235,0.6)]' 
-          : 'bg-blue-900/40 text-blue-400 border-blue-500/50 hover:bg-blue-800/60');
-
   const resizeHandleStyle = "absolute z-50 bg-yellow-500/50 hover:bg-yellow-400 rounded-sm border border-white/50 shadow-sm transition-colors";
 
   return (
     <>
-      <style>{`
-        .prismatonal-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 10px; height: 10px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
-        .prismatonal-slider::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
-        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-        .no-spinner { -moz-appearance: textfield; }
-        .seq-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
-        .seq-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.3); border-radius: 3px; }
-        .seq-scroll::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.6); border-radius: 3px; border: 1px solid rgba(15, 23, 42, 0.3); }
-        .seq-scroll::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.8); }
-      `}</style>
+      <MasterControls 
+          volume={volume} setVolume={setVolume}
+          spatialScale={spatialScale} setSpatialScale={setSpatialScale}
+          brightness={brightness} setBrightness={setBrightness}
+          viewZoom={viewZoom} setViewZoom={setViewZoom}
+          uiScale={uiScale}
+          uiUnlocked={uiUnlocked}
+          position={uiPositions.volume}
+          size={uiSizes?.volume || { width: 600, height: 75 }}
+          onDragStart={(e) => handleDrag(e, 'volume')}
+          onResize={(e, axis) => handleResize(e, 'volume', axis)}
+      />
 
-      {/* Volume Control */}
-      <div 
-        className={`absolute bg-slate-900/50 rounded-xl flex flex-col px-3 py-1 gap-0.5 backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-lg ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ 
-            ...draggableStyle('volume'), 
-            width: volumeBarWidth,
-            height: Math.max(volumeBarHeight, totalMinHeight), 
-            justifyContent: 'space-between', 
-            padding: '8px 12px' 
-        }}
-        onPointerDown={(e) => handleDrag(e, 'volume')}
-      >
-        <div className="flex items-center gap-2 w-full flex-1 min-h-[12px] max-h-7">
-             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Volume</span>
-             <div className="flex-1 min-w-[50px] flex items-center pl-1">
-                <input 
-                    type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} disabled={uiUnlocked}
-                    className={`prismatonal-slider w-full rounded-lg appearance-none text-green-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-                    style={{ height: sliderTrackHeight, background: `linear-gradient(to right, #22c55e 0%, #22c55e ${volume * 100}%, #1e293b ${volume * 100}%, #1e293b 100%)` }}
-                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-                    aria-label="Master Volume"
-                />
-             </div>
-        </div>
-        <div className="flex items-center gap-2 w-full flex-1 min-h-[12px] max-h-7">
-             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Reverb</span>
-             <div className="flex-1 min-w-[50px] flex items-center pl-1">
-                <input 
-                    type="range" min="0" max="2" step="0.01" value={spatialScale} onChange={(e) => setSpatialScale(parseFloat(e.target.value))} disabled={uiUnlocked}
-                    className={`prismatonal-slider w-full rounded-lg appearance-none text-blue-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-                    style={{ height: sliderTrackHeight, background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(spatialScale/2) * 100}%, #1e293b ${(spatialScale/2) * 100}%, #1e293b 100%)` }}
-                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-                    aria-label="Reverb Amount"
-                />
-             </div>
-        </div>
-        <div className="flex items-center gap-2 w-full flex-1 min-h-[12px] max-h-7">
-             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Tone</span>
-             <div className="flex-1 min-w-[50px] flex items-center pl-1">
-                <input 
-                    type="range" min="0" max="1" step="0.01" value={brightness} onChange={(e) => setBrightness(parseFloat(e.target.value))} disabled={uiUnlocked}
-                    className={`prismatonal-slider w-full rounded-lg appearance-none text-yellow-500 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-                    style={{ height: sliderTrackHeight, background: `linear-gradient(to right, #eab308 0%, #eab308 ${brightness * 100}%, #1e293b ${brightness * 100}%, #1e293b 100%)` }}
-                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-                    aria-label="Tone Brightness"
-                />
-             </div>
-        </div>
-        <div className="flex items-center gap-2 w-full flex-1 min-h-[12px] max-h-7">
-             <span className="font-bold text-slate-400 select-none uppercase tracking-widest text-right flex-shrink-0" style={labelStyle}>Zoom</span>
-             <div className="flex-1 min-w-[50px] flex items-center pl-1">
-                <input 
-                    type="range" min="0.5" max="3.0" step="0.05" value={viewZoom} onChange={(e) => setViewZoom(parseFloat(e.target.value))} disabled={uiUnlocked}
-                    onDoubleClick={(e) => { e.stopPropagation(); setViewZoom(1.0); }}
-                    title="Double-click to Reset Zoom"
-                    className={`prismatonal-slider w-full rounded-lg appearance-none text-cyan-400 ${uiUnlocked ? 'cursor-move opacity-50' : 'cursor-pointer'}`}
-                    style={{ height: sliderTrackHeight, background: `linear-gradient(to right, #22d3ee 0%, #22d3ee ${((viewZoom-0.5)/2.5) * 100}%, #1e293b ${((viewZoom-0.5)/2.5) * 100}%, #1e293b 100%)` }}
-                    onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
-                    aria-label="View Zoom"
-                />
-             </div>
-        </div>
-
-        {uiUnlocked && (
-            <>
-                <div className={`${resizeHandleStyle} cursor-ew-resize`} style={{ top: '10%', bottom: '10%', right: -6, width: 12 }} onPointerDown={(e) => handleResize(e, 'volume', 'x')} />
-                <div className={`${resizeHandleStyle} cursor-ns-resize`} style={{ left: '10%', right: '10%', bottom: -6, height: 12 }} onPointerDown={(e) => handleResize(e, 'volume', 'y')} />
-                <div className={`${resizeHandleStyle} cursor-nwse-resize bg-yellow-400`} style={{ right: -6, bottom: -6, width: 16, height: 16, borderRadius: '50%' }} onPointerDown={(e) => handleResize(e, 'volume', 'xy')} />
-            </>
-        )}
-      </div>
-
+      {/* Independent Resize Handle for Arp Bar */}
       <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0 }}>
           {uiUnlocked && (
               <div 
@@ -329,6 +221,8 @@ const FloatingControls: React.FC<Props> = ({
           onSust={onSust}
           onPluck={onPluck}
           onVoice={onVoice}
+          onKeys={onKeys}
+          onPercussion={onPercussion}
           activeSustainedModes={activeSustainedModes}
           onClearSustain={onClearSustain}
           presets={presets}
@@ -339,63 +233,43 @@ const FloatingControls: React.FC<Props> = ({
           uiUnlocked={uiUnlocked}
       />
 
-      <button 
-        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isBendEnabled ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} 
-        style={{ ...draggableStyle('bend'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} 
-        onPointerDown={(e) => handleButtonPress(e, 'bend', onBend)}
-        aria-label="Toggle Pitch Bend"
-      >
-        BEND
-      </button>
+      <PerformanceControls 
+          isBendEnabled={isBendEnabled}
+          latchMode={latchMode as any} // Cast safe due to component flexibility
+          isSustainEnabled={isSustainEnabled}
+          uiUnlocked={uiUnlocked}
+          uiScale={uiScale}
+          positions={uiPositions}
+          onBend={onBend}
+          onSustainToggle={onSustainToggle}
+          onOff={onOff}
+          onPanic={onPanic}
+          onDragStart={handleDrag}
+      />
 
-      <button 
-        className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${sustColorClass} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} 
-        style={{ ...draggableStyle('sust'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} 
-        onPointerDown={(e) => handleButtonPress(e, 'sust', onSustainToggle)} 
-        title="Sustain Notes"
-        aria-label="Toggle Sustain"
-      >
-        SUST
-      </button>
+      <ViewControls 
+          showIncreaseDepthButton={showIncreaseDepthButton}
+          uiUnlocked={uiUnlocked}
+          uiScale={uiScale}
+          positions={uiPositions}
+          onCenter={onCenter}
+          onIncreaseDepth={onIncreaseDepth}
+          onDecreaseDepth={onDecreaseDepth}
+          onDragStart={handleDrag}
+      />
 
-      <button className={`absolute rounded-full bg-yellow-900/40 border-2 border-yellow-500/50 flex items-center justify-center text-yellow-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-yellow-800/60 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('off'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'off', onOff)} aria-label="Stop All Notes">OFF</button>
-      <button className={`absolute rounded-full bg-red-900/40 border-2 border-red-500/50 flex items-center justify-center text-red-500 font-bold uppercase tracking-wider backdrop-blur hover:bg-red-800/60 active:bg-red-600 active:text-white transition-all shadow-[0_0_15px_rgba(239,68,68,0.2)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('panic'), width: perfBtnSize, height: perfBtnSize, fontSize: 16 * uiScale }} onPointerDown={(e) => handleButtonPress(e, 'panic', onPanic)} aria-label="Panic Stop">PANIC</button>
-
-      <button className={`absolute rounded bg-yellow-600/20 border-2 border-yellow-500 flex items-center justify-center text-yellow-500 font-bold backdrop-blur hover:bg-yellow-600/40 active:bg-yellow-600 active:text-white transition-all shadow-[0_0_15px_rgba(234,179,8,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('center'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'center', onCenter)} title="Center Display" aria-label="Center View"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg></button>
-
-      {showIncreaseDepthButton && (<button className={`absolute rounded bg-blue-600/20 border-2 border-blue-500 flex items-center justify-center text-blue-500 font-bold backdrop-blur hover:bg-blue-600/40 active:bg-blue-600 active:text-white transition-all shadow-[0_0_15px_rgba(59,130,246,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('depth'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'depth', onIncreaseDepth)} title="Increase Depth from Selection" aria-label="Increase Depth"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>)}
-
-      {showIncreaseDepthButton && (<button className={`absolute rounded bg-green-600/20 border-2 border-green-500 flex items-center justify-center text-green-500 font-bold backdrop-blur hover:bg-green-600/40 active:bg-green-600 active:text-white transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] z-[150] select-none ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} style={{ ...draggableStyle('decreaseDepth'), width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'decreaseDepth', onDecreaseDepth)} title="Decrease Depth" aria-label="Decrease Depth"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12h-15" /></svg></button>)}
-
-      <div className={`absolute flex items-center gap-2 z-[150] transition-all ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50 rounded-xl p-1 bg-slate-900/20 border border-white/10' : ''}`} style={{ ...draggableStyle('chords') }} onPointerDown={(e) => handleDrag(e, 'chords')}>
-          <button className="rounded bg-indigo-600/20 border-2 border-indigo-500 flex items-center justify-center text-indigo-500 font-bold backdrop-blur hover:bg-indigo-600/40 active:bg-indigo-600 active:text-white transition-all shadow-[0_0_15px_rgba(99,102,241,0.4)] select-none" style={{ width: baseSize, height: baseSize }} onPointerDown={(e) => handleButtonPress(e, 'chords', onAddChord)} title="Store Current Chord" aria-label="Add Chord"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: baseSize * 0.5, height: baseSize * 0.5 }}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg></button>
-          
-          {!uiUnlocked && savedChords.filter(c => c.visible).map((chord, i) => {
-              const isActive = activeChordIds.includes(chord.id);
-              return (
-                  <div key={chord.id} className="flex flex-col items-center gap-1 group">
-                      <button 
-                        className={`rounded border-2 flex items-center justify-center font-bold backdrop-blur transition-all shadow-lg select-none ${isActive ? 'bg-indigo-600 border-indigo-400 text-white shadow-[0_0_15px_rgba(99,102,241,0.8)] scale-110' : 'bg-slate-800/60 border-slate-600 text-slate-400 hover:border-indigo-500 hover:text-indigo-400'}`} 
-                        style={{ width: chordSize, height: chordSize, fontSize: 14 * uiScale }} 
-                        onPointerDown={(e) => { e.stopPropagation(); toggleChord(chord.id); }} 
-                        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if(onRemoveChord) onRemoveChord(chord.id); }}
-                      >
-                          {chord.label}
-                      </button>
-                      <button
-                          className="text-slate-600 hover:text-red-400 transition-colors p-1 opacity-60 hover:opacity-100"
-                          onPointerDown={(e) => { e.stopPropagation(); if(onRemoveChord) onRemoveChord(chord.id); }}
-                          title="Delete Chord"
-                          aria-label="Delete Chord"
-                      >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                      </button>
-                  </div>
-              );
-          })}
-      </div>
+      <ChordBar 
+          savedChords={savedChords}
+          activeChordIds={activeChordIds}
+          chordShortcutSizeScale={chordShortcutSizeScale}
+          uiUnlocked={uiUnlocked}
+          uiScale={uiScale}
+          position={uiPositions.chords}
+          onAddChord={onAddChord}
+          toggleChord={toggleChord}
+          onRemoveChord={onRemoveChord}
+          onDragStart={handleDrag}
+      />
     </>
   );
 };

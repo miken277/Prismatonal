@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback } from 'react';
 import { AppSettings, ArpConfig, ArpeggioStep } from '../types';
 import { arpeggiatorService } from '../services/ArpeggiatorService';
@@ -6,7 +7,8 @@ import { TonalityDiamondHandle } from '../components/TonalityDiamond';
 export const useArpeggiatorLogic = (
     settings: AppSettings,
     updateSettings: (s: Partial<AppSettings> | ((prev: AppSettings) => AppSettings)) => void,
-    diamondRef: React.RefObject<TonalityDiamondHandle>
+    diamondRef: React.RefObject<TonalityDiamondHandle>,
+    currentLatchMode: number = 3 // Default to Strum/Plucked
 ) => {
     const [recordingArpId, setRecordingArpId] = useState<string | null>(null);
     const [currentArpStep, setCurrentArpStep] = useState(0);
@@ -71,12 +73,20 @@ export const useArpeggiatorLogic = (
             return;
         }
 
-        const newStep: ArpeggioStep = { nodeId, ratio, n, d, limit, muted: false };
+        const newStep: ArpeggioStep = { 
+            nodeId, 
+            ratio, 
+            n, 
+            d, 
+            limit, 
+            muted: false,
+            mode: currentLatchMode // Save current instrument mode
+        };
         const newArps = [...settings.arpeggios];
         newArps[arpIndex] = { ...newArps[arpIndex], steps: [...currentSteps, newStep] };
 
         updateSettings(prev => ({ ...prev, arpeggios: newArps }));
-    }, [recordingArpId, settings.arpeggios, updateSettings]);
+    }, [recordingArpId, settings.arpeggios, updateSettings, currentLatchMode]);
 
     const handleArpPatternUpdate = useCallback((arpId: string, steps: ArpeggioStep[]) => {
         const arpIndex = settings.arpeggios.findIndex(a => a.id === arpId);

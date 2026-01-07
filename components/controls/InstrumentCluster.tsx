@@ -5,11 +5,13 @@ import { PresetState, PlayMode, SynthPreset } from '../../types';
 import { MODE_COLORS } from '../../constants';
 
 interface Props {
-    latchMode: 0 | 1 | 2 | 3 | 4;
+    latchMode: 0 | 1 | 2 | 3 | 4 | 5 | 6;
     onLatch: () => void;
     onSust?: () => void;
     onPluck?: () => void;
     onVoice?: () => void;
+    onKeys?: () => void;
+    onPercussion?: () => void; // New prop
     activeSustainedModes: number[];
     onClearSustain?: (mode: number) => void;
     
@@ -25,7 +27,7 @@ interface Props {
 }
 
 const InstrumentCluster: React.FC<Props> = ({
-    latchMode, onLatch, onSust, onPluck, onVoice, activeSustainedModes, onClearSustain,
+    latchMode, onLatch, onSust, onPluck, onVoice, onKeys, onPercussion, activeSustainedModes, onClearSustain,
     presets, onPresetChange, uiScale, position, onDragStart, uiUnlocked
 }) => {
     
@@ -136,11 +138,17 @@ const InstrumentCluster: React.FC<Props> = ({
                 <div className="w-8 h-1 bg-slate-600 rounded-full" />
             </div>
 
-            {/* Strings (Blue) - Moved to Top */}
+            {/* Strings (Blue) - Top */}
             {renderInstrument(2, "Strings", 'normal', onSust, MODE_COLORS[2])}
 
-            {/* Brass (Yellow) - Moved Below Strings */}
+            {/* Brass (Yellow) */}
             {renderInstrument(4, "Brass", 'brass', onVoice, MODE_COLORS[4])}
+
+            {/* Keys (Purple) */}
+            {renderInstrument(5, "Keys", 'keys', onKeys, MODE_COLORS[5])}
+
+            {/* Percussion (Pink) - New */}
+            {renderInstrument(6, "Perc", 'percussion', onPercussion, MODE_COLORS[6])}
 
             {/* Plucked (Orange) */}
             {renderInstrument(3, "Plucked", 'strum', onPluck, MODE_COLORS[3])}

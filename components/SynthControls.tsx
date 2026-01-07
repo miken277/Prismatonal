@@ -72,6 +72,7 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
   // --- Preset Management ---
 
   const loadPreset = (p: SynthPreset) => {
+      if (p.isHeader) return;
       const cloned = JSON.parse(JSON.stringify(p));
       onChange(activeVoiceMode, cloned);
   };
@@ -101,7 +102,8 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
           case 'latch': return 'DRONE';
           case 'strum': return 'PLUCKED';
           case 'brass': return 'BRASS';
-          case 'arpeggio': return 'ARP';
+          case 'keys': return 'KEYS';
+          case 'percussion': return 'PERC';
           default: return mode;
       }
   };
@@ -116,11 +118,11 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
         
         {/* Mode Selector */}
         <div className="flex border-b border-slate-700 bg-slate-900/80 mx-4 mt-2 rounded-t-lg overflow-hidden">
-            {(['latch', 'normal', 'strum', 'brass', 'arpeggio'] as PlayMode[]).map(mode => (
+            {(['latch', 'normal', 'strum', 'brass', 'keys', 'percussion'] as PlayMode[]).map(mode => (
                 <button
                     key={mode}
                     onClick={() => setActiveVoiceMode(mode)}
-                    className={`flex-1 py-3 text-xs font-bold uppercase transition border-b-2 ${activeVoiceMode === mode ? 'border-indigo-500 text-indigo-400 bg-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-800/50'}`}
+                    className={`flex-1 py-3 text-[10px] font-bold uppercase transition border-b-2 ${activeVoiceMode === mode ? 'border-indigo-500 text-indigo-400 bg-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-800/50'}`}
                 >
                     {getModeLabel(mode)}
                 </button>
@@ -143,7 +145,18 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
                             className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-sm text-white appearance-none focus:border-indigo-500 focus:outline-none"
                         >
                             {Object.keys(categorizedPresets).map(cat => (
-                                <optgroup key={cat} label={cat}>{categorizedPresets[cat].map(p => (<option key={p.id} value={p.name}>{p.name}</option>))}</optgroup>
+                                <optgroup key={cat} label={cat}>
+                                    {categorizedPresets[cat].map(p => {
+                                        if (p.isHeader) {
+                                            return (
+                                                <option key={p.id} disabled style={{ fontWeight: 'bold', color: '#a5b4fc', backgroundColor: '#1e293b' }}>
+                                                    {p.name}
+                                                </option>
+                                            );
+                                        }
+                                        return <option key={p.id} value={p.name}>{p.name}</option>;
+                                    })}
+                                </optgroup>
                             ))}
                             <optgroup label="User Bank">{userBank.map((p, idx) => (<option key={`user-${idx}`} value={p.name}>{p.name}</option>))}</optgroup>
                         </select>

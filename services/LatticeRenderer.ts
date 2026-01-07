@@ -33,13 +33,15 @@ export interface RenderState {
     latchMode: number;
 }
 
+// Render Order Priority (Highest = Topmost/Outer Ring)
 const MODE_PRIORITY: Record<string | number, number> = {
-    0: 0, 
-    3: 1, 
-    'arp': 2, 
-    2: 3, 
-    4: 4, 
-    1: 5  
+    0: 0, // Cursor
+    3: 1, // Strum
+    2: 2, // Strings
+    4: 3, // Brass
+    5: 4, // Keys
+    'arp': 5, // Arp
+    1: 6  // Drone (Top)
 };
 
 interface SkinColors {
@@ -498,7 +500,7 @@ export class LatticeRenderer {
              const uniqueModes = new Set<number | string>();
              activations.forEach(a => uniqueModes.add(a.mode));
              
-             // Sort: Standard modes (numbers) first, then 'arp'
+             // Sort using explicit priority
              const sortedModes = Array.from(uniqueModes).sort((a, b) => {
                  return (MODE_PRIORITY[a] ?? 99) - (MODE_PRIORITY[b] ?? 99);
              });

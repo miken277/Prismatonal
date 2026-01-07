@@ -1,8 +1,9 @@
+
 import React from 'react';
 import { OscillatorConfig, WaveformType, FilterType } from '../../types';
 
 // Envelope Graph Component
-const EnvelopeGraph = ({ attack, decay, sustain, release }: { attack: number, decay: number, sustain: number, release: number }) => {
+const EnvelopeGraph = ({ attack, decay, sustain, release, holdDecay }: { attack: number, decay: number, sustain: number, release: number, holdDecay?: number }) => {
     const width = 200;
     const height = 60;
     const pad = 2;
@@ -11,22 +12,31 @@ const EnvelopeGraph = ({ attack, decay, sustain, release }: { attack: number, de
     
     const xA = pad + scaleTime(attack);
     const xD = xA + scaleTime(decay);
-    const xS = xD + 30; // Fixed visual width for sustain hold
+    const xS = xD + 40; // Sustained width (represented as "time holding key")
     const xR = xS + scaleTime(release);
     
     const yBase = height - pad;
     const yPeak = pad;
     const ySus = yBase - (sustain * (height - 2 * pad));
     
-    const path = `M ${pad} ${yBase} L ${xA} ${yPeak} L ${xD} ${ySus} L ${xS} ${ySus} L ${xR} ${yBase}`;
+    // Calculate hold decay end point if specified
+    const hasHoldDecay = holdDecay !== undefined && holdDecay > 0 && holdDecay < 60; // 60s assumed max/inf
+    const ySusEnd = hasHoldDecay ? yBase : ySus;
+    
+    // Path: Start -> Peak -> SustainStart -> SustainEnd -> ReleaseEnd
+    const path = `M ${pad} ${yBase} L ${xA} ${yPeak} L ${xD} ${ySus} L ${xS} ${ySusEnd} L ${xR} ${yBase}`;
 
     return (
         <div className="w-full bg-slate-900 rounded border border-slate-700 h-[60px] overflow-hidden relative">
             <svg width="100%" height="100%" viewBox={`0 0 ${Math.max(width, xR + 10)} ${height}`} className="absolute top-0 left-0" preserveAspectRatio="none">
                 <path d={path} fill="none" stroke="#6366f1" strokeWidth="2" vectorEffect="non-scaling-stroke" />
                 <path d={`${path} L ${xR} ${height} L ${pad} ${height} Z`} fill="rgba(99, 102, 241, 0.2)" stroke="none" />
+                
+                {hasHoldDecay && (
+                    <line x1={xD} y1={ySus} x2={xS} y2={ySusEnd} stroke="rgba(255,255,255,0.3)" strokeDasharray="2,2" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                )}
             </svg>
-            <div className="absolute bottom-1 right-2 text-[8px] text-slate-500 pointer-events-none font-bold tracking-wider">ADSR</div>
+            <div className="absolute bottom-1 right-2 text-[8px] text-slate-500 pointer-events-none font-bold tracking-wider">ADSR{hasHoldDecay ? '+Hold' : ''}</div>
         </div>
     );
 };
@@ -109,13 +119,27 @@ const OscillatorPanel: React.FC<Props> = ({ label, config, isPrimary = false, on
 
                 {/* Envelope */}
                 <div className="space-y-2">
-                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wide">Envelope (ADSR)</h4>
-                    <EnvelopeGraph attack={config.attack} decay={config.decay} sustain={config.sustain} release={config.release} />
+                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wide">Envelope (ADSR+)</h4>
+                    <EnvelopeGraph attack={config.attack} decay={config.decay} sustain={config.sustain} release={config.release} holdDecay={config.holdDecay} />
                     <div className="grid grid-cols-2 gap-3 pt-2">
-                        <div><label className="flex justify-between text-xs mb-1 text-slate-400"><span>A: {config.attack.toFixed(2)}s</span></label><input type="range" min="0.01" max="5.0" step="0.01" value={config.attack} onChange={(e) => onUpdate('attack', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none cursor-pointer" /></div>
-                        <div><label className="flex justify-between text-xs mb-1 text-slate-400"><span>D: {config.decay.toFixed(2)}s</span></label><input type="range" min="0.01" max="5.0" step="0.01" value={config.decay} onChange={(e) => onUpdate('decay', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none cursor-pointer" /></div>
-                        <div><label className="flex justify-between text-xs mb-1 text-slate-400"><span>S: {config.sustain.toFixed(2)}</span></label><input type="range" min="0.0" max="1.0" step="0.01" value={config.sustain} onChange={(e) => onUpdate('sustain', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none cursor-pointer" /></div>
-                        <div><label className="flex justify-between text-xs mb-1 text-slate-400"><span>R: {config.release.toFixed(2)}s</span></label><input type="range" min="0.01" max="8.0" step="0.01" value={config.release} onChange={(e) => onUpdate('release', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none cursor-pointer" /></div>
+                        <div><label className="flex justify-between text-xs mb-1 text-slate-400"><span>Attack: {config.attack.toFixed(2)}s</span></label><input type="range" min="0.01" max="60.0" step="0.01" value={config.attack} onChange={(e) => onUpdate('attack', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none cursor-pointer" /></div>
+                        <div><label className="flex justify-between text-xs mb-1 text-slate-400"><span>Decay: {config.decay.toFixed(2)}s</span></label><input type="range" min="0.01" max="60.0" step="0.01" value={config.decay} onChange={(e) => onUpdate('decay', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none cursor-pointer" /></div>
+                        <div><label className="flex justify-between text-xs mb-1 text-slate-400"><span>Sustain Level: {config.sustain.toFixed(2)}</span></label><input type="range" min="0.0" max="1.0" step="0.01" value={config.sustain} onChange={(e) => onUpdate('sustain', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none cursor-pointer" /></div>
+                        <div><label className="flex justify-between text-xs mb-1 text-slate-400"><span>Release: {config.release.toFixed(2)}s</span></label><input type="range" min="0.01" max="60.0" step="0.01" value={config.release} onChange={(e) => onUpdate('release', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-900 rounded appearance-none cursor-pointer" /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-indigo-900/50 mt-2">
+                        <div>
+                            <label className="flex justify-between text-xs mb-1 text-slate-400">
+                                <span>Hold Decay: {(!config.holdDecay || config.holdDecay <= 0) ? 'Infinite' : `${config.holdDecay.toFixed(1)}s`}</span>
+                            </label>
+                            <input type="range" min="0" max="60.0" step="0.1" value={config.holdDecay || 0} onChange={(e) => onUpdate('holdDecay', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-700 rounded appearance-none cursor-pointer" title="0 = Infinite Hold" />
+                        </div>
+                        <div>
+                            <label className="flex justify-between text-xs mb-1 text-slate-400">
+                                <span>Pedal Decay: {(!config.pedalDecay || config.pedalDecay <= 0) ? 'Infinite' : `${config.pedalDecay.toFixed(1)}s`}</span>
+                            </label>
+                            <input type="range" min="0" max="60.0" step="0.1" value={config.pedalDecay || 0} onChange={(e) => onUpdate('pedalDecay', parseFloat(e.target.value))} className="w-full h-1 bg-indigo-700 rounded appearance-none cursor-pointer" title="0 = Infinite Latch" />
+                        </div>
                     </div>
                 </div>
 

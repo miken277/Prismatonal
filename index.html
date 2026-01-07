@@ -33,6 +33,22 @@
       ::-webkit-scrollbar-corner {
         background: #0f172a;
       }
+
+      /* --- Component Styles --- */
+
+      /* Custom Range Sliders (MasterControls) */
+      .prismatonal-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 10px; height: 10px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
+      .prismatonal-slider::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: currentColor; cursor: pointer; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.5); }
+      
+      /* Hide Number Input Spinners (ArpeggiatorBar) */
+      input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+      .no-spinner { -moz-appearance: textfield; }
+      
+      /* Sequencer Scrollbars (ArpeggiatorBar) */
+      .seq-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+      .seq-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.3); border-radius: 3px; }
+      .seq-scroll::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.6); border-radius: 3px; border: 1px solid rgba(15, 23, 42, 0.3); }
+      .seq-scroll::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.8); }
     </style>
 <script type="importmap">
 {

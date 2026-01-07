@@ -1,4 +1,5 @@
-import { ArpeggioStep, ArpConfig } from '../types';
+
+import { ArpeggioStep, ArpConfig, PlayMode } from '../types';
 import { audioEngine } from './AudioEngine';
 import { midiService } from './MidiService';
 import { store } from './Store';
@@ -19,7 +20,7 @@ class ArpeggiatorService {
     private currentConfig: ArpConfig | null = null;
     
     // The "effective" steps after processing Direction and Octave Range
-    private playbackQueue: { nodeId: string, ratio: number, originalIndex: number, muted?: boolean }[] = [];
+    private playbackQueue: { nodeId: string, ratio: number, originalIndex: number, muted?: boolean, mode?: number }[] = [];
     
     private onStepCallback: OnStepCallback | null = null;
     private onNoteCallback: OnNoteCallback | null = null; 
@@ -181,8 +182,17 @@ class ArpeggiatorService {
             const durationSec = (beatMs * divBase / 1000) * Math.min(1.0, Math.max(0.1, config.gate));
             const stopTime = time + durationSec;
 
+            // Determine Voice Slot based on recorded mode
+            // Fallback to 'keys' if mode is missing or invalid
+            let voiceSlot: PlayMode = 'keys';
+            if (step.mode === 1) voiceSlot = 'latch'; // Drone
+            else if (step.mode === 2) voiceSlot = 'normal'; // Strings
+            else if (step.mode === 3) voiceSlot = 'strum'; // Plucked
+            else if (step.mode === 4) voiceSlot = 'brass'; // Brass
+            else if (step.mode === 5) voiceSlot = 'keys'; // Keys
+
             // Trigger Audio with precise time
-            audioEngine.startVoice(voiceId, step.ratio, state.settings.baseFrequency, 'arpeggio', 'gate', time);
+            audioEngine.startVoice(voiceId, step.ratio, state.settings.baseFrequency, voiceSlot, 'gate', time);
             
             // Schedule Stop
             audioEngine.stopVoice(voiceId, stopTime);
@@ -231,7 +241,7 @@ class ArpeggiatorService {
         const config = this.currentConfig;
         
         let pool = this.baseSteps.map((s, i) => ({ ...s, originalIndex: i }));
-        let final: { nodeId: string, ratio: number, originalIndex: number, muted?: boolean }[] = [];
+        let final: { nodeId: string, ratio: number, originalIndex: number, muted?: boolean, mode?: number }[] = [];
 
         // 1. Octave Expansion
         const octaves = Math.max(1, Math.min(4, config.octaves));
@@ -244,7 +254,8 @@ class ArpeggiatorService {
                     ratio: step.ratio * mult,
                     originalIndex: step.originalIndex,
                     sortRatio: step.ratio * mult,
-                    muted: step.muted
+                    muted: step.muted,
+                    mode: step.mode
                 });
             }
         }

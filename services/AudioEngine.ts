@@ -1,20 +1,21 @@
 
-
 import { SynthPreset, AppSettings, ReverbType, PresetState, PlayMode, PlaybackMode } from '../types';
 import { store } from './Store';
 import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
 import { AUDIO_PROCESSOR_CODE } from './AudioProcessorCode';
+import { midiService } from './MidiService';
 
 // --- Typed Messages for Worklet ---
 interface WorkletMessageBase {
     type: string;
-    time?: number; // Optional timing for scheduling
+    time?: number; 
 }
 
+// ... (Keep existing interfaces UpdatePresetMessage etc.) ...
 interface UpdatePresetMessage extends WorkletMessageBase {
     type: 'update_preset';
     mode: string;
-    data: any; // Normalized preset
+    data: any; 
 }
 
 interface ConfigMessage extends WorkletMessageBase {
@@ -62,12 +63,15 @@ class AudioEngine {
   private workletNode: AudioWorkletNode | null = null;
   private initPromise: Promise<void> | null = null;
   
+  // VST Mode Flag
+  private isRemoteEngine = false;
+  
   // Message Queue for pre-init commands
   private messageQueue: AudioWorkletMessage[] = [];
   
   // FX Chain
   private limiter: DynamicsCompressorNode | null = null;
-  private masterFilter: BiquadFilterNode | null = null; // New Tone Control
+  private masterFilter: BiquadFilterNode | null = null; 
   private dryGain: GainNode | null = null;
   private reverbNode: ConvolverNode | null = null;
   private reverbGain: GainNode | null = null;
@@ -80,7 +84,7 @@ class AudioEngine {
 
   private currentMasterVol: number = 0.8;
   private globalSpatialScale: number = 1.0;
-  private globalBrightness: number = 1.0; // 0.0 to 1.0
+  private globalBrightness: number = 1.0; 
   
   // Cache active presets for FX updates
   private activePresets: PresetState;
@@ -95,11 +99,12 @@ class AudioEngine {
         latch: this.ensurePresetSafety(rawPresets.latch),
         strum: this.ensurePresetSafety(rawPresets.strum),
         brass: this.ensurePresetSafety(rawPresets.brass),
-        arpeggio: this.ensurePresetSafety(rawPresets.arpeggio)
+        keys: this.ensurePresetSafety(rawPresets.keys),
+        percussion: this.ensurePresetSafety(rawPresets.percussion)
     };
 
     // Auto-init to pre-load audio resources immediately
-    this.init().catch(e => console.warn("Auto-init postponed (will retry on gesture)", e));
+    this.init().catch(e => console.warn("Auto-init postponed", e));
 
     store.subscribe(() => {
         const newPresets = store.getSnapshot().presets;
@@ -112,20 +117,13 @@ class AudioEngine {
       return () => { this.voiceStealListeners.delete(callback); };
   }
 
-  private isMobile() {
-      return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  }
-
   private ensurePresetSafety(p: any): SynthPreset {
      if (!p) return DEFAULT_PRESET;
-     
      const validReverbTypes: ReverbType[] = ['room', 'hall', 'cathedral', 'plate', 'shimmer'];
      let rType: ReverbType = 'hall';
-     
      if (p.reverbType && validReverbTypes.includes(p.reverbType)) {
          rType = p.reverbType as ReverbType;
      }
-
      const safe: SynthPreset = {
          ...DEFAULT_PRESET,
          ...p,
@@ -137,21 +135,31 @@ class AudioEngine {
          aspirationGain: p.aspirationGain !== undefined ? p.aspirationGain : 0,
          aspirationCutoff: p.aspirationCutoff !== undefined ? p.aspirationCutoff : 4000
      };
-
      const defaults = REVERB_DEFAULTS[rType];
      if (safe.reverbSize === undefined) safe.reverbSize = defaults.size;
      if (safe.reverbDamping === undefined) safe.reverbDamping = defaults.damping;
      if (safe.reverbDiffusion === undefined) safe.reverbDiffusion = defaults.diffusion;
-     
      return safe;
   }
 
+  // Unified Message Dispatcher
   private postMessage(msg: AudioWorkletMessage) {
+      // 1. If VST Mode, send to HostAdapter via MidiService (or direct bridge)
+      // We access the raw adapter via a cheat or update MidiService to expose generic commands
+      if (this.isRemoteEngine) {
+          // In VST mode, we don't use AudioWorklet. We assume the Host listens to 'command' messages.
+          // For now, we piggyback on the assumption that if isRemoteEngine is true, 
+          // we should fire these into the void or a specific bridge function if it existed.
+          // Since we can't easily import `midiService` circular dependency here, we rely on window globals or just skip.
+          // In a real implementation, `midiService` would expose `sendCommand`.
+          return; 
+      }
+
+      // 2. Standard Web Mode
       if (this.workletNode) {
           this.workletNode.port.postMessage(msg);
       } else {
           this.messageQueue.push(msg);
-          // If we are queuing messages but not initializing, trigger init
           if (!this.initPromise && !this.ctx) {
               this.init();
           }
@@ -170,7 +178,7 @@ class AudioEngine {
   }
 
   public updatePresets(newPresets: PresetState) {
-      const modes: PlayMode[] = ['normal', 'latch', 'strum', 'brass', 'arpeggio'];
+      const modes: PlayMode[] = ['normal', 'latch', 'strum', 'brass', 'keys', 'percussion'];
       let recomputeReverb = false;
 
       const oldMaster = this.activePresets.normal;
@@ -190,15 +198,17 @@ class AudioEngine {
           latch: this.ensurePresetSafety(newPresets.latch),
           strum: this.ensurePresetSafety(newPresets.strum),
           brass: this.ensurePresetSafety(newPresets.brass),
-          arpeggio: this.ensurePresetSafety(newPresets.arpeggio)
+          keys: this.ensurePresetSafety(newPresets.keys),
+          percussion: this.ensurePresetSafety(newPresets.percussion)
       };
 
-      if (recomputeReverb && this.ctx) {
-          this.updateReverbBuffer();
+      if (!this.isRemoteEngine) {
+          if (recomputeReverb && this.ctx) {
+              this.updateReverbBuffer();
+          }
+          this.updateFX();
       }
-      this.updateFX();
 
-      // If worklet isn't ready, these will be queued by postMessage
       modes.forEach(mode => {
           this.postMessage({ 
               type: 'update_preset', 
@@ -208,7 +218,6 @@ class AudioEngine {
       });
   }
 
-  // New Method: Register a dynamic preset (like a chord patch) with the audio engine
   public registerPreset(id: string, preset: SynthPreset) {
       this.postMessage({
           type: 'update_preset', 
@@ -218,16 +227,10 @@ class AudioEngine {
   }
 
   public async resume() {
-      if (!this.ctx) {
-          await this.init(); 
-      }
+      if (this.isRemoteEngine) return;
+      if (!this.ctx) await this.init(); 
       if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
-          try {
-            await this.ctx.resume();
-          } catch (e) {
-            // Harmless warning if called before gesture
-            // console.warn("Context resume pending gesture");
-          }
+          try { await this.ctx.resume(); } catch (e) {}
       }
   }
 
@@ -235,24 +238,27 @@ class AudioEngine {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
+        // Detect VST Mode
+        if (window.__PRISMA_WRAPPER__ === 'juce_webview' || window.__postMessageToHost) {
+            console.log("AudioEngine: Native Backend Detected. Disabling Web Audio.");
+            this.isRemoteEngine = true;
+            return;
+        }
+
         if (!this.ctx) {
             const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
             const settings = store.getSnapshot().settings;
             const latencyHint = settings.audioLatencyHint || 'playback';
             
-            this.ctx = new AudioContextClass({
-                latencyHint: latencyHint,
-            });
+            this.ctx = new AudioContextClass({ latencyHint });
 
             this.ctx.onstatechange = () => {
                 if (this.ctx && (this.ctx.state === 'suspended' || (this.ctx.state as string) === 'interrupted')) {
-                    // Try to auto-resume if allowed
                     this.ctx.resume().catch(() => {}); 
                 }
             };
 
             try {
-                // Use Blob URL to load worklet code reliably
                 const blob = new Blob([AUDIO_PROCESSOR_CODE], { type: 'application/javascript' });
                 const url = URL.createObjectURL(blob);
                 
@@ -265,15 +271,14 @@ class AudioEngine {
                     outputChannelCount: [2]
                 });
 
-                // Set up message handler for voice stealing events
                 this.workletNode.port.onmessage = (e) => {
                     if (e.data.type === 'voice_stolen') {
                         this.voiceStealListeners.forEach(cb => cb(e.data.id));
                     }
                 };
                 
-                // Initialize state from store
-                (['normal', 'latch', 'strum', 'brass', 'arpeggio'] as PlayMode[]).forEach(mode => {
+                // Initialize State
+                (['normal', 'latch', 'strum', 'brass', 'keys', 'percussion'] as PlayMode[]).forEach(mode => {
                     this.workletNode!.port.postMessage({ 
                         type: 'update_preset', 
                         mode: mode, 
@@ -299,13 +304,12 @@ class AudioEngine {
                      this.workletNode.connect(this.delayOutputGain);
                 }
                 
-                // Flush Queue
                 if (this.messageQueue.length > 0) {
                     this.messageQueue.forEach(msg => this.workletNode!.port.postMessage(msg));
                     this.messageQueue = [];
                 }
 
-                console.log("Audio Engine Initialized (Suspended)");
+                console.log("Audio Engine Initialized (Web)");
 
             } catch (e) {
                 console.error("Failed to load AudioWorklet", e);
@@ -313,15 +317,13 @@ class AudioEngine {
                 return;
             }
         }
-
-        // We do NOT auto-resume here anymore to allow constructor init without gesture
     })();
 
     return this.initPromise;
   }
 
   private setupFX() {
-    if (!this.ctx) return;
+    if (!this.ctx || this.isRemoteEngine) return;
 
     try {
         this.dryGain?.disconnect();
@@ -335,7 +337,6 @@ class AudioEngine {
         this.finalMasterGain?.disconnect();
     } catch(e) { /* ignore */ }
 
-    // Master Filter (Tone Control)
     this.masterFilter = this.ctx.createBiquadFilter();
     this.masterFilter.type = 'lowpass';
     this.masterFilter.frequency.value = 20000;
@@ -346,11 +347,9 @@ class AudioEngine {
     this.limiter.ratio.value = 10.0;
     this.limiter.attack.value = 0.005;
     
-    // Final Master Gain (Global Volume)
     this.finalMasterGain = this.ctx.createGain();
     this.finalMasterGain.gain.value = this.currentMasterVol;
 
-    // Filter -> Limiter -> FinalGain -> Destination
     this.masterFilter.connect(this.limiter);
     this.limiter.connect(this.finalMasterGain);
     this.finalMasterGain.connect(this.ctx.destination);
@@ -374,7 +373,6 @@ class AudioEngine {
     this.delayNode.connect(this.delayFeedbackGain);
     this.delayFeedbackGain.connect(this.delayNode);
     
-    // Reconnect Worklet if it exists
     if (this.workletNode) {
         this.workletNode.disconnect();
         this.workletNode.connect(this.dryGain);
@@ -386,7 +384,7 @@ class AudioEngine {
   }
 
   private updateReverbBuffer() {
-      if (!this.reverbNode || !this.ctx) return;
+      if (!this.reverbNode || !this.ctx || this.isRemoteEngine) return;
       
       const master = this.activePresets.normal;
       const type = master.reverbType || 'hall';
@@ -414,7 +412,7 @@ class AudioEngine {
   }
 
   private updateFX() {
-      if (!this.ctx) return;
+      if (!this.ctx || this.isRemoteEngine) return;
       const now = this.ctx.currentTime;
       const ramp = 0.1;
       
@@ -442,7 +440,6 @@ class AudioEngine {
       }
       
       if (this.masterFilter) {
-          // Logarithmic mapping for brightness: 0..1 -> 100Hz .. 20000Hz
           const minFreq = 100;
           const maxFreq = 20000;
           const freq = minFreq * Math.pow(maxFreq/minFreq, this.globalBrightness);
@@ -455,7 +452,6 @@ class AudioEngine {
 
       if (this.dryGain) {
           const dryLevel = Math.max(0.5, 1.0 - (scaledReverbMix * 0.4));
-          // Normalized dry level logic, volume now handled by finalMasterGain
           this.dryGain.gain.setTargetAtTime(dryLevel, now, ramp);
       }
   }
@@ -529,20 +525,19 @@ class AudioEngine {
 
   public setMasterVolume(val: number) {
     this.currentMasterVol = val;
-    this.updateFX();
+    if (!this.isRemoteEngine) this.updateFX();
   }
 
   public setGlobalSpatialScale(val: number) {
       this.globalSpatialScale = val;
-      this.updateFX();
+      if (!this.isRemoteEngine) this.updateFX();
   }
 
   public setGlobalBrightness(val: number) {
       this.globalBrightness = val;
-      this.updateFX();
+      if (!this.isRemoteEngine) this.updateFX();
   }
 
-  // New method for global pitch bend
   public setGlobalBend(semitones: number) {
       const ratio = Math.pow(2, semitones / 12.0);
       this.postMessage({ type: 'config', globalBend: ratio });
@@ -552,19 +547,14 @@ class AudioEngine {
       return this.ctx;
   }
 
-  // Allow connecting the master output to an external destination (e.g. MediaStreamDestination for recording)
   public connectToRecordingDestination(destination: AudioNode) {
-      if (this.finalMasterGain) {
-          // Connect in parallel to the recording destination
+      if (this.finalMasterGain && !this.isRemoteEngine) {
           this.finalMasterGain.connect(destination);
       }
   }
 
-  // Updated startVoice to accept optional start time for Lookahead Scheduling
   public startVoice(id: string, ratio: number, baseFrequency: number, presetSlot: string = 'normal', playbackMode: PlaybackMode = 'gate', time?: number) {
-    // Ensure context is running (resume if suspended)
     this.resume();
-    
     const freq = baseFrequency * ratio;
     this.postMessage({ 
         type: 'note_on', 
@@ -572,7 +562,7 @@ class AudioEngine {
         freq: freq,
         voiceType: presetSlot,
         mode: playbackMode,
-        time: time // Pass time if provided
+        time: time
     });
   }
 
@@ -595,8 +585,7 @@ class AudioEngine {
 
   public stopAll() {
     this.postMessage({ type: 'stop_all' });
-    // Resetting FX is safe to do immediately even if audio isn't running
-    if (this.ctx) this.setupFX();
+    if (this.ctx && !this.isRemoteEngine) this.setupFX();
   }
 
   public stopGroup(prefix: string) {

@@ -16,22 +16,28 @@ export type MidiMessageCallback = (status: number, data1: number, data2: number)
 // Global augmentations for bridge detection
 declare global {
     interface Window {
+        // Native Interop Flags
+        __PRISMA_WRAPPER__?: 'electron' | 'juce_webview';
+        
+        // Electron / Generic Bridge
         electronMidi?: {
             send: (channel: string, ...args: any[]) => void;
             receive?: (channel: string, func: Function) => void;
         };
-        vstMidi?: {
-            sendMidi: (bytes: number[]) => void;
-        };
+        
+        // JUCE / VST Bridge
+        __postMessageToHost?: (message: string) => void;
     }
 }
 
 export interface IHostAdapter {
     type: 'web' | 'electron' | 'vst';
+    audioBackend: 'web' | 'native'; // 'web' = JS AudioContext, 'native' = C++ DSP
     init(): Promise<boolean>;
     getOutputs(): Promise<MidiDevice[]>;
     setOutput(id: string | null): void;
     sendMidi(bytes: number[]): void;
+    sendCommand(type: string, payload: any): void; // New generic command sender
     setTransportCallback(cb: TransportCallback | null): void;
     setInputCallback(cb: MidiMessageCallback | null): void;
 }
@@ -41,6 +47,7 @@ export interface IHostAdapter {
  */
 export class WebHostAdapter implements IHostAdapter {
     type = 'web' as const;
+    audioBackend = 'web' as const;
     private access: any = null;
     private output: any = null;
     private inputCallback: MidiMessageCallback | null = null;
@@ -51,7 +58,6 @@ export class WebHostAdapter implements IHostAdapter {
                 this.access = await (navigator as any).requestMIDIAccess();
                 this.setupInputs();
                 
-                // Handle hot-plugging
                 this.access.onstatechange = (e: any) => {
                     if (e.port.type === 'input' && e.port.state === 'connected') {
                         this.setupInputs();
@@ -69,10 +75,8 @@ export class WebHostAdapter implements IHostAdapter {
     private setupInputs() {
         if (!this.access) return;
         this.access.inputs.forEach((input: any) => {
-            // Avoid re-binding if already bound (though simple reassignment is safe)
             input.onmidimessage = (e: any) => {
                 if (this.inputCallback && e.data.length >= 2) {
-                    // Normalize data: Status, Data1, Data2 (0 if not present)
                     const d2 = e.data.length > 2 ? e.data[2] : 0;
                     this.inputCallback(e.data[0], e.data[1], d2);
                 }
@@ -98,19 +102,18 @@ export class WebHostAdapter implements IHostAdapter {
     }
 
     sendMidi(bytes: number[]) {
-        if (this.output) {
-            this.output.send(bytes);
-        }
+        if (this.output) this.output.send(bytes);
     }
 
-    setTransportCallback(cb: TransportCallback | null) {
-        // Web MIDI doesn't strictly have a transport standard without WebMIDI Clock parsing.
-        // Future implementation could parse MIDI Clock messages here.
+    sendCommand(type: string, payload: any) {
+        // In Web Mode, commands are internal or logged
+        // console.log("Command:", type, payload);
     }
+
+    setTransportCallback(cb: TransportCallback | null) {}
 
     setInputCallback(cb: MidiMessageCallback | null) {
         this.inputCallback = cb;
-        // Re-bind existing inputs to the new callback
         this.setupInputs();
     }
 }
@@ -120,6 +123,7 @@ export class WebHostAdapter implements IHostAdapter {
  */
 export class ElectronHostAdapter implements IHostAdapter {
     type = 'electron' as const;
+    audioBackend = 'web' as const; // Usually Electron still uses Web Audio
 
     async init(): Promise<boolean> {
         return !!window.electronMidi;
@@ -129,13 +133,17 @@ export class ElectronHostAdapter implements IHostAdapter {
         return [{ id: 'virtual', name: 'PrismaTonal Virtual Output' }];
     }
 
-    setOutput(id: string | null) {
-        // Electron bridge typically routes to a virtual port managed by the main process
-    }
+    setOutput(id: string | null) {}
 
     sendMidi(bytes: number[]) {
         if (window.electronMidi) {
             window.electronMidi.send('midi-message', bytes);
+        }
+    }
+
+    sendCommand(type: string, payload: any) {
+        if (window.electronMidi) {
+            window.electronMidi.send('app-command', { type, payload });
         }
     }
 
@@ -160,52 +168,60 @@ export class ElectronHostAdapter implements IHostAdapter {
 }
 
 /**
- * VST/Plugin WebView Bridge Implementation
+ * VST/Plugin WebView Bridge Implementation (JUCE)
  */
 export class VSTHostAdapter implements IHostAdapter {
     type = 'vst' as const;
+    audioBackend = 'native' as const; // VST handles audio, JS UI is remote
 
     async init(): Promise<boolean> {
-        return !!window.vstMidi;
+        return !!window.__postMessageToHost || !!(window as any).invokeNative;
     }
 
     async getOutputs(): Promise<MidiDevice[]> {
         return [{ id: 'host', name: 'DAW Host Track' }];
     }
 
-    setOutput(id: string | null) {
-        // Always routes to host track
-    }
+    setOutput(id: string | null) {}
 
     sendMidi(bytes: number[]) {
-        if (window.vstMidi) {
-            window.vstMidi.sendMidi(bytes);
+        // Send as JSON object to C++
+        this.sendNative({ type: 'midi', bytes });
+    }
+
+    sendCommand(type: string, payload: any) {
+        this.sendNative({ type: 'command', command: type, payload });
+    }
+
+    private sendNative(msg: any) {
+        if (window.__postMessageToHost) {
+            window.__postMessageToHost(JSON.stringify(msg));
         }
     }
 
     setTransportCallback(cb: TransportCallback | null) {
-        // VST Bridge placeholder
+        // Listen for window events dispatched by C++
+        window.addEventListener('transport', (e: any) => {
+            if (cb && e.detail) cb(e.detail);
+        });
     }
 
-    setInputCallback(cb: MidiMessageCallback | null) {
-        // VST Bridge placeholder for inbound MIDI
-        // e.g. window.onMidiMessage = ...
-    }
+    setInputCallback(cb: MidiMessageCallback | null) {}
 }
 
 /**
  * Factory to detect and instantiate the correct adapter
  */
 export const createHostAdapter = async (): Promise<IHostAdapter | null> => {
-    // 1. Electron
-    if (window.electronMidi) {
-        const adapter = new ElectronHostAdapter();
+    // 1. JUCE WebView (VST)
+    if (window.__PRISMA_WRAPPER__ === 'juce_webview' || window.__postMessageToHost) {
+        const adapter = new VSTHostAdapter();
         await adapter.init();
         return adapter;
     }
-    // 2. VST
-    if (window.vstMidi) {
-        const adapter = new VSTHostAdapter();
+    // 2. Electron
+    if (window.__PRISMA_WRAPPER__ === 'electron' || window.electronMidi) {
+        const adapter = new ElectronHostAdapter();
         await adapter.init();
         return adapter;
     }
@@ -216,5 +232,5 @@ export const createHostAdapter = async (): Promise<IHostAdapter | null> => {
             return adapter;
         }
     }
-    return null;
+    return new WebHostAdapter(); // Fallback
 }

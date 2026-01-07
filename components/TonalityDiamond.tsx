@@ -1,11 +1,12 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType, SynthPreset } from '../types';
-import { generateLattice } from '../services/LatticeService';
 import { getPitchRatioFromScreenDelta, PITCH_SCALE } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
 import { LatticeRenderer } from '../services/LatticeRenderer';
+import { useLatticeData } from '../hooks/useLatticeData';
+import { GRID_CELL_SIZE, VIRTUAL_SIZE } from '../constants';
 
 export interface TonalityDiamondHandle {
   clearLatches: (mode?: number) => void;
@@ -13,7 +14,7 @@ export interface TonalityDiamondHandle {
   increaseDepth: () => void;
   decreaseDepth: () => void;
   getLatchedNodes: () => { node: LatticeNode, mode: number }[];
-  triggerVisual: (nodeId: string, active: boolean) => void; // New method
+  triggerVisual: (nodeId: string, active: boolean) => void; 
 }
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
   onLimitInteraction: (limit: number) => void;
   activeChordIds: string[];
   uiUnlocked: boolean;
-  latchMode: 0 | 1 | 2 | 3 | 4; 
+  latchMode: 0 | 1 | 2 | 3 | 4 | 5 | 6; 
   isCurrentSustainEnabled: boolean;
   globalScale?: number; 
   viewZoom?: number;
@@ -40,13 +41,11 @@ interface ActiveCursor {
 }
 
 interface NodeActivation {
-    mode: number | string; // Updated to support 'arp' as string
+    mode: number | string; 
     timestamp: number;
     presetId: string;
 }
 
-const GRID_CELL_SIZE = 100; 
-const VIRTUAL_SIZE = 40000; // Fixed massive scroll area to prevent layout thrashing
 const CENTER_OFFSET = VIRTUAL_SIZE / 2;
 
 const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) => {
@@ -57,57 +56,30 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const bgLineCanvasRef = useRef<HTMLCanvasElement>(null);
   const staticCanvasRef = useRef<HTMLCanvasElement>(null); 
   const dynamicCanvasRef = useRef<HTMLCanvasElement>(null); 
-  
-  // Cache the bounding rect to avoid reflows
   const canvasRectRef = useRef<DOMRect | null>(null);
 
   const animationFrameRef = useRef<number>(0);
   const globalBendRef = useRef<number>(0);
   const rendererRef = useRef<LatticeRenderer>(new LatticeRenderer());
 
-  const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
-  
-  // Unified Scale Calculation
   const effectiveScale = globalScale * viewZoom;
   const prevEffectiveScaleRef = useRef(effectiveScale);
 
-  const nodeMap = useMemo(() => {
-      return new Map(data.nodes.map(n => [n.id, n]));
-  }, [data.nodes]);
+  // --- USE LATTICE DATA HOOK ---
+  const {
+      data,
+      isGenerating,
+      nodeMap,
+      spatialGrid,
+      adjacencyMap,
+      dynamicSize: _dynamicSize // Unused here, but available if needed for canvas resizing logic
+  } = useLatticeData(settings, effectiveScale);
 
-  const spatialGrid = useMemo(() => {
-      const grid = new Map<string, LatticeNode[]>();
-      const spacing = settings.buttonSpacingScale * effectiveScale;
-
-      data.nodes.forEach(node => {
-          const x = node.x * spacing + CENTER_OFFSET;
-          const y = node.y * spacing + CENTER_OFFSET;
-          const col = Math.floor(x / GRID_CELL_SIZE);
-          const row = Math.floor(y / GRID_CELL_SIZE);
-          const key = `${col},${row}`;
-          if (!grid.has(key)) grid.set(key, []);
-          grid.get(key)!.push(node);
-      });
-      return grid;
-  }, [data.nodes, settings.buttonSpacingScale, effectiveScale]);
-
-  // Create an adjacency map for fast neighbor lookup
-  const adjacencyMap = useMemo(() => {
-      const map = new Map<string, { target: string, limit: number }[]>();
-      data.lines.forEach(line => {
-          if (!map.has(line.sourceId)) map.set(line.sourceId, []);
-          if (!map.has(line.targetId)) map.set(line.targetId, []);
-          map.get(line.sourceId)!.push({ target: line.targetId, limit: line.limit });
-          map.get(line.targetId)!.push({ target: line.sourceId, limit: line.limit });
-      });
-      return map;
-  }, [data.lines]);
-
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [persistentLatches, setPersistentLatches] = useState<Map<string, Map<number, number>>>(new Map());
-  const [externalTriggers, setExternalTriggers] = useState<Map<string, number>>(new Map()); // nodeId -> timestamp
+  const [externalTriggers, setExternalTriggers] = useState<Map<string, number>>(new Map()); 
   const nodeTriggerHistory = useRef<Map<string, number>>(new Map());
 
   // Notify parent of active modes
@@ -179,6 +151,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               if (mode === 1) pId = 'latch';
               else if (mode === 3) pId = 'strum';
               else if (mode === 4) pId = 'brass';
+              else if (mode === 5) pId = 'keys';
+              else if (mode === 6) pId = 'percussion';
               activations.push({ mode, timestamp, presetId: pId });
           });
           effective.set(nodeId, activations);
@@ -198,6 +172,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     else if (n.voiceMode === 'normal') mode = 2;
                     else if (n.voiceMode === 'strum') mode = 3;
                     else if (n.voiceMode === 'brass') mode = 4;
+                    else if (n.voiceMode === 'keys') mode = 5;
+                    else if (n.voiceMode === 'percussion') mode = 6;
 
                     if (chordDef.soundConfigs && chordDef.soundConfigs[n.voiceMode]) {
                         const specificPreset = chordDef.soundConfigs[n.voiceMode];
@@ -241,7 +217,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               const nodeId = cursor.hoverNodeId;
               if (!visual.has(nodeId)) visual.set(nodeId, []);
               const list = visual.get(nodeId)!;
-              // Mode derived from current LatchMode for immediate feedback
               const activation = { mode: latchMode, timestamp: Date.now(), presetId: 'cursor' };
               list.push(activation);
               list.sort((a, b) => a.timestamp - b.timestamp);
@@ -252,7 +227,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       externalTriggers.forEach((timestamp, nodeId) => {
           if (!visual.has(nodeId)) visual.set(nodeId, []);
           const list = visual.get(nodeId)!;
-          // 'arp' mode renders Red
           list.push({ mode: 'arp', timestamp, presetId: 'arpeggio' });
       });
 
@@ -501,41 +475,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       prevEffectiveScaleRef.current = newScale;
   }, [effectiveScale]);
 
-  const generationDeps = useMemo(() => {
-      return JSON.stringify({
-          tuning: settings.tuningSystem,
-          layout: settings.layoutApproach,
-          depths: settings.limitDepths,
-          complexities: settings.limitComplexities,
-          hidden: settings.hiddenLimits,
-          ratio: settings.latticeAspectRatio,
-          skin: settings.activeSkin
-      });
-  }, [settings.tuningSystem, settings.layoutApproach, settings.limitDepths, settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio, settings.activeSkin]);
-
-  useEffect(() => {
-    setIsGenerating(true);
-    const timerId = setTimeout(() => {
-        const effectiveSettings: AppSettings = JSON.parse(JSON.stringify(settings));
-        const hiddenLimits = effectiveSettings.hiddenLimits || [];
-        hiddenLimits.forEach((limit: number) => {
-            // @ts-ignore
-            if (effectiveSettings.limitDepths[limit] !== undefined) effectiveSettings.limitDepths[limit] = 0;
-        });
-
-        const result = generateLattice(effectiveSettings);
-        const visibleNodeIds = new Set(result.nodes.map(n => n.id));
-        const visibleLines = result.lines.filter(l => {
-            if (hiddenLimits.includes(l.limit)) return false;
-            if (!visibleNodeIds.has(l.sourceId) || !visibleNodeIds.has(l.targetId)) return false;
-            return true;
-        });
-
-        setData({ nodes: result.nodes, lines: visibleLines });
-        setIsGenerating(false);
-    }, 10);
-    return () => clearTimeout(timerId);
-  }, [generationDeps]); 
   
   const prevAudioLatchedRef = useRef<Map<string, NodeActivation[]>>(new Map());
   useEffect(() => {
@@ -552,7 +491,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               if (!wasActive) {
                    const node = nodes.get(nodeId); 
                    if (node) {
-                       // Only audio triggering for persistent nodes. Arp handles its own audio triggers.
                        audioEngine.startVoice(voiceId, node.ratio, settings.baseFrequency, act.presetId, 'latch');
                        if (settings.midiEnabled) midiService.noteOn(voiceId, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                    }
@@ -641,6 +579,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           case 2: return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
           case 3: return { preset: 'strum', playback: isStrumEnabled ? 'trigger' : 'gate' };
           case 4: return { preset: 'brass', playback: isStrumEnabled ? 'trigger' : 'gate' };
+          case 5: return { preset: 'keys', playback: isStrumEnabled ? 'trigger' : 'gate' };
+          case 6: return { preset: 'percussion', playback: isStrumEnabled ? 'trigger' : 'gate' };
           default: return { preset: 'normal', playback: isStrumEnabled ? 'trigger' : 'gate' };
       }
   };
@@ -943,7 +883,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               visualLatchedNodes: visualLatchedRef.current, 
               activeLines: activeLinesRef.current,
               brightenedLines: brightenedLinesRef.current,
-              harmonicNeighbors: harmonicNeighborsRef.current, // Pass the harmonic neighbors map
+              harmonicNeighbors: harmonicNeighborsRef.current, 
               activeCursors: activeCursorsRef.current,
               cursorPositions: cursorPositionsRef.current,
               nodeTriggerHistory: nodeTriggerHistory.current,

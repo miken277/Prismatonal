@@ -1,7 +1,8 @@
 
+
 import { useSyncExternalStore } from 'react';
 import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState } from '../types';
-import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_BRASS_PRESET, DEFAULT_ARP_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS, REVERB_DEFAULTS } from '../constants';
+import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_BRASS_PRESET, DEFAULT_KEYS_PRESET, DEFAULT_PERCUSSION_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS, REVERB_DEFAULTS } from '../constants';
 import { XmlService } from './XmlService';
 
 const SETTINGS_KEY = 'prismatonal_settings_v5'; 
@@ -76,15 +77,30 @@ class PrismaStore {
                 latch: this.migratePreset(parsed.latch || DEFAULT_LATCH_PRESET),
                 strum: this.migratePreset(parsed.strum || DEFAULT_STRUM_PRESET),
                 brass: this.migratePreset(parsed.brass || parsed.voice || DEFAULT_BRASS_PRESET),
-                arpeggio: this.migratePreset(parsed.arpeggio || DEFAULT_ARP_PRESET)
+                keys: this.migratePreset(parsed.keys || parsed.arpeggio || DEFAULT_KEYS_PRESET), // Migrate Arp->Keys
+                percussion: this.migratePreset(parsed.percussion || DEFAULT_PERCUSSION_PRESET)
             };
+
+            // Fix for Keys loading incorrect "Normal" default from older storage
+            // If Keys matches "Analog Strings" (default normal) but SHOULD be "Dream Rhodes" (default keys), reset it.
+            // This is a one-time migration heuristic.
+            if (loadedPresets.keys.name === DEFAULT_NORMAL_PRESET.name && DEFAULT_KEYS_PRESET.name !== DEFAULT_NORMAL_PRESET.name) {
+                // Check if user accidentally saved it this way vs migration fail? 
+                // We'll assume migration fail if it matches the *old* default exact name.
+                if (loadedPresets.keys.name === 'Analog Strings') {
+                    console.log("Migrating Keys preset from legacy default...");
+                    loadedPresets.keys = JSON.parse(JSON.stringify(DEFAULT_KEYS_PRESET));
+                }
+            }
+
         } catch (e) {
             loadedPresets = {
                 normal: JSON.parse(JSON.stringify(DEFAULT_NORMAL_PRESET)),
                 latch: JSON.parse(JSON.stringify(DEFAULT_LATCH_PRESET)),
                 strum: JSON.parse(JSON.stringify(DEFAULT_STRUM_PRESET)),
                 brass: JSON.parse(JSON.stringify(DEFAULT_BRASS_PRESET)),
-                arpeggio: JSON.parse(JSON.stringify(DEFAULT_ARP_PRESET))
+                keys: JSON.parse(JSON.stringify(DEFAULT_KEYS_PRESET)),
+                percussion: JSON.parse(JSON.stringify(DEFAULT_PERCUSSION_PRESET))
             };
         }
     } else {
@@ -93,7 +109,8 @@ class PrismaStore {
             latch: JSON.parse(JSON.stringify(DEFAULT_LATCH_PRESET)),
             strum: JSON.parse(JSON.stringify(DEFAULT_STRUM_PRESET)),
             brass: JSON.parse(JSON.stringify(DEFAULT_BRASS_PRESET)),
-            arpeggio: JSON.parse(JSON.stringify(DEFAULT_ARP_PRESET))
+            keys: JSON.parse(JSON.stringify(DEFAULT_KEYS_PRESET)),
+            percussion: JSON.parse(JSON.stringify(DEFAULT_PERCUSSION_PRESET))
         };
     }
 
@@ -216,7 +233,8 @@ class PrismaStore {
                       latch: this.migratePreset(nextState.presets.latch),
                       strum: this.migratePreset(nextState.presets.strum),
                       brass: this.migratePreset(nextState.presets.brass || (nextState.presets as any).voice),
-                      arpeggio: this.migratePreset(nextState.presets.arpeggio)
+                      keys: this.migratePreset(nextState.presets.keys || (nextState.presets as any).arpeggio),
+                      percussion: this.migratePreset(nextState.presets.percussion || DEFAULT_PERCUSSION_PRESET)
                   };
               }
               if (nextState.userBank) {
