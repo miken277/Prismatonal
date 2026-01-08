@@ -168,56 +168,8 @@ export class LatticeRenderer {
         const cullTop = view.y - cullPad;
         const cullBottom = view.y + view.h + cullPad;
 
-        // Draw Lines with Consonance Weighting
-        const linesByLimit: Record<number, number[]> = {};
-        for (const line of data.lines) {
-            const x1 = line.x1 * spacing + centerOffset;
-            const y1 = line.y1 * spacing + centerOffset;
-            const x2 = line.x2 * spacing + centerOffset;
-            const y2 = line.y2 * spacing + centerOffset;
-
-            if (Math.max(x1, x2) < cullLeft || Math.min(x1, x2) > cullRight || Math.max(y1, y2) < cullTop || Math.min(y1, y2) > cullBottom) continue;
-
-            if (!linesByLimit[line.limit]) linesByLimit[line.limit] = [];
-            linesByLimit[line.limit].push(x1, y1, x2, y2);
-        }
-
-        ctx.lineCap = 'round';
-        for (const limitStr in linesByLimit) {
-            const limit = parseInt(limitStr);
-            const coords = linesByLimit[limit];
-            
-            let color = settings.colors[limit] || '#666';
-            if (isFlatSkin) {
-                color = limit === 1 ? skin.line : skin.lineDim;
-            }
-
-            const visualSettings = settings.limitVisuals?.[limit] || { size: 1, opacity: 1 };
-            
-            // Consonance Weighting Logic
-            let weight = 1.0;
-            let baseAlpha = 0.3;
-
-            if (limit === 1) { weight = 3.0; baseAlpha = 0.5; } // Octave
-            else if (limit === 3) { weight = 2.5; baseAlpha = 0.45; } // P5 (Strong)
-            else if (limit === 5) { weight = 1.8; baseAlpha = 0.35; } // M3 (Medium)
-            else { weight = 0.8; baseAlpha = 0.2; } // 7, 11, 13 etc (Weak)
-
-            ctx.beginPath();
-            for(let i=0; i<coords.length; i+=4) {
-                ctx.moveTo(coords[i], coords[i+1]);
-                ctx.lineTo(coords[i+2], coords[i+3]);
-            }
-            
-            ctx.lineWidth = weight * visualSettings.size * effectiveScale;
-            ctx.strokeStyle = color;
-            ctx.globalAlpha = isFlatSkin ? 1.0 : baseAlpha * visualSettings.opacity;
-            
-            if (limit === 1) ctx.setLineDash([5 * effectiveScale, 5 * effectiveScale]);
-            else ctx.setLineDash([]);
-            ctx.stroke();
-        }
-        ctx.setLineDash([]); 
+        // Static lines have been removed to reduce clutter.
+        // Previously: Iterated data.lines and drew them here.
 
         // Draw Nodes
         for (const node of data.nodes) {

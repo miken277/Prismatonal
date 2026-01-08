@@ -28,7 +28,6 @@ export const projectCoordinates = (
     let y = 0;
 
     const spacing = 140; 
-    // Map coords to named primes for non-lattice layouts
     const p3 = coords[0] || 0;
     const p5 = coords[1] || 0;
     const p7 = coords[2] || 0;

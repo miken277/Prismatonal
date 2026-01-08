@@ -1,17 +1,16 @@
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { AppSettings, LatticeNode, LatticeLine } from '../types';
 import { generateLattice } from '../services/LatticeService';
-import { GRID_CELL_SIZE, VIRTUAL_SIZE } from '../constants';
-
-const CENTER_OFFSET = VIRTUAL_SIZE / 2;
+import { GRID_CELL_SIZE } from '../constants';
 
 export const useLatticeData = (settings: AppSettings, globalScale: number) => {
     const [data, setData] = useState<{ nodes: LatticeNode[], lines: LatticeLine[] }>({ nodes: [], lines: [] });
     const [isGenerating, setIsGenerating] = useState(false);
     const [dynamicSize, setDynamicSize] = useState(2000);
     
-    // Derived Data Memoization
+    const centerOffset = dynamicSize / 2;
+
     const nodeMap = useMemo(() => {
         return new Map(data.nodes.map(n => [n.id, n]));
     }, [data.nodes]);
@@ -21,8 +20,8 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
         const spacing = settings.buttonSpacingScale * globalScale;
 
         data.nodes.forEach(node => {
-            const x = node.x * spacing + CENTER_OFFSET;
-            const y = node.y * spacing + CENTER_OFFSET;
+            const x = node.x * spacing + centerOffset;
+            const y = node.y * spacing + centerOffset;
             const col = Math.floor(x / GRID_CELL_SIZE);
             const row = Math.floor(y / GRID_CELL_SIZE);
             const key = `${col},${row}`;
@@ -30,7 +29,7 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
             grid.get(key)!.push(node);
         });
         return grid;
-    }, [data.nodes, settings.buttonSpacingScale, globalScale]);
+    }, [data.nodes, settings.buttonSpacingScale, globalScale, centerOffset]);
 
     const adjacencyMap = useMemo(() => {
         const map = new Map<string, { target: string, limit: number }[]>();
@@ -52,15 +51,12 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
             complexities: settings.limitComplexities,
             hidden: settings.hiddenLimits,
             ratio: settings.latticeAspectRatio,
-            skin: settings.activeSkin
+            skin: settings.activeSkin,
+            layerOrder: settings.layoutApproach === 'diamond' ? settings.layerOrder : [] 
         });
-    }, [
-        settings.tuningSystem, settings.layoutApproach, settings.limitDepths, 
         // @ts-ignore
-        settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio, settings.activeSkin
-    ]);
+    }, [settings.tuningSystem, settings.layoutApproach, settings.limitDepths, settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio, settings.activeSkin, settings.layerOrder]);
 
-    // Generation Effect
     useEffect(() => {
         setIsGenerating(true);
         const timerId = setTimeout(() => {
@@ -85,8 +81,9 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
         return () => clearTimeout(timerId);
     }, [generationDeps]);
 
-    // Dynamic Sizing Effect
     useEffect(() => {
+        if (data.nodes.length === 0) return;
+
         let maxExtent = 0;
         for (const n of data.nodes) {
             const absX = Math.abs(n.x);
@@ -94,18 +91,19 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
             if (absX > maxExtent) maxExtent = absX;
             if (absY > maxExtent) maxExtent = absY;
         }
-        const padding = 600; 
-        const spacing = settings.buttonSpacingScale * globalScale;
-        const calculatedSize = (maxExtent * spacing * 2) + padding;
-        const finalSize = Math.max(calculatedSize, window.innerWidth, window.innerHeight);
         
-        const MAX_CANVAS_SIZE = 5000;
-        const clampedSize = Math.min(finalSize, MAX_CANVAS_SIZE);
+        const spacing = settings.buttonSpacingScale * globalScale;
+        const padding = 1000; 
+        const calculatedSize = (maxExtent * spacing * 2) + padding;
+        
+        const minSize = Math.max(typeof window !== 'undefined' ? window.innerWidth : 1000, typeof window !== 'undefined' ? window.innerHeight : 800);
+        const MAX_CANVAS_SIZE = 12000; // Increased limit for larger diamonds
+        const finalSize = Math.min(Math.max(calculatedSize, minSize), MAX_CANVAS_SIZE);
 
-        if (Math.abs(clampedSize - dynamicSize) > 50) {
-            setDynamicSize(clampedSize);
+        if (Math.abs(finalSize - dynamicSize) > 100) {
+            setDynamicSize(finalSize);
         }
-    }, [data.nodes, settings.buttonSpacingScale, globalScale, dynamicSize]);
+    }, [data.nodes, settings.buttonSpacingScale, globalScale]);
 
     return {
         data,
@@ -114,6 +112,6 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
         nodeMap,
         spatialGrid,
         adjacencyMap,
-        centerOffset: CENTER_OFFSET
+        centerOffset
     };
 };

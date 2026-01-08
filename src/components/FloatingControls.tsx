@@ -14,7 +14,7 @@ interface Props {
   onPanic: () => void;
   onOff: () => void;
   onLatch: () => void;
-  latchMode: 0 | 1 | 2;
+  latchMode: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   onBend: () => void;
   isBendEnabled: boolean;
   onCenter: () => void;
@@ -68,7 +68,7 @@ const FloatingControls: React.FC<Props> = ({
     if (!uiUnlocked) return;
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
-    setDraggingId(key);
+    setDraggingId(key as string);
     const initialLeft = uiPositions[key].x;
     const initialTop = uiPositions[key].y;
     const startX = e.clientX;
