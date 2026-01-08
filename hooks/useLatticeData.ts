@@ -47,35 +47,37 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
             tuning: settings.tuningSystem,
             layout: settings.layoutApproach,
             depths: settings.limitDepths,
-            // @ts-ignore
-            complexities: settings.limitComplexities,
             hidden: settings.hiddenLimits,
             ratio: settings.latticeAspectRatio,
             skin: settings.activeSkin,
-            layerOrder: settings.layoutApproach === 'diamond' ? settings.layerOrder : [] 
+            path: settings.modulationPath
         });
-        // @ts-ignore
-    }, [settings.tuningSystem, settings.layoutApproach, settings.limitDepths, settings.limitComplexities, settings.hiddenLimits, settings.latticeAspectRatio, settings.activeSkin, settings.layerOrder]);
+    }, [settings.tuningSystem, settings.layoutApproach, settings.limitDepths, settings.hiddenLimits, settings.latticeAspectRatio, settings.activeSkin, settings.modulationPath]);
 
     useEffect(() => {
         setIsGenerating(true);
         const timerId = setTimeout(() => {
-            const effectiveSettings: AppSettings = JSON.parse(JSON.stringify(settings));
-            const hiddenLimits = effectiveSettings.hiddenLimits || [];
-            hiddenLimits.forEach((limit: number) => {
-                // @ts-ignore
-                if (effectiveSettings.limitDepths[limit] !== undefined) effectiveSettings.limitDepths[limit] = 0;
+            // 1. Generate full lattice based on depths and history
+            const rawResult = generateLattice(settings, settings.modulationPath);
+            
+            // 2. Strict Filtering based on hiddenLimits
+            const hiddenSet = new Set(settings.hiddenLimits);
+            
+            // Filter Nodes: A node is visible if neither its Numerator nor Denominator limit is hidden
+            const visibleNodes = rawResult.nodes.filter(n => {
+                return !hiddenSet.has(n.maxPrime);
             });
+            
+            const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
 
-            const result = generateLattice(effectiveSettings);
-            const visibleNodeIds = new Set(result.nodes.map(n => n.id));
-            const visibleLines = result.lines.filter(l => {
-                if (hiddenLimits.includes(l.limit)) return false;
+            // Filter Lines: Visible if limit is not hidden AND both endpoints are visible
+            const visibleLines = rawResult.lines.filter(l => {
+                if (hiddenSet.has(l.limit)) return false;
                 if (!visibleNodeIds.has(l.sourceId) || !visibleNodeIds.has(l.targetId)) return false;
                 return true;
             });
 
-            setData({ nodes: result.nodes, lines: visibleLines });
+            setData({ nodes: visibleNodes, lines: visibleLines });
             setIsGenerating(false);
         }, 10);
         return () => clearTimeout(timerId);
@@ -95,23 +97,12 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
         const spacing = settings.buttonSpacingScale * globalScale;
         const padding = 1000; 
         const calculatedSize = (maxExtent * spacing * 2) + padding;
-        
-        const minSize = Math.max(typeof window !== 'undefined' ? window.innerWidth : 1000, typeof window !== 'undefined' ? window.innerHeight : 800);
-        const MAX_CANVAS_SIZE = 12000; // Increased limit for larger diamonds
-        const finalSize = Math.min(Math.max(calculatedSize, minSize), MAX_CANVAS_SIZE);
+        const finalSize = Math.min(Math.max(calculatedSize, 2000), 12000);
 
         if (Math.abs(finalSize - dynamicSize) > 100) {
             setDynamicSize(finalSize);
         }
     }, [data.nodes, settings.buttonSpacingScale, globalScale]);
 
-    return {
-        data,
-        isGenerating,
-        dynamicSize,
-        nodeMap,
-        spatialGrid,
-        adjacencyMap,
-        centerOffset
-    };
+    return { data, isGenerating, dynamicSize, nodeMap, spatialGrid, adjacencyMap, centerOffset };
 };

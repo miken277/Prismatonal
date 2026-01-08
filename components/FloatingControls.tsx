@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpeggioStep, PresetState, PlayMode, SynthPreset, UISize } from '../types';
+import { ChordDefinition, XYPos, AppSettings, ArpeggioDefinition, ArpConfig, ArpDivision, ArpeggioStep, PresetState, PlayMode, SynthPreset, UISize } from '../types';
 import ArpeggiatorBar from './controls/ArpeggiatorBar';
 import InstrumentCluster from './controls/InstrumentCluster';
 import MasterControls from './controls/MasterControls';
@@ -26,12 +26,17 @@ interface Props {
   onPluck?: () => void; 
   onVoice?: () => void; 
   onKeys?: () => void;
-  onPercussion?: () => void; // New prop
-  latchMode: 0 | 1 | 2 | 3 | 4 | 5 | 6; // Updated type
+  onPercussion?: () => void; 
+  latchMode: 0 | 1 | 2 | 3 | 4 | 5 | 6; 
   onBend: () => void;
   isBendEnabled: boolean;
   onSustainToggle?: () => void;
   isSustainEnabled?: boolean;
+  onModulationToggle?: () => void;
+  isModulationModeActive?: boolean;
+  modulationPathLength?: number;
+  onModulationUndo?: () => void;
+  onModulationReset?: () => void;
   onCenter: () => void;
   onIncreaseDepth: () => void;
   onDecreaseDepth: () => void;
@@ -76,7 +81,9 @@ interface Props {
 
 const FloatingControls: React.FC<Props> = ({ 
   volume, setVolume, spatialScale, setSpatialScale, brightness, setBrightness, viewZoom, setViewZoom,
-  onPanic, onOff, onLatch, onSust, onPluck, onVoice, onKeys, onPercussion, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
+  onPanic, onOff, onLatch, onSust, onPluck, onVoice, onKeys, onPercussion, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, 
+  onModulationToggle, isModulationModeActive, modulationPathLength, onModulationUndo, onModulationReset,
+  onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
   uiSizes, updateSize,
@@ -176,7 +183,6 @@ const FloatingControls: React.FC<Props> = ({
           onResize={(e, axis) => handleResize(e, 'volume', axis)}
       />
 
-      {/* Independent Resize Handle for Arp Bar */}
       <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0 }}>
           {uiUnlocked && (
               <div 
@@ -235,8 +241,10 @@ const FloatingControls: React.FC<Props> = ({
 
       <PerformanceControls 
           isBendEnabled={isBendEnabled}
-          latchMode={latchMode as any} // Cast safe due to component flexibility
+          latchMode={latchMode as any}
           isSustainEnabled={isSustainEnabled}
+          isModulationModeActive={isModulationModeActive}
+          modulationPathLength={modulationPathLength}
           uiUnlocked={uiUnlocked}
           uiScale={uiScale}
           positions={uiPositions}
@@ -244,6 +252,9 @@ const FloatingControls: React.FC<Props> = ({
           onSustainToggle={onSustainToggle}
           onOff={onOff}
           onPanic={onPanic}
+          onModulationToggle={onModulationToggle}
+          onModulationUndo={onModulationUndo}
+          onModulationReset={onModulationReset}
           onDragStart={handleDrag}
       />
 

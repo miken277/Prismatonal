@@ -88,6 +88,25 @@ export const usePerformanceState = (
         updateSettings(prev => ({ ...prev, isPitchBendEnabled: willEnable }));
     }, [latchMode, settings.isPitchBendEnabled, updateSettings]);
 
+    const handleModulationToggle = useCallback(() => {
+        updateSettings(prev => ({ ...prev, isModulationModeActive: !prev.isModulationModeActive }));
+    }, [updateSettings]);
+
+    const handleModulationUndo = useCallback(() => {
+        updateSettings(prev => {
+            if (prev.modulationPath.length <= 1) return prev;
+            const newPath = prev.modulationPath.slice(0, -1);
+            return { ...prev, modulationPath: newPath };
+        });
+    }, [updateSettings]);
+
+    const handleModulationReset = useCallback(() => {
+        updateSettings(prev => {
+            if (prev.modulationPath.length <= 1) return prev;
+            return { ...prev, modulationPath: [prev.modulationPath[0]] };
+        });
+    }, [updateSettings]);
+
     const handleSustainStatusChange = useCallback((modes: number[]) => {
         setActiveSustainedModes(modes);
     }, []);
@@ -98,6 +117,9 @@ export const usePerformanceState = (
         switchInstrument,
         handleSustainToggle,
         handleBendToggle,
+        handleModulationToggle,
+        handleModulationUndo,
+        handleModulationReset,
         handleSustainStatusChange,
         // Helper aliases
         handleDroneSelect: () => switchInstrument(1),

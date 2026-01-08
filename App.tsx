@@ -46,7 +46,7 @@ const App: React.FC = () => {
   const { autoScaleFactor, isShortScreen } = useAppLayout(settings, updateSettings);
   const effectiveScale = autoScaleFactor * (settings.uiScale || 1.0);
 
-  // 3. Performance Logic (Instrument Modes, Sustain, Bend)
+  // 3. Performance Logic (Instrument Modes, Sustain, Bend, Modulation)
   const {
       latchMode,
       activeSustainedModes,
@@ -58,6 +58,9 @@ const App: React.FC = () => {
       handlePercussionSelect,
       handleSustainToggle,
       handleBendToggle,
+      handleModulationToggle,
+      handleModulationUndo,
+      handleModulationReset,
       handleSustainStatusChange
   } = usePerformanceState(settings, updateSettings);
 
@@ -274,6 +277,10 @@ const App: React.FC = () => {
         latchMode={latchMode}
         onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
         onSustainToggle={handleSustainToggle} isSustainEnabled={settings.isSustainEnabled}
+        onModulationToggle={handleModulationToggle} isModulationModeActive={settings.isModulationModeActive}
+        modulationPathLength={settings.modulationPath.length}
+        onModulationUndo={handleModulationUndo}
+        onModulationReset={handleModulationReset}
         onCenter={handleCenter}
         onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
         onAddChord={handleAddChord} toggleChord={toggleChord}

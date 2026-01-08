@@ -74,7 +74,7 @@ export interface ArpeggioStep {
     d?: number;
     muted?: boolean;
     limit?: number; // For quality indication (maxPrime)
-    mode?: number; // The instrument mode (1=Drone, 2=Strings, 3=Plucked, 4=Brass, 5=Keys, 6=Percussion) active during recording
+    mode?: number; // The instrument mode active during recording
 }
 
 export type ArpDirection = 'order' | 'up' | 'down' | 'updown' | 'random';
@@ -121,17 +121,18 @@ export interface KeyMappings {
     panic: string;
     off: string;
     
-    // Patch & Mode Controls (Bottom Right Priority)
-    latch: string; // Toggle Drone/Strings mode
-    sustain: string; // Toggles Sustain (SUST)
-    bend: string; // Toggles Pitch Bend
-    modeDrone: string; // Switch to Drone Mode
-    modeStrings: string; // Switch to Strings Mode
-    modePlucked: string; // Switch to Plucked Mode
-    modeBrass: string; // Switch to Brass Mode
-    modeKeys: string; // Switch to Keys Mode
-    modePercussion: string; // Switch to Percussion Mode (New)
-    synth: string; // Toggle Synth Panel
+    // Patch & Mode Controls
+    latch: string; 
+    sustain: string; 
+    bend: string; 
+    modulate: string; // NEW: Toggle Modulation mode
+    modeDrone: string; 
+    modeStrings: string; 
+    modePlucked: string; 
+    modeBrass: string; 
+    modeKeys: string; 
+    modePercussion: string; 
+    synth: string; 
 
     // Chords & Performance
     addChord: string;
@@ -145,7 +146,7 @@ export interface KeyMappings {
     playAllArps: string;
     stopAllArps: string;
     
-    // Legacy / View scaling (kept for compatibility)
+    // Legacy / View scaling
     spatialScaleUp: string;
     spatialScaleDown: string;
 }
@@ -160,9 +161,9 @@ export interface AppSettings {
   // Global Tuning
   tuningSystem: TuningSystem;
   layoutApproach: LayoutApproach;
-  activeSkin: string; // Dynamic skin ID for visual presentation
+  activeSkin: string; 
 
-  // Individual depths (Steps from center)
+  // Individual depths (Steps from center, 0-31)
   limitDepths: {
     3: number;
     5: number;
@@ -173,99 +174,98 @@ export interface AppSettings {
     15: number;
   };
 
-  // Replaces limitComplexities with toggleable Odd Identities (1, 3, 5, 7, 9, 11, 13, 15)
-  // Stores simple array of enabled identities (e.g. [1, 3, 5])
   enabledIdentities: number[]; 
-  
+  latticeMaxDistance: number; 
+
+  // MODULATION STATE
+  isModulationModeActive: boolean;
+  modulationPath: GenerationOrigin[]; // List of absolute centers visited
+
   // Increase Depth Settings
   showIncreaseDepthButton: boolean;
   centerResetsDepth: boolean;
 
   // Chords
   savedChords: ChordDefinition[];
-  chordShortcutSizeScale: number; // 0.33 to 1.0 relative to main buttons
+  chordShortcutSizeScale: number; 
   
   // Arpeggios
   arpeggios: ArpeggioDefinition[];
   arpBpm: number;
 
-  // Visible toggle for lower limits (View only)
+  // Visible toggle for lower limits
   hiddenLimits: number[]; 
   
-  layerOrder: number[]; // Array of limit numbers, index 0 = back, last index = front
+  layerOrder: number[]; 
   
   // Audio Settings
-  baseFrequency: number; // Hz for 1/1
-  audioLatencyHint: 'interactive' | 'balanced' | 'playback'; // Buffer size control
-  enableOversampling: boolean; // New: Performance vs Quality toggle
-  wavetableSize: 2048 | 8192 | 65536; // Wavetable resolution
-  interpolationType: 'linear' | 'cubic'; // Wavetable interpolation method
+  baseFrequency: number; 
+  audioLatencyHint: 'interactive' | 'balanced' | 'playback'; 
+  enableOversampling: boolean; 
+  wavetableSize: 2048 | 8192 | 65536; 
+  interpolationType: 'linear' | 'cubic'; 
 
   // Voice Leading / Focus Mode
   isVoiceLeadingEnabled: boolean;
-  voiceLeadingStrength: number; // 0 to 1, higher means stricter falloff
+  voiceLeadingStrength: number; 
   
   // Voice Leading Visuals
   isVoiceLeadingAnimationEnabled: boolean;
-  voiceLeadingAnimationSpeed: number; // seconds
-  voiceLeadingReverseDir: boolean; // Reverse the direction of the flow animation
-  voiceLeadingGlowAmount: number; // 0.0 to 1.0 (Controls width/intensity of the lobe)
-  voiceLeadingSteps: number; // 1 or 2 (Reach for active voice leading lines)
+  voiceLeadingAnimationSpeed: number; 
+  voiceLeadingReverseDir: boolean; 
+  voiceLeadingGlowAmount: number; 
+  voiceLeadingSteps: number; 
   
   // Line Appearance
-  baseLineWidth: number; // 0.5 to 3.0 (Static lines)
+  baseLineWidth: number; 
   lineBrighteningEnabled: boolean;
-  lineBrighteningSteps: number; // 1 or 2
-  lineBrighteningWidth: number; // 1.0 to 4.0
+  lineBrighteningSteps: number; 
+  lineBrighteningWidth: number; 
 
-  // Momentum is deprecated/greyed out in favor of Latch Mode
   isMomentumEnabled: boolean; 
 
   // Latch Settings
-  latchedZoomScale: number; // Scale factor for active nodes (1.0 to 2.0)
+  latchedZoomScale: number; 
 
   // Appearance
-  buttonSizeScale: number; // Global Scalar 0.5 to 2.0
-  buttonSpacingScale: number; // 0.5 to 5.0
-  latticeAspectRatio: number; // 0.5 (Stretched X) to 2.0 (Squished X)
-  canvasSize: number; // Width/Height of the scrollable area in pixels (e.g. 3000, 5000)
+  buttonSizeScale: number; 
+  buttonSpacingScale: number; 
+  latticeAspectRatio: number; 
+  canvasSize: number; 
   buttonShape: ButtonShape;
   colors: LimitColorMap;
   limitVisuals?: { [key: number]: { size: number; opacity: number } };
   
   // Text Appearance
-  nodeTextSizeScale: number; // 0.5 to 2.0
+  nodeTextSizeScale: number; 
   showFractionBar: boolean;
 
   isPitchBendEnabled: boolean;
-  isSustainEnabled: boolean; // Global Sustain Modifier (Gate vs Latch)
-  isStrumEnabled: boolean; // Global Strum Modifier (Trigger vs Gate)
-  chordsAlwaysRelatch: boolean; // New: Whether selecting a chord always retriggers/relatches its notes
+  isSustainEnabled: boolean; 
+  isStrumEnabled: boolean; 
+  chordsAlwaysRelatch: boolean; 
   isPitchSnapEnabled: boolean;
   polyphony: number;
   pitchOffLocked: boolean;
   volumeLocked: boolean;
 
-  // --- Visuals - Background ---
+  // Visuals - Background
   backgroundMode: BackgroundMode;
   backgroundPresets: BackgroundPreset[];
   
-  // Solid
-  solidColor: string; // Hex color for solid background
-
-  // Gradient
+  solidColor: string; 
   gradientColorStart: string;
   gradientColorEnd: string;
   gradientType: 'linear' | 'radial';
-  gradientAngle: number; // Degrees (0-360)
+  gradientAngle: number; 
 
   // Image
-  backgroundImageData: string | null; // Base64
-  backgroundYOffset: number; // Vertical offset
-  backgroundTiling: boolean; // Tile the background image
-  bgImageGamma: number; // 0.5 to 1.5 (Brightness control)
-  bgImageTint: string; // Tint Color
-  bgImageTintStrength: number; // 0.0 to 1.0
+  backgroundImageData: string | null; 
+  backgroundYOffset: number; 
+  backgroundTiling: boolean; 
+  bgImageGamma: number; 
+  bgImageTint: string; 
+  bgImageTintStrength: number; 
 
   // Overlay
   isOverlayEnabled: boolean;
@@ -287,24 +287,24 @@ export interface AppSettings {
   // MIDI Settings
   midiEnabled: boolean;
   midiOutputId: string | null;
-  midiPitchBendRange: number; // Semitones (typically 2, 12, 24, or 48)
+  midiPitchBendRange: number; 
 
   // Behavior
   enableKeyboardShortcuts: boolean;
   keyMappings: KeyMappings;
-  strumDuration: number; // seconds, 0.1 to 2.0
-  enableAudioRecording: boolean; // Renamed from recordScreenActivity
+  strumDuration: number; 
+  enableAudioRecording: boolean; 
 
   // UI Relocation & Scaling
   uiUnlocked: boolean;
-  uiScale: number; // 0.5 (Tiny) to 1.5 (Huge)
-  uiEdgeMargin: number; // in Millimeters (1-10)
+  uiScale: number; 
+  uiEdgeMargin: number; 
   uiPositions: {
     volume: XYPos;
     space: XYPos;
     panic: XYPos;
     off: XYPos;
-    latch: XYPos; // Legacy key, kept for data compatibility, now usually unused or re-mapped
+    latch: XYPos; 
     sust: XYPos;
     bend: XYPos;
     center: XYPos;
@@ -313,8 +313,9 @@ export interface AppSettings {
     chords: XYPos;
     layers: XYPos;
     arpeggioBar: XYPos;
-    instruments: XYPos; // New cluster for Drone/String
-    complexity: XYPos; // New: Complexity Controls
+    instruments: XYPos; 
+    complexity: XYPos; 
+    mod: XYPos; // NEW: Modulation button position
   };
   uiSizes: {
     volume: UISize;
@@ -327,31 +328,31 @@ export type FilterType = 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peak' 
 export interface OscillatorConfig {
   enabled: boolean;
   waveform: WaveformType;
-  coarseDetune: number; // Cents -1200 to 1200
-  fineDetune: number; // Cents -50 to 50
-  gain: number; // 0 to 1 (Mix)
+  coarseDetune: number; 
+  fineDetune: number; 
+  gain: number; 
   
   // Envelope
   attack: number;
   decay: number;
-  sustain: number; // Level 0.0 to 1.0
+  sustain: number; 
   release: number;
   
-  // Extended Envelope (Finite Sustain)
-  holdDecay?: number; // Time to decay from Sustain Level to 0 while Key Held (0 or undefined = Infinite)
-  pedalDecay?: number; // Time to decay from Current Level to 0 while Sustain Pedal Active (0 or undefined = Infinite)
+  // Extended Envelope
+  holdDecay?: number; 
+  pedalDecay?: number; 
 
   // Filter
-  filterCutoff: number; // Hz
-  filterResonance: number; // Q factor
+  filterCutoff: number; 
+  filterResonance: number; 
   filterType: FilterType;
 
   // LFO
-  lfoRate: number; // Hz
-  lfoDepth: number; // Amount 0-100
-  lfoWaveform: 'sine' | 'triangle' | 'square' | 'sawtooth' | 'noise'; // New LFO Shape
+  lfoRate: number; 
+  lfoDepth: number; 
+  lfoWaveform: 'sine' | 'triangle' | 'square' | 'sawtooth' | 'noise'; 
   lfoTarget: 'none' | 'pitch' | 'filter' | 'tremolo';
-  lfoDelay: number; // Fade in time (seconds)
+  lfoDelay: number; 
 }
 
 export type ModSource = 'lfo1' | 'lfo2' | 'lfo3' | 'env1' | 'env2' | 'env3';
@@ -365,7 +366,7 @@ export interface ModulationRow {
     enabled: boolean;
     source: ModSource;
     target: ModTarget;
-    amount: number; // -100 to 100
+    amount: number; 
 }
 
 export type ReverbType = 'room' | 'hall' | 'cathedral' | 'plate' | 'shimmer';
@@ -373,96 +374,76 @@ export type ReverbType = 'room' | 'hall' | 'cathedral' | 'plate' | 'shimmer';
 export interface SynthPreset {
   id: number | string;
   name: string;
-  category?: string; // New field for categorization
-  isHeader?: boolean; // New field for UI headers in lists
+  category?: string; 
+  isHeader?: boolean; 
   
   osc1: OscillatorConfig;
   osc2: OscillatorConfig;
   osc3: OscillatorConfig;
   
-  // Modulation Matrix
   modMatrix: ModulationRow[];
-
-  // Master Gain for the preset
   gain: number; 
-
-  // Resonator / Body (Formerly Formant/Vocal)
-  resonatorMix?: number; // 0 to 1 (0 = Bypass)
-  resonatorSweep?: number; // 0.0 to 1.0 (Timbre sweep)
-  
-  // Noise / Air (Formerly Aspiration)
-  noiseGain?: number; // 0 to 1 (Noise level)
-  noiseCutoff?: number; // Hz (Highpass filter on noise)
-
-  // Expression / Performance
-  portamento?: number; // 0 to 1 (Glide time)
-  acousticSustain?: boolean; // Legacy: Maps to pedalDecay in logic if needed, but pedalDecay takes precedence
-
-  // Stereo & Pan
-  spread?: number; // 0 to 1 (Voice Stereo Width)
-  stereoPanSpeed?: number; // Hz
-  stereoPanDepth?: number; // 0 to 1 (Auto-Pan amount)
-  
-  // Reverb Unit
-  reverbType?: ReverbType; // Convolution Preset (Logic base)
-  reverbMix: number; // 0 to 1
-  reverbSize: number; // Duration in seconds (0.1 to 10.0)
-  reverbDamping: number; // 0 (Bright) to 1 (Dark)
-  reverbDiffusion?: number; // 0 (Grainy) to 1 (Smooth)
-
-  // Delay Unit
-  delayMix: number; // 0 to 1
-  delayTime: number; // Seconds
-  delayFeedback: number; // 0 to 0.95
-
-  // Dynamics (Compressor/Limiter) (Global)
-  compressorThreshold: number; // dB (-60 to 0)
-  compressorRatio: number; // 1 to 20
-  compressorRelease: number; // seconds
-
-  // Arp Settings
+  resonatorMix?: number; 
+  resonatorSweep?: number; 
+  noiseGain?: number; 
+  noiseCutoff?: number; 
+  portamento?: number; 
+  acousticSustain?: boolean; 
+  spread?: number; 
+  stereoPanSpeed?: number; 
+  stereoPanDepth?: number; 
+  reverbType?: ReverbType; 
+  reverbMix: number; 
+  reverbSize: number; 
+  reverbDamping: number; 
+  reverbDiffusion?: number; 
+  delayMix: number; 
+  delayTime: number; 
+  delayFeedback: number; 
+  compressorThreshold: number; 
+  compressorRatio: number; 
+  compressorRelease: number; 
   arpConfig?: ArpConfig;
-  
-  // Vocal/Formant legacy fields (optional for migration)
   formantStrength?: number;
   vowel?: number;
   aspirationGain?: number;
   aspirationCutoff?: number;
 }
 
-// Slot Types
 export type PresetSlot = 'normal' | 'latch' | 'strum' | 'brass' | 'keys' | 'percussion';
-export type PlayMode = PresetSlot; // Alias for backward compatibility
-export type PlaybackMode = 'gate' | 'trigger' | 'latch'; // Behavior type
+export type PlayMode = PresetSlot; 
+export type PlaybackMode = 'gate' | 'trigger' | 'latch'; 
 
 export interface PresetState {
     normal: SynthPreset;
     latch: SynthPreset;
     strum: SynthPreset;
-    brass: SynthPreset; // Renamed from voice
-    keys: SynthPreset; // Renamed from arpeggio
-    percussion: SynthPreset; // New Mode
+    brass: SynthPreset; 
+    keys: SynthPreset; 
+    percussion: SynthPreset; 
 }
 
 export interface StoreState {
     settings: AppSettings;
     presets: PresetState;
-    userBank: SynthPreset[]; // 20 Save Slots
+    userBank: SynthPreset[]; 
 }
 
 export interface LatticeNode {
-  id: string; // Coordinate key "0,0,0,0,0:oct"
-  ratio: number; // Absolute Frequency multiplier (including octave)
-  n: number; // Numerator (adjusted for octave)
-  d: number; // Denominator (adjusted for octave)
+  id: string; 
+  ratio: number; 
+  n: number; 
+  d: number; 
   label: string; 
-  x: number; // Screen X
-  y: number; // Screen Y
+  x: number; 
+  y: number; 
   limitTop: number; 
   limitBottom: number;
-  maxPrime: number; // For Z-sorting
-  coords: number[]; // [p3, p5, p7, p9, p11, p13, p15]
-  octave: number; // -2, -1, 0, 1, 2
+  maxPrime: number; 
+  coords: number[]; 
+  octave: number; 
+  isGhost?: boolean; // NEW: Indicates node belongs to a previous lattice origin
+  originIndex?: number; // NEW: Index in modulationPath
 }
 
 export interface LatticeLine {
@@ -474,10 +455,11 @@ export interface LatticeLine {
   limit: number;
   sourceId: string;
   targetId: string;
+  isGhost?: boolean; // NEW: Indicates line belongs to a previous lattice origin
 }
 
 export interface ActiveVoice {
-  id: string; // Pointer ID or Node ID
+  id: string; 
   nodeId?: string;
   stop: () => void;
   setDetune: (cents: number) => void;

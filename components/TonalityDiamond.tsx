@@ -1,12 +1,13 @@
 
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
-import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType, SynthPreset } from '../types';
+import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType, SynthPreset, GenerationOrigin } from '../types';
 import { getPitchRatioFromScreenDelta, PITCH_SCALE } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
 import { LatticeRenderer } from '../services/LatticeRenderer';
 import { useLatticeData } from '../hooks/useLatticeData';
 import { GRID_CELL_SIZE } from '../constants';
+import { reconstructNode } from '../services/LatticeService';
 
 export interface TonalityDiamondHandle {
   clearLatches: (mode?: number) => void;
@@ -74,6 +75,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   } = useLatticeData(settings, effectiveScale);
 
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const prevDynamicSizeRef = useRef(dynamicSize);
   
   const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
   const [persistentLatches, setPersistentLatches] = useState<Map<string, Map<number, number>>>(new Map());
@@ -198,6 +200,27 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       return effective;
   }, [persistentLatches, activeChordIds, settings.savedChords, latchMode]);
 
+  // Identify nodes that are active but not present in the current lattice generation (Phantoms)
+  // This happens when modulating away from a center but keeping notes latched.
+  const phantomNodes = useMemo(() => {
+      const phantoms = new Map<string, LatticeNode>();
+      audioLatchedNodes.forEach((_, id) => {
+          if (!nodeMap.has(id)) {
+              // Try to reconstruct the node data from ID
+              const node = reconstructNode(id, settings);
+              if (node) phantoms.set(id, node);
+          }
+      });
+      // Also check active cursors if they are holding a node that disappeared
+      activeCursors.forEach(cursor => {
+          if (cursor.hoverNodeId && !nodeMap.has(cursor.hoverNodeId) && !phantoms.has(cursor.hoverNodeId)) {
+              const node = reconstructNode(cursor.hoverNodeId, settings);
+              if (node) phantoms.set(cursor.hoverNodeId, node);
+          }
+      });
+      return phantoms;
+  }, [audioLatchedNodes, activeCursors, nodeMap, settings]);
+
   const visualLatchedNodes = useMemo(() => {
       const visual = new Map<string, NodeActivation[]>();
       audioLatchedNodes.forEach((v, k) => visual.set(k, [...v]));
@@ -206,7 +229,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           const isSustainingInstrument = latchMode >= 1; 
           const isSustainActive = isCurrentSustainEnabled;
           const isBendEnabled = settings.isPitchBendEnabled;
+          const isModulating = settings.isModulationModeActive;
           
+          if (isModulating) return;
+
           const isHybridMode = isSustainingInstrument && isSustainActive && isBendEnabled;
           if (isHybridMode) return; 
 
@@ -229,7 +255,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       });
 
       return visual;
-  }, [audioLatchedNodes, activeCursors, settings.isPitchBendEnabled, latchMode, isCurrentSustainEnabled, externalTriggers]);
+  }, [audioLatchedNodes, activeCursors, settings.isPitchBendEnabled, settings.isModulationModeActive, latchMode, isCurrentSustainEnabled, externalTriggers]);
 
   // Calculate Harmonic Neighbors for Highlighting
   const harmonicNeighbors = useMemo(() => {
@@ -269,7 +295,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
     } 
     else if (reach === 2) {
-        const activeNodes = Array.from(latched.keys()).map(id => nodeMap.get(id)).filter(n => n) as LatticeNode[];
+        const activeNodes = Array.from(latched.keys()).map(id => nodeMap.get(id) || phantomNodes.get(id)).filter(n => n) as LatticeNode[];
         for (let i=0; i<activeNodes.length; i++) {
             for (let j=i+1; j<activeNodes.length; j++) {
                 const A = activeNodes[i];
@@ -293,7 +319,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
     }
     return active;
-  }, [data.lines, visualLatchedNodes, settings.voiceLeadingSteps, nodeMap]);
+  }, [data.lines, visualLatchedNodes, settings.voiceLeadingSteps, nodeMap, phantomNodes]);
   
   const brightenedLines = useMemo(() => {
       if (!settings.lineBrighteningEnabled || visualLatchedNodes.size === 0) return [];
@@ -318,11 +344,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       return Array.from(resultLines);
   }, [visualLatchedNodes, data.lines, settings.lineBrighteningEnabled, settings.lineBrighteningSteps]);
 
-  // Refs for Render Loop
+  // Refs for Render Loop - CRITICAL FIX: Use useLayoutEffect to sync immediately before paint
   const settingsRef = useRef(settings);
   const dataRef = useRef(data);
   const activeCursorsRef = useRef<Map<number, ActiveCursor>>(activeCursors);
   const visualLatchedRef = useRef(visualLatchedNodes);
+  const phantomNodesRef = useRef(phantomNodes);
   const activeLinesRef = useRef(activeLines);
   const brightenedLinesRef = useRef(brightenedLines);
   const harmonicNeighborsRef = useRef(harmonicNeighbors);
@@ -334,19 +361,20 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
   const centerOffsetRef = useRef(centerOffset);
 
-  useEffect(() => { settingsRef.current = settings; }, [settings]);
-  useEffect(() => { dataRef.current = data; }, [data]);
-  useEffect(() => { activeCursorsRef.current = activeCursors; }, [activeCursors]);
-  useEffect(() => { visualLatchedRef.current = visualLatchedNodes; }, [visualLatchedNodes]);
-  useEffect(() => { activeLinesRef.current = activeLines; }, [activeLines]);
-  useEffect(() => { brightenedLinesRef.current = brightenedLines; }, [brightenedLines]);
-  useEffect(() => { harmonicNeighborsRef.current = harmonicNeighbors; }, [harmonicNeighbors]);
-  useEffect(() => { effectiveScaleRef.current = effectiveScale; }, [effectiveScale]);
-  useEffect(() => { latchModeRef.current = latchMode; }, [latchMode]);
-  useEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
-  useEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
-  useEffect(() => { persistentLatchesRef.current = persistentLatches; }, [persistentLatches]);
-  useEffect(() => { centerOffsetRef.current = centerOffset; }, [centerOffset]);
+  useLayoutEffect(() => { settingsRef.current = settings; }, [settings]);
+  useLayoutEffect(() => { dataRef.current = data; }, [data]);
+  useLayoutEffect(() => { activeCursorsRef.current = activeCursors; }, [activeCursors]);
+  useLayoutEffect(() => { visualLatchedRef.current = visualLatchedNodes; }, [visualLatchedNodes]);
+  useLayoutEffect(() => { phantomNodesRef.current = phantomNodes; }, [phantomNodes]);
+  useLayoutEffect(() => { activeLinesRef.current = activeLines; }, [activeLines]);
+  useLayoutEffect(() => { brightenedLinesRef.current = brightenedLines; }, [brightenedLines]);
+  useLayoutEffect(() => { harmonicNeighborsRef.current = harmonicNeighbors; }, [harmonicNeighbors]);
+  useLayoutEffect(() => { effectiveScaleRef.current = effectiveScale; }, [effectiveScale]);
+  useLayoutEffect(() => { latchModeRef.current = latchMode; }, [latchMode]);
+  useLayoutEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
+  useLayoutEffect(() => { spatialGridRef.current = spatialGrid; }, [spatialGrid]);
+  useLayoutEffect(() => { persistentLatchesRef.current = persistentLatches; }, [persistentLatches]);
+  useLayoutEffect(() => { centerOffsetRef.current = centerOffset; }, [centerOffset]);
   
   const lastTouchedLimitRef = useRef<number | null>(null);
   const depthHistoryRef = useRef<number[]>([]);
@@ -406,7 +434,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     getLatchedNodes: () => {
         const result: { node: LatticeNode, mode: number }[] = [];
         persistentLatches.forEach((modeMap, id) => {
-            const n = nodeMap.get(id);
+            const n = nodeMap.get(id) || phantomNodes.get(id);
             if (n) {
                 modeMap.forEach((_, mode) => result.push({ node: n, mode }));
             }
@@ -439,6 +467,20 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           setIsInitialLoad(false);
       }
   }, [isGenerating, data.nodes.length, isInitialLoad]);
+
+  // Adjust scroll position when dynamic size changes to keep view centered relative to content
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    
+    if (!isInitialLoad && dynamicSize !== prevDynamicSizeRef.current) {
+        const diff = (dynamicSize - prevDynamicSizeRef.current) / 2;
+        container.scrollLeft += diff;
+        container.scrollTop += diff;
+        requestAnimationFrame(updateRect);
+    }
+    prevDynamicSizeRef.current = dynamicSize;
+  }, [dynamicSize, isInitialLoad]);
 
   useLayoutEffect(() => {
       const container = scrollContainerRef.current;
@@ -481,6 +523,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const current = audioLatchedNodes;
       const prev = prevAudioLatchedRef.current;
       const nodes = nodeMap;
+      const phantoms = phantomNodes;
       
       current.forEach((activations, nodeId) => {
           activations.forEach(act => {
@@ -489,7 +532,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               const wasActive = prevActivations && prevActivations.some(p => p.mode === act.mode);
               
               if (!wasActive) {
-                   const node = nodes.get(nodeId); 
+                   const node = nodes.get(nodeId) || phantoms.get(nodeId); 
                    if (node) {
                        audioEngine.startVoice(voiceId, node.ratio, settings.baseFrequency, act.presetId, 'latch');
                        if (settings.midiEnabled) midiService.noteOn(voiceId, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
@@ -512,7 +555,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       });
 
       prevAudioLatchedRef.current = current;
-  }, [audioLatchedNodes, nodeMap, settings.baseFrequency, settings.midiEnabled]);
+  }, [audioLatchedNodes, nodeMap, phantomNodes, settings.baseFrequency, settings.midiEnabled]);
 
   useEffect(() => {
     audioEngine.setPolyphony(settings.polyphony);
@@ -600,6 +643,27 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const nodeId = hitNode ? hitNode.id : null;
 
       if (hitNode) {
+        // --- MODULATION LOGIC ---
+        if (settings.isModulationModeActive) {
+            const newOrigin: GenerationOrigin = {
+                coords: hitNode.coords,
+                octave: hitNode.octave
+            };
+            
+            const newPath = [...settings.modulationPath, newOrigin];
+            
+            const currentOrigin = settings.modulationPath[settings.modulationPath.length - 1];
+            const isSame = currentOrigin.coords.every((v, i) => v === hitNode.coords[i]) && currentOrigin.octave === hitNode.octave;
+            
+            if (!isSame) {
+                updateSettings({ 
+                    modulationPath: newPath,
+                    isModulationModeActive: false
+                });
+            }
+            return; 
+        }
+
         nodeTriggerHistory.current.set(hitNode.id, Date.now());
 
         const topLayer = settings.layerOrder[settings.layerOrder.length - 1];
@@ -708,7 +772,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     const isBending = isBendEnabled && !!cursor.originNodeId;
 
     if (isBending && dynamicCanvasRef.current) {
-         const originNode = nodeMapRef.current.get(cursor.originNodeId!);
+         const originNode = nodeMapRef.current.get(cursor.originNodeId!) || phantomNodesRef.current.get(cursor.originNodeId!);
          if (originNode) {
              const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
              const originWorldY = (originNode.y * spacing) + centerOffset;
@@ -883,7 +947,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               centerOffset: centerOffsetRef.current,
               view: { x: viewX, y: viewY, w: viewW, h: viewH },
               time: time,
-              latchMode: latchModeRef.current
+              latchMode: latchModeRef.current,
+              phantomNodes: phantomNodesRef.current
           }
       );
 

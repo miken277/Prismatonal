@@ -71,30 +71,19 @@ const calculateLayout = (w: number, h: number, scale: number, settings: AppSetti
         newPos.layers = { x: limitBarX, y: layersY };
 
         // Center Instruments Cluster vertically between Arp Bar and Bottom Controls
-        // Arp Bar Height approx 50px scaled. Bottom starts at bottomY.
         const topSpace = marginTop + (50 * scale);
         const availableHeight = bottomY - topSpace;
-        
-        // Revised Height Calculation for 5 Buttons:
-        // 5 buttons * 78px + 4 gaps * 12px + padding ~20px = 390 + 48 + 20 = 458px
         const clusterHeight = 460 * scale; 
         
-        // Weighted positioning: 
-        // Instead of pure center (0.5), use 0.25 (25%) of the available slack space 
-        // to position it closer to the Arpeggiator Bar (top).
         let targetY = topSpace;
-        
         if (availableHeight > clusterHeight) {
             const slack = availableHeight - clusterHeight;
             targetY = topSpace + (slack * 0.25);
         } else {
-            // If tight, center it
             targetY = topSpace + (availableHeight / 2) - (clusterHeight / 2);
         }
         
-        // Ensure it doesn't overlap top or bottom with a minimum safety margin
         const clampedY = Math.max(topSpace + (10 * scale), Math.min(targetY, bottomY - clusterHeight - (10 * scale)));
-
         newPos.instruments = { x: marginLeft, y: clampedY };
     }
 
@@ -128,6 +117,10 @@ const calculateLayout = (w: number, h: number, scale: number, settings: AppSetti
     
     rightX -= (perfBtn + internalBlockGap); 
     newPos.bend = { x: rightX, y: perfY };
+    
+    // Add Modulation Button logic
+    rightX -= (perfBtn + internalBlockGap);
+    newPos.mod = { x: rightX, y: perfY };
     
     newPos.latch = { x: -9999, y: -9999 };
 

@@ -50,17 +50,18 @@ export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
     panic: 'escape',
     off: 'o',
     
-    // Patch & Mode Controls (Bottom Right Priority)
-    latch: 'l', // Key binding for mode toggling (Drone/Strings)
-    sustain: ' ', // Spacebar for Sustain (previously latch)
+    // Patch & Mode Controls
+    latch: 'l', 
+    sustain: ' ', 
     bend: 'b',
+    modulate: 'm', // Key for Mod mode
     modeDrone: '1',
     modeStrings: '2',
     modePlucked: '3',
-    modeBrass: '4', // Updated mapping name
-    modeKeys: '5', // Switch to Keys Mode
-    modePercussion: '6', // Switch to Percussion Mode
-    synth: 'm',
+    modeBrass: '4', 
+    modeKeys: '5', 
+    modePercussion: '6', 
+    synth: 'p', // Changed from m
 
     // Chords
     addChord: 'enter',
@@ -139,6 +140,7 @@ const getDefaults = () => {
         latch: { x: w - 80 - margin, y: h - 280 },
         sust: { x: w - 80 - margin, y: h - 330 },
         bend: { x: w - 80 - margin, y: h - 380 },
+        mod: { x: w - 80 - margin, y: h - 430 }, // Modulation button
         center: { x: margin, y: h - 48 - margin },
         depth: { x: margin + 60, y: h - 48 - margin },
         decreaseDepth: { x: margin + 120, y: h - 48 - margin },
@@ -146,14 +148,14 @@ const getDefaults = () => {
         layers: { x: w - 90 - margin, y: margin + 60 },
         arpeggioBar: { x: margin, y: margin },
         instruments: { x: margin, y: margin + 60 },
-        complexity: { x: margin, y: margin + 60 } // Default left position
+        complexity: { x: margin, y: margin + 60 } 
     };
 };
 
 const DEFAULT_UI_POSITIONS = getDefaults();
 
 export const DEFAULT_UI_SIZES = {
-    volume: { width: 600, height: 160 }, // Increased from 110 to ensure full coverage by default
+    volume: { width: 600, height: 160 }, 
     arpeggioBar: { width: 760 }
 };
 
@@ -189,8 +191,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   layoutApproach: 'lattice',
   activeSkin: 'default',
   limitDepths: { 3: 3, 5: 2, 7: 1, 9: 1, 11: 1, 13: 1, 15: 1 },
-  // Default to First Two Octaves (Harmonics 1-7) enabled, higher ones disabled
-  enabledIdentities: [1, 3, 5, 7], 
+  enabledIdentities: [1, 3, 5, 7, 9, 11, 13, 15], 
+  latticeMaxDistance: 1, 
+  isModulationModeActive: false,
+  modulationPath: [{ coords: [0,0,0,0,0,0,0], octave: 0 }], // Start at absolute 1/1
   showIncreaseDepthButton: true,
   centerResetsDepth: false,
   savedChords: generateChordSlots(),
@@ -201,7 +205,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   layerOrder: [15, 13, 11, 9, 7, 5, 3, 1], 
   baseFrequency: 196.00, // G3
   audioLatencyHint: 'playback',
-  enableOversampling: false, // Default to OFF for better general performance
+  enableOversampling: false, 
   wavetableSize: 8192,
   interpolationType: 'cubic',
   isVoiceLeadingEnabled: true, 
@@ -214,42 +218,40 @@ export const DEFAULT_SETTINGS: AppSettings = {
   baseLineWidth: 1.0, 
   lineBrighteningEnabled: true,
   lineBrighteningSteps: 1,
-  lineBrighteningWidth: 1.0, // Default width for brightened lines
+  lineBrighteningWidth: 1.0, 
   isMomentumEnabled: false, 
   latchedZoomScale: 1.3,
-  buttonSizeScale: 1.26, // 10mm default with 2x correction
-  buttonSpacingScale: 1.89, // 50mm default with 2x correction (Lattice default)
+  buttonSizeScale: 1.26, 
+  buttonSpacingScale: 1.89, 
   latticeAspectRatio: 0.7, 
   canvasSize: 2000, 
   buttonShape: ButtonShape.CIRCLE,
   colors: { ...DEFAULT_COLORS },
   nodeTextSizeScale: 1.0,
   showFractionBar: false,
-  isPitchBendEnabled: false, // Default: Disabled for cleaner start
-  isSustainEnabled: false, // Default: Disabled (Strings mode default)
-  isStrumEnabled: false, // Default to false so String behaves like a normal Gate instrument
-  chordsAlwaysRelatch: false, // New Default
+  isPitchBendEnabled: false, 
+  isSustainEnabled: false, 
+  isStrumEnabled: false, 
+  chordsAlwaysRelatch: false, 
   isPitchSnapEnabled: true,
-  polyphony: 8, // Reduced from 16 to 8 for better mobile stability by default
+  polyphony: 8, 
   pitchOffLocked: false,
   volumeLocked: false,
   
-  // Background & Overlay
-  backgroundMode: 'image', // Updated Default
+  backgroundMode: 'image', 
   backgroundPresets: DEFAULT_BACKGROUNDS,
-  solidColor: '#0f172a', // Default dark slate
+  solidColor: '#0f172a', 
   gradientColorStart: '#0f172a',
-  gradientColorEnd: '#1e1b4b', // Deep indigo
+  gradientColorEnd: '#1e1b4b', 
   gradientType: 'radial',
   gradientAngle: 180,
-  backgroundImageData: DEFAULT_BACKGROUNDS[0].data, // Use First Default Background
+  backgroundImageData: DEFAULT_BACKGROUNDS[0].data, 
   backgroundYOffset: 0,
-  backgroundTiling: true, // Updated Default
+  backgroundTiling: true, 
   bgImageGamma: 1.0,
   bgImageTint: '#000000',
-  bgImageTintStrength: 0.3, // Lowered from 0.7 to 0.3 to ensure images are visible by default
+  bgImageTintStrength: 0.3, 
   
-  // Overlay Defaults (Deprecated but kept for type safety until refactor complete)
   isOverlayEnabled: false,
   overlayBlendMode: 'normal',
   overlayOpacity: 0.5,
@@ -259,7 +261,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayGradientType: 'linear',
   overlayGradientAngle: 180,
   
-  // Rainbow Defaults
   rainbowSaturation: 90,
   rainbowBrightness: 60,
   rainbowOffset: 0,
@@ -272,9 +273,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableKeyboardShortcuts: false,
   keyMappings: DEFAULT_KEY_MAPPINGS,
   strumDuration: 0.5,
-  enableAudioRecording: false, // Renamed from recordScreenActivity
+  enableAudioRecording: false, 
 
-  // UI Relocation & Scaling
   uiUnlocked: false,
   uiScale: 1.0, 
   uiEdgeMargin: 4, 
@@ -317,7 +317,7 @@ export const PRESETS: SynthPreset[] = [
 export const DEFAULT_NORMAL_PRESET = preservedAnalogStrings; 
 export const DEFAULT_STRUM_PRESET = PLUCKED_PATCHES[0]; 
 export const DEFAULT_LATCH_PRESET = preservedNoiseWash;
-export const DEFAULT_BRASS_PRESET = BRASS_PATCHES[0]; // New Default for Brass
-export const DEFAULT_KEYS_PRESET = ETHEREAL_KEYS[0]; // Renamed from ARP
-export const DEFAULT_PERCUSSION_PRESET = ETHEREAL_MALLETS[0]; // Set default to "Crystal Rain" (Mallet)
+export const DEFAULT_BRASS_PRESET = BRASS_PATCHES[0]; 
+export const DEFAULT_KEYS_PRESET = ETHEREAL_KEYS[0]; 
+export const DEFAULT_PERCUSSION_PRESET = ETHEREAL_MALLETS[0]; 
 export const DEFAULT_PRESET = preservedAnalogStrings;

@@ -57,7 +57,6 @@ const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
     
         const isValid = options.some(o => o.value === settings.layoutApproach);
         if (!isValid && options.length > 0) {
-          // Defer update to avoid render loop during render
           setTimeout(() => handleChange('layoutApproach', options[0].value), 0);
         }
     
@@ -134,17 +133,52 @@ const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
                         {renderBaseFrequency()}
                         <h3 className="font-semibold text-blue-300 border-b border-slate-700 pb-1 flex justify-between items-center">
                             <span>Lattice Axis Depth</span>
-                            <span className="text-[10px] text-blue-500 uppercase font-black">ACTIVE</span>
+                            <span className="text-[10px] text-blue-500 uppercase font-black">STEPS</span>
                         </h3>
                         <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
+                            <div className="pb-3 mb-1 border-b border-slate-700/50">
+                                <label className="flex justify-between items-center text-xs font-bold text-slate-300 mb-1">
+                                    <span>Max Total Steps</span>
+                                    <span className="text-blue-400">{settings.latticeMaxDistance || 12}</span>
+                                </label>
+                                <input 
+                                    type="range" 
+                                    min="1" max="20" step="1" 
+                                    value={settings.latticeMaxDistance || 12} 
+                                    onChange={(e) => handleChange('latticeMaxDistance', parseInt(e.target.value))} 
+                                    className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                />
+                                <p className="text-[9px] text-slate-500 mt-1">Limits combined distance from center. Lower this to filter out complex hybrid intervals (permutations).</p>
+                            </div>
+
                             <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Steps from center per prime limit</p>
                             {PRIMES.map(limit => (
                                 <div key={limit} className="flex items-center gap-3">
                                     <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
-                                    {/* @ts-ignore */}
-                                    <input type="range" min="0" max="6" step="1" value={settings.limitDepths?.[limit] ?? 0} onChange={(e) => handleLimitDepthChange(limit, parseInt(e.target.value))} className="flex-grow h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
-                                    {/* @ts-ignore */}
-                                    <span className="text-xs font-mono w-4 text-right text-blue-400">{settings.limitDepths?.[limit] ?? 0}</span>
+                                    {/* Updated to NumberInput for granular step control */}
+                                    <div className="flex-grow">
+                                        <div className="flex items-center gap-2">
+                                            <button 
+                                                className="w-6 h-6 bg-slate-700 hover:bg-slate-600 rounded flex items-center justify-center text-slate-300 font-bold text-sm"
+                                                // @ts-ignore
+                                                onClick={() => handleLimitDepthChange(limit, Math.max(0, (settings.limitDepths?.[limit] ?? 0) - 1))}
+                                            >-</button>
+                                            <div className="flex-1">
+                                                <NumberInput 
+                                                    // @ts-ignore
+                                                    value={settings.limitDepths?.[limit] ?? 0}
+                                                    min={0} max={12} 
+                                                    onChange={(val) => handleLimitDepthChange(limit, val)} 
+                                                    className="text-center h-8"
+                                                />
+                                            </div>
+                                            <button 
+                                                className="w-6 h-6 bg-slate-700 hover:bg-slate-600 rounded flex items-center justify-center text-slate-300 font-bold text-sm"
+                                                // @ts-ignore
+                                                onClick={() => handleLimitDepthChange(limit, Math.min(12, (settings.limitDepths?.[limit] ?? 0) + 1))}
+                                            >+</button>
+                                        </div>
+                                    </div>
                                 </div>
                             ))}
                         </div>
