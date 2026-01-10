@@ -1,6 +1,4 @@
 
-
-
 const DSP_CONSTANTS = `
 // --- 1. DSP UTILS & CONSTANTS ---
 const TWO_PI = 2 * Math.PI;
@@ -70,23 +68,32 @@ class SVF {
   constructor() { this.low = 0.0; this.band = 0.0; this.high = 0.0; this.notch = 0.0; }
   reset() { this.low = 0.0; this.band = 0.0; this.high = 0.0; this.notch = 0.0; }
   process(input, cutoff, res, sampleRate, type, peakGain = 1.0) {
+    // Safety check for NaN which propagates and kills audio
+    if (!Number.isFinite(this.low) || !Number.isFinite(this.band)) this.reset();
+
     const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.45));
     let f = 2.0 * Math.sin(Math.PI * safeCutoff / sampleRate);
     const q = 1.0 / (res + 0.5);
+    
     this.low += f * this.band;
     this.high = input - this.low - q * this.band;
     this.band += f * this.high;
     this.notch = this.high + this.low;
+    
+    let out = 0.0;
     switch((type|0)) {
-        case 0: return this.low;
-        case 1: return this.high;
-        case 2: return this.band;
-        case 3: return this.notch;
-        case 4: return this.low + this.high + (this.band * peakGain);
-        case 5: return (this.low * peakGain) + this.high + this.band;
-        case 6: return this.low + (this.high * peakGain) + this.band;
-        default: return this.low;
+        case 0: out = this.low; break;
+        case 1: out = this.high; break;
+        case 2: out = this.band; break;
+        case 3: out = this.notch; break;
+        case 4: out = this.low + this.high + (this.band * peakGain); break;
+        case 5: out = (this.low * peakGain) + this.high + this.band; break;
+        case 6: out = this.low + (this.high * peakGain) + this.band; break;
+        default: out = this.low;
     }
+    
+    // Hard clip to prevent blowouts
+    return Math.max(-10.0, Math.min(10.0, out));
   }
 }
 
@@ -122,14 +129,11 @@ class Envelope {
   reset() { this.stage = 'idle'; this.value = 0.0; }
   
   process(config, dt, mode) {
-    // Mode: 'gate' (Key Held), 'latch' (Sustain Pedal Active), 'trigger' (Pluck/One-Shot)
     const att = (config.attack !== undefined) ? config.attack : 0.01;
     const dec = (config.decay !== undefined) ? config.decay : 0.1;
     const sus = (config.sustain !== undefined) ? config.sustain : 1.0;
     const rel = (config.release !== undefined) ? config.release : 0.1;
     
-    // New Finite Sustain Parameters
-    // If <= 0, treat as Infinite (standard sustain)
     const holdDecay = (config.holdDecay !== undefined) ? config.holdDecay : 0;
     const pedalDecay = (config.pedalDecay !== undefined) ? config.pedalDecay : 0;
 
@@ -148,7 +152,6 @@ class Envelope {
       case 'decay':
         const decRate = 1.0 / (Math.max(0.001, dec));
         this.value += (sus - this.value) * (decRate * dt * 5.0); 
-        // If decaying to near sustain, switch to sustain phase
         if (Math.abs(this.value - sus) < 0.001) { 
             this.value = sus; 
             this.stage = 'sustain'; 
@@ -156,34 +159,24 @@ class Envelope {
         return this.value * this.velocity;
         
       case 'sustain':
-        // Finite Sustain Logic
-        // If Latch Mode (Pedal), check pedalDecay
         if (mode === 'latch') {
             if (pedalDecay > 0) {
-                // Finite Pedal Hold: Decay slowly from current level
                 const pDecRate = 1.0 / pedalDecay; 
-                // We decay towards 0
                 this.value -= this.value * (pDecRate * dt * 5.0);
                 if (this.value < 0.001) { this.value = 0.0; this.stage = 'idle'; }
             } else {
-                // Infinite Pedal Hold: Maintain Sustain Level (or current level if entered late?)
-                // Standard ADSR maintains Sustain level
                 this.value = sus; 
             }
         } 
-        // If Gate Mode (Key Held), check holdDecay
         else if (mode === 'gate') {
             if (holdDecay > 0) {
-                // Finite Key Hold: Decay slowly
                 const hDecRate = 1.0 / holdDecay;
                 this.value -= this.value * (hDecRate * dt * 5.0);
                 if (this.value < 0.001) { this.value = 0.0; this.stage = 'idle'; }
             } else {
-                // Infinite Key Hold
                 this.value = sus;
             }
         }
-        
         return this.value * this.velocity;
         
       case 'release':
@@ -199,11 +192,13 @@ class Envelope {
 
 class Oscillator {
   constructor(sampleRate) { this.phase = 0.0; this.blep = new PolyBLEP(sampleRate); this.sampleRate = sampleRate; }
-  reset() {}
+  reset() { this.phase = 0.0; }
   process(freq, type, dt) {
     if (!Number.isFinite(freq) || freq <= 0 || freq > 24000) return 0.0;
+    
     this.phase += dt * freq;
     while (this.phase >= 1.0) this.phase -= 1.0;
+    
     let sample = 0.0;
     switch (type) {
       case 'sine':
@@ -253,8 +248,8 @@ class Voice {
     this.baseFreq = freq; this.targetFreq = freq;
     this.active = true; this.startTime = currentTime; this.releaseTime = 0; this.activeTime = 0.0;
     this.envs.forEach(env => env.trigger());
-    this.filters.forEach(f => f.reset());
-    this.resonator.reset(); this.noiseFilter.reset();
+    // NOTE: We do NOT reset filters here to avoid clicking when stealing voices.
+    // this.filters.forEach(f => f.reset()); 
     this.lfoPhases.fill(0.0);
     this.lfoRandoms[0] = (Math.random() * 2.0) - 1.0;
     this.lfoRandoms[1] = (Math.random() * 2.0) - 1.0;

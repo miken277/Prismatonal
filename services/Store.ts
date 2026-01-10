@@ -1,5 +1,4 @@
 
-
 import { useSyncExternalStore } from 'react';
 import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState } from '../types';
 import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_BRASS_PRESET, DEFAULT_KEYS_PRESET, DEFAULT_PERCUSSION_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS, REVERB_DEFAULTS } from '../constants';
@@ -173,13 +172,26 @@ class PrismaStore {
 
     if (next === current) return;
 
+    // Apply Update
     this.state = { ...this.state, settings: next };
     
+    // Persist with Safety Check
     try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-    } catch (e) {
-        console.warn("Settings storage limit reached. Changes saved to session only.", e);
-        // We do NOT stop the state update, so the app still works for this session.
+    } catch (e: any) {
+        if (e.name === 'QuotaExceededError' && next.backgroundImageData) {
+            console.warn("Storage quota exceeded due to background image. Saving partial settings.");
+            // If failed, try to save without the heavy background image
+            const safeSettings = { ...next, backgroundImageData: null };
+            try {
+                localStorage.setItem(SETTINGS_KEY, JSON.stringify(safeSettings));
+                alert("Storage Limit Warning: Background image was too large to save. Other settings have been saved. Please use a smaller image.");
+            } catch (innerE) {
+                console.error("Critical storage failure", innerE);
+            }
+        } else {
+            console.warn("Settings storage limit reached. Changes saved to session only.", e);
+        }
     }
     this.notify();
   };

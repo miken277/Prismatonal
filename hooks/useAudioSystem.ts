@@ -38,36 +38,20 @@ export const useAudioSystem = (
         audioEngine.setGlobalBrightness(brightness);
     }, [brightness]);
 
-    // --- Initialization / Warmup ---
-    // Handles the browser requirement for user gesture to start AudioContext
-    useEffect(() => {
-        const warmup = () => {
-            audioEngine.resume().then(() => {});
-            // Initialize MIDI only after user interaction to avoid premature permission prompts if desired,
-            // though usually safe to do early if context is valid.
-            if (settings.midiEnabled) midiService.init();
-
-            // Cleanup listeners once triggered
-            window.removeEventListener('pointerdown', warmup);
-            window.removeEventListener('keydown', warmup);
-            window.removeEventListener('touchstart', warmup);
-            window.removeEventListener('touchend', warmup);
-            window.removeEventListener('click', warmup);
-        };
-
-        window.addEventListener('pointerdown', warmup);
-        window.addEventListener('keydown', warmup);
-        window.addEventListener('touchstart', warmup);
-        window.addEventListener('touchend', warmup);
-        window.addEventListener('click', warmup);
-
-        return () => {
-            window.removeEventListener('pointerdown', warmup);
-            window.removeEventListener('keydown', warmup);
-            window.removeEventListener('touchstart', warmup);
-            window.removeEventListener('touchend', warmup);
-            window.removeEventListener('click', warmup);
-        };
+    // --- Explicit Initialization ---
+    const startAudio = useCallback(async () => {
+        try {
+            await audioEngine.resume();
+            console.log("Audio Context Resumed");
+            
+            // Initialize MIDI if enabled
+            if (settings.midiEnabled) {
+                const success = await midiService.init();
+                if (!success) console.log("MIDI initialization skipped or failed (benign)");
+            }
+        } catch (e) {
+            console.error("Failed to start audio engine", e);
+        }
     }, [settings.midiEnabled]);
 
     const stopAudio = useCallback(() => {
@@ -81,6 +65,7 @@ export const useAudioSystem = (
         setSpatialScale,
         brightness,
         setBrightness,
+        startAudio, // Exposed for Splash Screen
         stopAudio
     };
 };

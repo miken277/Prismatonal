@@ -6,6 +6,7 @@ import SynthControls from './components/SynthControls';
 import FloatingControls from './components/FloatingControls';
 import LimitLayerControls from './components/LimitLayerControls';
 import RecordingControls from './components/RecordingControls';
+import SplashScreen from './components/SplashScreen';
 import { audioEngine } from './services/AudioEngine';
 import { midiService } from './services/MidiService';
 import { useStore } from './services/Store';
@@ -19,6 +20,9 @@ import { useAudioSystem } from './hooks/useAudioSystem';
 
 const App: React.FC = () => {
   const { settings, presets, updateSettings, setPreset } = useStore();
+
+  // App Lifecycle
+  const [hasStarted, setHasStarted] = useState(false);
 
   // Visual State
   const [viewZoom, setViewZoom] = useState(1.0);
@@ -34,11 +38,12 @@ const App: React.FC = () => {
 
   // --- Custom Hooks ---
   
-  // 1. Audio System (State, Sync, Warmup)
+  // 1. Audio System (State, Sync, Startup)
   const {
       masterVolume, setMasterVolume,
       spatialScale, setSpatialScale,
       brightness, setBrightness,
+      startAudio,
       stopAudio
   } = useAudioSystem(settings, presets);
 
@@ -58,7 +63,7 @@ const App: React.FC = () => {
       handlePercussionSelect,
       handleSustainToggle,
       handleBendToggle,
-      handleShiftToggle, // NEW
+      handleShiftToggle,
       handleModulationToggle,
       handleModulationUndo,
       handleModulationReset,
@@ -89,6 +94,11 @@ const App: React.FC = () => {
   }, [effectiveScale]);
 
   // --- Handlers ---
+
+  const handleAppStart = () => {
+      startAudio();
+      setHasStarted(true);
+  };
 
   const handleLimitInteraction = (limit: number) => {
     if (settings.layerOrder[settings.layerOrder.length - 1] !== limit) {
@@ -240,103 +250,107 @@ const App: React.FC = () => {
   const showArpBar = availableArpWidth > 250 * effectiveScale;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-slate-900 font-sans text-white">
-      <div className="absolute z-50 pointer-events-none" style={{ top: headerTop, left: leftOffset }}>
-        <h1 className="text-sm font-bold tracking-widest text-slate-500 opacity-20 leading-none">PRISMATONAL</h1>
-      </div>
+    <>
+        {!hasStarted && <SplashScreen onStart={handleAppStart} />}
+        
+        <div className={`relative w-full h-[100dvh] overflow-hidden bg-slate-900 font-sans text-white transition-opacity duration-1000 ${hasStarted ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="absolute z-50 pointer-events-none" style={{ top: headerTop, left: leftOffset }}>
+            <h1 className="text-sm font-bold tracking-widest text-slate-500 opacity-20 leading-none">PRISMATONAL</h1>
+          </div>
 
-      <div className="absolute z-50 flex gap-2 pointer-events-auto" style={{ top: headerTop, right: rightOffset }}>
-          <button onClick={() => setIsSettingsOpen(true)} className={headerBtnClass}>Settings</button>
-          <button onClick={() => setIsSynthOpen(true)} className={headerBtnClass}>Synth</button>
-      </div>
+          <div className="absolute z-50 flex gap-2 pointer-events-auto" style={{ top: headerTop, right: rightOffset }}>
+              <button onClick={() => setIsSettingsOpen(true)} className={headerBtnClass}>Settings</button>
+              <button onClick={() => setIsSynthOpen(true)} className={headerBtnClass}>Synth</button>
+          </div>
 
-      <TonalityDiamond 
-        ref={diamondRef}
-        settings={settings}
-        updateSettings={updateSettings}
-        audioEngine={audioEngine} 
-        onLimitInteraction={handleLimitInteraction}
-        activeChordIds={activeChordIds}
-        uiUnlocked={settings.uiUnlocked}
-        latchMode={latchMode}
-        isCurrentSustainEnabled={settings.isSustainEnabled} 
-        globalScale={effectiveScale}
-        viewZoom={viewZoom}
-        onNodeTrigger={handleArpRecordNote}
-        onSustainStatusChange={handleSustainStatusChange}
-        onClearActiveChords={handleClearActiveChords}
-      />
+          <TonalityDiamond 
+            ref={diamondRef}
+            settings={settings}
+            updateSettings={updateSettings}
+            audioEngine={audioEngine} 
+            onLimitInteraction={handleLimitInteraction}
+            activeChordIds={activeChordIds}
+            uiUnlocked={settings.uiUnlocked}
+            latchMode={latchMode}
+            isCurrentSustainEnabled={settings.isSustainEnabled} 
+            globalScale={effectiveScale}
+            viewZoom={viewZoom}
+            onNodeTrigger={handleArpRecordNote}
+            onSustainStatusChange={handleSustainStatusChange}
+            onClearActiveChords={handleClearActiveChords}
+          />
 
-      <FloatingControls 
-        volume={masterVolume} setVolume={setMasterVolume}
-        spatialScale={spatialScale} setSpatialScale={setSpatialScale}
-        brightness={brightness} setBrightness={setBrightness}
-        viewZoom={viewZoom} setViewZoom={setViewZoom}
-        
-        onPanic={handlePanic} onOff={handleOff}
-        onLatch={handleDroneSelect} 
-        onSust={handleStringSelect} 
-        onPluck={handlePluckedSelect}
-        onVoice={handleVoiceSelect}
-        onKeys={handleKeysSelect}
-        onPercussion={handlePercussionSelect}
-        latchMode={latchMode}
-        onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
-        onSustainToggle={handleSustainToggle} isSustainEnabled={settings.isSustainEnabled}
-        onModulationToggle={handleModulationToggle} isModulationModeActive={settings.isModulationModeActive}
-        modulationPathLength={settings.modulationPath.length}
-        onModulationUndo={handleModulationUndo}
-        onModulationReset={handleModulationReset}
-        onShiftToggle={handleShiftToggle} isShiftModeActive={settings.isShiftModeActive}
-        onCenter={handleCenter}
-        onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
-        onAddChord={handleAddChord} toggleChord={toggleChord}
-        onRemoveChord={handleRemoveChord}
-        activeChordIds={activeChordIds} savedChords={settings.savedChords}
-        chordShortcutSizeScale={settings.chordShortcutSizeScale}
-        showIncreaseDepthButton={settings.showIncreaseDepthButton}
-        uiUnlocked={settings.uiUnlocked}
-        uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
-        uiSizes={settings.uiSizes} updateSize={handleUiSizeUpdate}
-        draggingId={draggingId} setDraggingId={setDraggingId}
-        uiScale={effectiveScale}
-        
-        arpeggios={settings.arpeggios}
-        arpBpm={settings.arpBpm}
-        onArpToggle={handleArpToggle}
-        onArpBpmChange={handleArpBpmChange}
-        onArpRowConfigChange={handleArpRowConfigChange}
-        onArpPatternUpdate={handleArpPatternUpdate}
-        recordingArpId={recordingArpId}
-        currentArpStep={currentArpStep}
-        recordingFlash={recordingFlash}
-        onPlayAll={handlePlayAll}
-        onStopAll={handleStopAll}
-        
-        activeSustainedModes={activeSustainedModes}
-        maxArpWidth={showArpBar ? availableArpWidth : 0}
-        onClearSustain={handleClearSustain}
-        
-        isSequencerOpen={isSequencerOpen}
-        onToggleSequencer={() => setIsSequencerOpen(p => !p)}
-        
-        presets={presets}
-        onPresetChange={setPreset}
-      />
+          <FloatingControls 
+            volume={masterVolume} setVolume={setMasterVolume}
+            spatialScale={spatialScale} setSpatialScale={setSpatialScale}
+            brightness={brightness} setBrightness={setBrightness}
+            viewZoom={viewZoom} setViewZoom={setViewZoom}
+            
+            onPanic={handlePanic} onOff={handleOff}
+            onLatch={handleDroneSelect} 
+            onSust={handleStringSelect} 
+            onPluck={handlePluckedSelect}
+            onVoice={handleVoiceSelect}
+            onKeys={handleKeysSelect}
+            onPercussion={handlePercussionSelect}
+            latchMode={latchMode}
+            onBend={handleBendToggle} isBendEnabled={settings.isPitchBendEnabled}
+            onSustainToggle={handleSustainToggle} isSustainEnabled={settings.isSustainEnabled}
+            onModulationToggle={handleModulationToggle} isModulationModeActive={settings.isModulationModeActive}
+            modulationPathLength={settings.modulationPath.length}
+            onModulationUndo={handleModulationUndo}
+            onModulationReset={handleModulationReset}
+            onShiftToggle={handleShiftToggle} isShiftModeActive={settings.isShiftModeActive}
+            onCenter={handleCenter}
+            onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
+            onAddChord={handleAddChord} toggleChord={toggleChord}
+            onRemoveChord={handleRemoveChord}
+            activeChordIds={activeChordIds} savedChords={settings.savedChords}
+            chordShortcutSizeScale={settings.chordShortcutSizeScale}
+            showIncreaseDepthButton={settings.showIncreaseDepthButton}
+            uiUnlocked={settings.uiUnlocked}
+            uiPositions={settings.uiPositions} updatePosition={handleUiPositionUpdate}
+            uiSizes={settings.uiSizes} updateSize={handleUiSizeUpdate}
+            draggingId={draggingId} setDraggingId={setDraggingId}
+            uiScale={effectiveScale}
+            
+            arpeggios={settings.arpeggios}
+            arpBpm={settings.arpBpm}
+            onArpToggle={handleArpToggle}
+            onArpBpmChange={handleArpBpmChange}
+            onArpRowConfigChange={handleArpRowConfigChange}
+            onArpPatternUpdate={handleArpPatternUpdate}
+            recordingArpId={recordingArpId}
+            currentArpStep={currentArpStep}
+            recordingFlash={recordingFlash}
+            onPlayAll={handlePlayAll}
+            onStopAll={handleStopAll}
+            
+            activeSustainedModes={activeSustainedModes}
+            maxArpWidth={showArpBar ? availableArpWidth : 0}
+            onClearSustain={handleClearSustain}
+            
+            isSequencerOpen={isSequencerOpen}
+            onToggleSequencer={() => setIsSequencerOpen(p => !p)}
+            
+            presets={presets}
+            onPresetChange={setPreset}
+          />
 
-      <LimitLayerControls 
-        settings={settings} 
-        updateSettings={updateSettings} 
-        draggingId={draggingId} 
-        setDraggingId={setDraggingId} 
-        uiScale={effectiveScale}
-        isShortScreen={isShortScreen}
-      />
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} updateSettings={updateSettings} />
-      <SynthControls isOpen={isSynthOpen} onClose={() => setIsSynthOpen(false)} presets={presets} onChange={setPreset} />
-      
-      <RecordingControls />
-    </div>
+          <LimitLayerControls 
+            settings={settings} 
+            updateSettings={updateSettings} 
+            draggingId={draggingId} 
+            setDraggingId={setDraggingId} 
+            uiScale={effectiveScale}
+            isShortScreen={isShortScreen}
+          />
+          <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} updateSettings={updateSettings} />
+          <SynthControls isOpen={isSynthOpen} onClose={() => setIsSynthOpen(false)} presets={presets} onChange={setPreset} />
+          
+          <RecordingControls />
+        </div>
+    </>
   );
 };
 
