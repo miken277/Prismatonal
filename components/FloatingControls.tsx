@@ -37,6 +37,8 @@ interface Props {
   modulationPathLength?: number;
   onModulationUndo?: () => void;
   onModulationReset?: () => void;
+  onShiftToggle?: () => void;
+  isShiftModeActive?: boolean;
   onCenter: () => void;
   onIncreaseDepth: () => void;
   onDecreaseDepth: () => void;
@@ -82,7 +84,7 @@ interface Props {
 const FloatingControls: React.FC<Props> = ({ 
   volume, setVolume, spatialScale, setSpatialScale, brightness, setBrightness, viewZoom, setViewZoom,
   onPanic, onOff, onLatch, onSust, onPluck, onVoice, onKeys, onPercussion, latchMode, onBend, isBendEnabled, onSustainToggle, isSustainEnabled, 
-  onModulationToggle, isModulationModeActive, modulationPathLength, onModulationUndo, onModulationReset,
+  onModulationToggle, isModulationModeActive, modulationPathLength, onModulationUndo, onModulationReset, onShiftToggle, isShiftModeActive,
   onCenter, onIncreaseDepth, onDecreaseDepth, onAddChord, toggleChord, onRemoveChord,
   activeChordIds, savedChords, chordShortcutSizeScale,
   showIncreaseDepthButton, uiUnlocked, uiPositions, updatePosition,
@@ -245,6 +247,7 @@ const FloatingControls: React.FC<Props> = ({
           isSustainEnabled={isSustainEnabled}
           isModulationModeActive={isModulationModeActive}
           modulationPathLength={modulationPathLength}
+          isShiftModeActive={isShiftModeActive}
           uiUnlocked={uiUnlocked}
           uiScale={uiScale}
           positions={uiPositions}
@@ -255,6 +258,7 @@ const FloatingControls: React.FC<Props> = ({
           onModulationToggle={onModulationToggle}
           onModulationUndo={onModulationUndo}
           onModulationReset={onModulationReset}
+          onShiftToggle={onShiftToggle}
           onDragStart={handleDrag}
       />
 

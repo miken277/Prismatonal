@@ -58,6 +58,7 @@ const App: React.FC = () => {
       handlePercussionSelect,
       handleSustainToggle,
       handleBendToggle,
+      handleShiftToggle, // NEW
       handleModulationToggle,
       handleModulationUndo,
       handleModulationReset,
@@ -115,6 +116,10 @@ const App: React.FC = () => {
 
   const handleClearSustain = (mode: number) => {
       diamondRef.current?.clearLatches(mode);
+  };
+  
+  const handleClearActiveChords = () => {
+      setActiveChordIds([]);
   };
 
   const handleCenter = () => diamondRef.current?.centerView();
@@ -259,6 +264,7 @@ const App: React.FC = () => {
         viewZoom={viewZoom}
         onNodeTrigger={handleArpRecordNote}
         onSustainStatusChange={handleSustainStatusChange}
+        onClearActiveChords={handleClearActiveChords}
       />
 
       <FloatingControls 
@@ -281,6 +287,7 @@ const App: React.FC = () => {
         modulationPathLength={settings.modulationPath.length}
         onModulationUndo={handleModulationUndo}
         onModulationReset={handleModulationReset}
+        onShiftToggle={handleShiftToggle} isShiftModeActive={settings.isShiftModeActive}
         onCenter={handleCenter}
         onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
         onAddChord={handleAddChord} toggleChord={toggleChord}

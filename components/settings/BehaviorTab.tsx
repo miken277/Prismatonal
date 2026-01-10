@@ -130,6 +130,7 @@ const BehaviorTab: React.FC<Props> = ({ settings, updateSettings }) => {
                     <span className="text-sm font-semibold">Enable Keyboard Shortcuts</span>
                     <input type="checkbox" checked={settings.enableKeyboardShortcuts} onChange={(e) => handleChange('enableKeyboardShortcuts', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-indigo-500" />
                   </label>
+
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold">Strum Duration</label>
                     <div className="flex items-center gap-3">

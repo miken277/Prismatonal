@@ -69,7 +69,8 @@ export const usePerformanceState = (
         updateSettings(prev => ({ 
             ...prev, 
             isSustainEnabled: nextSustainState,
-            isPitchBendEnabled: nextBendState
+            isPitchBendEnabled: nextBendState,
+            isShiftModeActive: false // Reset Shift on instrument change for safety
         }));
     }, [latchMode, settings.isSustainEnabled, settings.isPitchBendEnabled, sustainStates, bendStates, updateSettings]);
 
@@ -87,6 +88,11 @@ export const usePerformanceState = (
         setBendStates(prev => ({ ...prev, [latchMode]: willEnable }));
         updateSettings(prev => ({ ...prev, isPitchBendEnabled: willEnable }));
     }, [latchMode, settings.isPitchBendEnabled, updateSettings]);
+
+    // NEW: Shift Toggle
+    const handleShiftToggle = useCallback(() => {
+        updateSettings(prev => ({ ...prev, isShiftModeActive: !prev.isShiftModeActive }));
+    }, [updateSettings]);
 
     const handleModulationToggle = useCallback(() => {
         updateSettings(prev => ({ ...prev, isModulationModeActive: !prev.isModulationModeActive }));
@@ -117,6 +123,7 @@ export const usePerformanceState = (
         switchInstrument,
         handleSustainToggle,
         handleBendToggle,
+        handleShiftToggle, // Exported
         handleModulationToggle,
         handleModulationUndo,
         handleModulationReset,

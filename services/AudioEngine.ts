@@ -47,6 +47,13 @@ interface GlideMessage extends WorkletMessageBase {
     freq: number;
 }
 
+interface TransferMessage extends WorkletMessageBase {
+    type: 'transfer';
+    id: string;
+    newId: string;
+    freq: number;
+}
+
 interface StopAllMessage extends WorkletMessageBase {
     type: 'stop_all';
 }
@@ -56,7 +63,7 @@ interface StopGroupMessage extends WorkletMessageBase {
     prefix: string;
 }
 
-type AudioWorkletMessage = UpdatePresetMessage | ConfigMessage | NoteOnMessage | NoteOffMessage | GlideMessage | StopAllMessage | StopGroupMessage;
+type AudioWorkletMessage = UpdatePresetMessage | ConfigMessage | NoteOnMessage | NoteOffMessage | GlideMessage | StopAllMessage | StopGroupMessage | TransferMessage;
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
@@ -144,14 +151,7 @@ class AudioEngine {
 
   // Unified Message Dispatcher
   private postMessage(msg: AudioWorkletMessage) {
-      // 1. If VST Mode, send to HostAdapter via MidiService (or direct bridge)
-      // We access the raw adapter via a cheat or update MidiService to expose generic commands
       if (this.isRemoteEngine) {
-          // In VST mode, we don't use AudioWorklet. We assume the Host listens to 'command' messages.
-          // For now, we piggyback on the assumption that if isRemoteEngine is true, 
-          // we should fire these into the void or a specific bridge function if it existed.
-          // Since we can't easily import `midiService` circular dependency here, we rely on window globals or just skip.
-          // In a real implementation, `midiService` would expose `sendCommand`.
           return; 
       }
 
@@ -580,6 +580,16 @@ class AudioEngine {
         type: 'glide', 
         id: id, 
         freq: freq 
+    });
+  }
+
+  public transferVoice(oldId: string, newId: string, ratio: number, baseFrequency: number) {
+    const freq = baseFrequency * ratio;
+    this.postMessage({
+        type: 'transfer',
+        id: oldId,
+        newId: newId,
+        freq: freq
     });
   }
 

@@ -64,16 +64,16 @@ export class Fraction {
   }
 }
 
-const GENERATORS = [3, 5, 7, 9, 11, 13, 15];
-const GENERATOR_RATIOS: Record<number, Fraction> = {
+const PRIMES = [3, 5, 7, 11, 13];
+const PRIME_RATIOS = {
   3: new Fraction(3, 2),
   5: new Fraction(5, 4),
   7: new Fraction(7, 4),
-  9: new Fraction(9, 8),
   11: new Fraction(11, 8),
   13: new Fraction(13, 8),
-  15: new Fraction(15, 8),
 };
+
+const ODD_IDENTITIES = [1, 3, 5, 7, 11, 13];
 
 // --- Reconstruction ---
 
@@ -90,9 +90,10 @@ export const reconstructNode = (id: string, settings: AppSettings): LatticeNode 
         if (coords.some(isNaN) || isNaN(octave)) return null;
 
         let frac = new Fraction(1, 1);
-        GENERATORS.forEach((gen, idx) => {
+        PRIMES.forEach((gen, idx) => {
             const val = coords[idx] || 0;
-            const gRat = GENERATOR_RATIOS[gen];
+            // @ts-ignore
+            const gRat = PRIME_RATIOS[gen];
             for(let i=0; i<Math.abs(val); i++) {
                 frac = val > 0 ? frac.mul(gRat).normalize() : frac.mul(new Fraction(gRat.d, gRat.n)).normalize();
             }
@@ -125,7 +126,7 @@ export const reconstructNode = (id: string, settings: AppSettings): LatticeNode 
 
 export const generateLattice = (
     settings: AppSettings, 
-    generationOrigins: GenerationOrigin[] = [{coords: [0,0,0,0,0,0,0], octave: 0}]
+    generationOrigins: GenerationOrigin[] = [{coords: [0,0,0,0,0], octave: 0}]
 ): { nodes: LatticeNode[], lines: LatticeLine[] } => {
   
   if (settings.layoutApproach === 'diamond') {
@@ -133,37 +134,26 @@ export const generateLattice = (
   }
 
   const nodesMap = new Map<string, LatticeNode>();
-  const lines: LatticeLine[] = [];
   const OCTAVE_RANGE = 2; 
-  const maxDist = settings.latticeMaxDistance !== undefined ? settings.latticeMaxDistance : 12;
+  const globalMaxDistance = settings.latticeMaxDistance ?? 12;
 
-  // The latest origin in the path is the "Active" one
-  const activeOriginIndex = generationOrigins.length - 1;
-
-  generationOrigins.forEach((origin, oIdx) => {
-      const isGhost = oIdx !== activeOriginIndex;
+  generationOrigins.forEach(origin => {
       const localQueue: { coords: number[], ratio: Fraction }[] = [];
       
-      // Calculate absolute start ratio for origin coords relative to global 1/1
+      // Calculate start ratio for origin coords
       let originFrac = new Fraction(1, 1);
-      GENERATORS.forEach((gen, idx) => {
-          const val = origin.coords[idx] || 0;
-          const gRat = GENERATOR_RATIOS[gen];
+      PRIMES.forEach((p, idx) => {
+          const val = origin.coords[idx];
+          const pRat = PRIME_RATIOS[p as 3|5|7|11|13];
           for(let i=0; i<Math.abs(val); i++) {
-              originFrac = val > 0 ? originFrac.mul(gRat).normalize() : originFrac.mul(new Fraction(gRat.d, gRat.n)).normalize();
+              originFrac = val > 0 ? originFrac.mul(pRat).normalize() : originFrac.mul(new Fraction(pRat.d, pRat.n)).normalize();
           }
       });
-      // Adjust for base octave of the origin
-      originFrac = originFrac.shiftOctave(origin.octave);
 
-      const fullCoords = [...origin.coords];
-      while(fullCoords.length < GENERATORS.length) fullCoords.push(0);
-
-      localQueue.push({ coords: fullCoords, ratio: originFrac });
-      const visitedLocal = new Set<string>([fullCoords.join(',')]);
+      localQueue.push({ coords: origin.coords, ratio: originFrac });
+      const visitedLocal = new Set<string>([origin.coords.join(',')]);
       
-      // Reduce complexity limits for ghost lattices to save performance and visual clutter
-      const MAX_LOCAL_NODES = isGhost ? 100 : 1200; 
+      const MAX_LOCAL_NODES = 800;
       let processed = 0;
 
       while (localQueue.length > 0 && processed < MAX_LOCAL_NODES) {
@@ -171,10 +161,10 @@ export const generateLattice = (
           processed++;
 
           for (let oct = origin.octave - OCTAVE_RANGE; oct <= origin.octave + OCTAVE_RANGE; oct++) {
-              const shifted = current.ratio.shiftOctave(oct - origin.octave);
+              const shifted = current.ratio.shiftOctave(oct);
               const id = `${current.coords.join(',')}:${oct}`;
               
-              if (!nodesMap.has(id) || !isGhost) {
+              if (!nodesMap.has(id)) {
                   const absoluteRatio = shifted.n / shifted.d;
                   const { x, y } = projectCoordinates(current.coords, absoluteRatio, settings.latticeAspectRatio, settings.layoutApproach);
 
@@ -189,46 +179,36 @@ export const generateLattice = (
                       limitTop: getMaxPrime(shifted.n),
                       limitBottom: getMaxPrime(shifted.d),
                       maxPrime: Math.max(getMaxPrime(shifted.n), getMaxPrime(shifted.d)),
-                      octave: oct,
-                      isGhost: isGhost,
-                      originIndex: oIdx
+                      octave: oct
                   });
               }
           }
 
-          GENERATORS.forEach((gen, idx) => {
-              // @ts-ignore
-              let depthLimit = settings.limitDepths[gen];
+          PRIMES.forEach((prime, idx) => {
+              const depthLimit = settings.limitDepths[prime as 3|5|7|11|13];
               if (depthLimit <= 0) return;
-              
-              // Reduce spread of ghost lattices
-              if (isGhost) depthLimit = Math.min(depthLimit, 1);
 
               [1, -1].forEach(dir => {
                   const nextCoords = [...current.coords];
                   nextCoords[idx] += dir;
                   
-                  const originVal = origin.coords[idx] || 0;
-                  // 1. Per-Axis Depth Check
-                  if (Math.abs(nextCoords[idx] - originVal) > depthLimit) return;
-                  
-                  // 2. Global Distance Check
-                  let dist = 0;
-                  nextCoords.forEach((v, i) => dist += Math.abs(v - (origin.coords[i] || 0)));
-                  if (dist > maxDist) return;
+                  // 1. Check Per-Axis Depth Limit
+                  if (Math.abs(nextCoords[idx] - origin.coords[idx]) > depthLimit) return;
 
+                  // 2. Check Global Manhattan Distance (Max Tonal Distance)
+                  let totalDist = 0;
+                  for (let k = 0; k < nextCoords.length; k++) {
+                      totalDist += Math.abs(nextCoords[k] - origin.coords[k]);
+                  }
+                  if (totalDist > globalMaxDistance) return;
+                  
                   const key = nextCoords.join(',');
                   if (!visitedLocal.has(key)) {
-                      const gRat = GENERATOR_RATIOS[gen];
-                      const nextFrac = dir === 1 ? current.ratio.mul(gRat).normalize() : current.ratio.mul(new Fraction(gRat.d, gRat.n)).normalize();
+                      const pRat = PRIME_RATIOS[prime as 3|5|7|11|13];
+                      const nextFrac = dir === 1 ? current.ratio.mul(pRat).normalize() : current.ratio.mul(new Fraction(pRat.d, pRat.n)).normalize();
                       
-                      // 3. Complexity Check (optional but recommended)
-                      // @ts-ignore
-                      const compLimit = (settings.limitComplexities && settings.limitComplexities[gen]) ? settings.limitComplexities[gen] : 1000;
-                      if (nextFrac.n <= compLimit && nextFrac.d <= compLimit) {
-                          visitedLocal.add(key);
-                          localQueue.push({ coords: nextCoords, ratio: nextFrac });
-                      }
+                      visitedLocal.add(key);
+                      localQueue.push({ coords: nextCoords, ratio: nextFrac });
                   }
               });
           });
@@ -236,25 +216,10 @@ export const generateLattice = (
   });
 
   const nodes = Array.from(nodesMap.values());
+  const lines: LatticeLine[] = [];
   
   nodes.forEach(node => {
-      // 1. Generate Octave Lines (Vertical/Limit 2)
-      const octaveTargetId = `${node.coords.join(',')}:${node.octave + 1}`;
-      const octaveTarget = nodesMap.get(octaveTargetId);
-      if (octaveTarget) {
-          const lineGhost = node.isGhost || octaveTarget.isGhost;
-          
-          lines.push({
-              id: `${node.id}-${octaveTarget.id}`,
-              x1: node.x, y1: node.y, x2: octaveTarget.x, y2: octaveTarget.y,
-              limit: 2, 
-              sourceId: node.id, targetId: octaveTarget.id,
-              isGhost: lineGhost
-          });
-      }
-
-      // 2. Generate Prime Generator Lines
-      GENERATORS.forEach((gen, idx) => {
+      PRIMES.forEach((prime, idx) => {
           const targetCoords = [...node.coords];
           targetCoords[idx] += 1;
           const coordKey = targetCoords.join(',');
@@ -263,19 +228,12 @@ export const generateLattice = (
               const target = nodesMap.get(`${coordKey}:${o}`);
               if (target) {
                   const ratio = target.ratio / node.ratio;
-                  const genRat = GENERATOR_RATIOS[gen];
-                  const targetVal = genRat.n / genRat.d;
-                  const normalizedRatio = ratio >= 1 ? ratio : 1/ratio; 
-                  const test = Math.log2(normalizedRatio / targetVal);
-                  
-                  if (Math.abs(test - Math.round(test)) < 0.001) {
-                      const lineGhost = node.isGhost || target.isGhost;
+                  const test = ratio / (PRIME_RATIOS[prime as 3|5|7|11|13].n / PRIME_RATIOS[prime as 3|5|7|11|13].d);
+                  if (Math.abs(Math.log2(test) - Math.round(Math.log2(test))) < 0.001) {
                       lines.push({
                           id: `${node.id}-${target.id}`,
                           x1: node.x, y1: node.y, x2: target.x, y2: target.y,
-                          limit: gen, 
-                          sourceId: node.id, targetId: target.id,
-                          isGhost: lineGhost
+                          limit: prime, sourceId: node.id, targetId: target.id
                       });
                   }
               }
@@ -287,18 +245,23 @@ export const generateLattice = (
 };
 
 /**
- * Generates a Harry Partch-style Tonality Diamond based on enabled Identities
+ * Generates a Harry Partch-style Tonality Diamond
  */
 const generatePartchDiamond = (settings: AppSettings): { nodes: LatticeNode[], lines: LatticeLine[] } => {
     const nodes: LatticeNode[] = [];
     const lines: LatticeLine[] = [];
     
-    const activeIdentities = (settings.enabledIdentities || [1, 3, 5, 7, 9, 11, 13, 15]).filter(id => !settings.hiddenLimits.includes(id));
-    activeIdentities.sort((a, b) => a - b);
-    if (!activeIdentities.includes(1)) activeIdentities.unshift(1);
+    // Find highest enabled odd limit
+    let maxEnabledLimit = 1;
+    settings.layerOrder.forEach(l => {
+        if (!settings.hiddenLimits.includes(l) && ODD_IDENTITIES.includes(l)) {
+            if (l > maxEnabledLimit) maxEnabledLimit = l;
+        }
+    });
 
+    const activeIdentities = ODD_IDENTITIES.filter(id => id <= maxEnabledLimit);
     const N = activeIdentities.length;
-    const diamondSpacing = 100; 
+    const centerOffset = (N - 1) / 2;
 
     for (let o = 0; o < N; o++) {
         for (let u = 0; u < N; u++) {
@@ -308,19 +271,24 @@ const generatePartchDiamond = (settings: AppSettings): { nodes: LatticeNode[], l
             const frac = new Fraction(idOton, idUton).normalize();
             const ratio = frac.n / frac.d;
             
-            const id = `diamond-${idOton}-${idUton}`;
-            const x = ((o + u) - (N - 1)) * diamondSpacing;
-            const y = (u - o) * diamondSpacing;
+            // Layout indices rotated 45 degrees
+            // 1/1 at (0,0)
+            // o increases: moves top-right
+            // u increases: moves bottom-right
+            const x = (o + u) - (N - 1);
+            const y = (o - u);
 
+            const id = `diamond-${o}-${u}`;
+            
             nodes.push({
                 id,
-                coords: [o, u, 0, 0, 0, 0, 0], 
+                coords: [o, u, 0, 0, 0], // Not standard prime coords, but used for grid
                 ratio,
                 n: frac.n,
                 d: frac.d,
                 label: `${frac.n}/${frac.d}`,
-                x: x,
-                y: y,
+                x: x * 1.0,
+                y: y * 0.8, // Slightly squashed vertically
                 limitTop: getMaxPrime(frac.n),
                 limitBottom: getMaxPrime(frac.d),
                 maxPrime: Math.max(getMaxPrime(frac.n), getMaxPrime(frac.d)),
@@ -329,9 +297,10 @@ const generatePartchDiamond = (settings: AppSettings): { nodes: LatticeNode[], l
         }
     }
 
-    nodes.forEach((node) => {
+    // Connect neighbors in the diamond grid
+    nodes.forEach((node, i) => {
         const [o, u] = node.coords;
-        nodes.forEach((target) => {
+        nodes.forEach((target, j) => {
             const [to, tu] = target.coords;
             const distO = Math.abs(o - to);
             const distU = Math.abs(u - tu);

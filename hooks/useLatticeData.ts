@@ -47,12 +47,22 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
             tuning: settings.tuningSystem,
             layout: settings.layoutApproach,
             depths: settings.limitDepths,
+            maxDist: settings.latticeMaxDistance, // Ensure distance change triggers regeneration
             hidden: settings.hiddenLimits,
             ratio: settings.latticeAspectRatio,
             skin: settings.activeSkin,
             path: settings.modulationPath
         });
-    }, [settings.tuningSystem, settings.layoutApproach, settings.limitDepths, settings.hiddenLimits, settings.latticeAspectRatio, settings.activeSkin, settings.modulationPath]);
+    }, [
+        settings.tuningSystem, 
+        settings.layoutApproach, 
+        settings.limitDepths, 
+        settings.latticeMaxDistance, // Added dependency
+        settings.hiddenLimits, 
+        settings.latticeAspectRatio, 
+        settings.activeSkin, 
+        settings.modulationPath
+    ]);
 
     useEffect(() => {
         setIsGenerating(true);

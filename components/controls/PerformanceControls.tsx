@@ -8,6 +8,7 @@ interface Props {
     isSustainEnabled?: boolean;
     isModulationModeActive?: boolean;
     modulationPathLength?: number;
+    isShiftModeActive?: boolean; // NEW
     uiUnlocked: boolean;
     uiScale: number;
     positions: AppSettings['uiPositions'];
@@ -19,12 +20,15 @@ interface Props {
     onModulationToggle?: () => void;
     onModulationUndo?: () => void;
     onModulationReset?: () => void;
+    onShiftToggle?: () => void; // NEW
     onDragStart: (e: React.PointerEvent, key: keyof AppSettings['uiPositions']) => void;
 }
 
 const PerformanceControls: React.FC<Props> = ({
-    isBendEnabled, latchMode, isSustainEnabled, isModulationModeActive, modulationPathLength = 0, uiUnlocked, uiScale, positions,
-    onBend, onSustainToggle, onOff, onPanic, onModulationToggle, onModulationUndo, onModulationReset, onDragStart
+    isBendEnabled, latchMode, isSustainEnabled, isModulationModeActive, modulationPathLength = 0, isShiftModeActive,
+    uiUnlocked, uiScale, positions,
+    onBend, onSustainToggle, onOff, onPanic, onModulationToggle, onModulationUndo, onModulationReset, onShiftToggle,
+    onDragStart
 }) => {
     
     const perfBtnSize = 92 * uiScale;
@@ -62,9 +66,6 @@ const PerformanceControls: React.FC<Props> = ({
     const modX = positions.mod.x;
     const modY = positions.mod.y;
     
-    // Offsets for satellites (relative to main button center)
-    // Left Satellite (Undo): Top Left (-X, -Y)
-    // Right Satellite (Reset): Top Right (+X, -Y)
     const offsetDistance = perfBtnSize * 0.6;
     const undoX = modX + (perfBtnSize/2) - (satelliteSize/2) - offsetDistance;
     const undoY = modY + (perfBtnSize/2) - (satelliteSize/2) - offsetDistance * 0.8;
@@ -74,6 +75,17 @@ const PerformanceControls: React.FC<Props> = ({
 
     return (
         <>
+            {/* Shift Button (New) */}
+            <button 
+                className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isShiftModeActive ? 'bg-orange-600 text-white border-orange-300 shadow-[0_0_15px_rgba(249,115,22,0.6)]' : 'bg-orange-900/40 text-orange-400 border-orange-500/50 hover:bg-orange-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} 
+                style={draggableStyle('shift')} 
+                onPointerDown={(e) => handlePress(e, 'shift', onShiftToggle)}
+                aria-label="Toggle Chord Shift"
+                title="Shift Mode: Drag any latched note to transpose entire chord"
+            >
+                SHIFT
+            </button>
+
             <button 
                 className={`absolute rounded-full flex items-center justify-center font-bold uppercase tracking-wider backdrop-blur transition-all z-[150] select-none border-2 shadow-lg ${isBendEnabled ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.6)]' : 'bg-purple-900/40 text-purple-400 border-purple-500/50 hover:bg-purple-800/60'} ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`} 
                 style={draggableStyle('bend')} 
@@ -111,18 +123,12 @@ const PerformanceControls: React.FC<Props> = ({
                 PANIC
             </button>
 
-            {/* Modulation Satellites (Rendered under main button visually if needed, but z-index handles it) */}
+            {/* Modulation Satellites */}
             {showSatellites && !uiUnlocked && (
                 <>
-                    {/* Undo / Back Button */}
                     <button
                         className="absolute rounded-full flex items-center justify-center bg-cyan-900/80 border border-cyan-400 text-cyan-200 hover:bg-cyan-700 hover:text-white hover:scale-110 hover:shadow-[0_0_10px_cyan] transition-all z-[160] animate-in fade-in zoom-in duration-300"
-                        style={{
-                            left: undoX,
-                            top: undoY,
-                            width: satelliteSize,
-                            height: satelliteSize,
-                        }}
+                        style={{ left: undoX, top: undoY, width: satelliteSize, height: satelliteSize }}
                         onPointerDown={(e) => { e.stopPropagation(); if (onModulationUndo) onModulationUndo(); }}
                         title="Undo Last Pivot"
                     >
@@ -131,15 +137,9 @@ const PerformanceControls: React.FC<Props> = ({
                         </svg>
                     </button>
 
-                    {/* Reset / Close Button */}
                     <button
                         className="absolute rounded-full flex items-center justify-center bg-red-900/80 border border-red-400 text-red-200 hover:bg-red-700 hover:text-white hover:scale-110 hover:shadow-[0_0_10px_red] transition-all z-[160] animate-in fade-in zoom-in duration-300"
-                        style={{
-                            left: resetX,
-                            top: resetY,
-                            width: satelliteSize,
-                            height: satelliteSize,
-                        }}
+                        style={{ left: resetX, top: resetY, width: satelliteSize, height: satelliteSize }}
                         onPointerDown={(e) => { e.stopPropagation(); if (onModulationReset) onModulationReset(); }}
                         title="Clear Modulation (Reset to Root)"
                     >

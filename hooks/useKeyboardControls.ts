@@ -21,9 +21,10 @@ interface Props {
     handlePluckedSelect: () => void;
     handleVoiceSelect: () => void;
     handleKeysSelect?: () => void;
-    handlePercussionSelect?: () => void; // New handler
+    handlePercussionSelect?: () => void; 
     handleSustainToggle: () => void;
     handleBendToggle: () => void;
+    handleShiftToggle?: () => void; // NEW
     handlePanic: () => void;
     handleCenter: () => void;
     handleOff: () => void;
@@ -39,7 +40,7 @@ export const useKeyboardControls = ({
     settings, latchMode, isSettingsOpen, setIsSettingsOpen, isSynthOpen, setIsSynthOpen,
     setMasterVolume, setSpatialScale, setIsSequencerOpen,
     handleDroneSelect, handleStringSelect, handlePluckedSelect, handleVoiceSelect, handleKeysSelect, handlePercussionSelect,
-    handleSustainToggle, handleBendToggle, handlePanic, handleCenter, handleOff,
+    handleSustainToggle, handleBendToggle, handleShiftToggle, handlePanic, handleCenter, handleOff,
     handleAddChord, handleIncreaseDepth, handleDecreaseDepth, handleArpBpmChange,
     handlePlayAll, handleStopAll
 }: Props) => {
@@ -73,6 +74,7 @@ export const useKeyboardControls = ({
             else if (key === (map.modePercussion || '6').toLowerCase() && handlePercussionSelect) handlePercussionSelect();
             else if (key === map.sustain.toLowerCase()) handleSustainToggle();
             else if (key === map.bend.toLowerCase()) handleBendToggle();
+            else if (key === (map.shift || 'shift').toLowerCase() && handleShiftToggle) handleShiftToggle(); // NEW
             else if (key === map.panic.toLowerCase()) handlePanic();
             else if (key === map.center.toLowerCase()) handleCenter();
             else if (key === map.settings.toLowerCase()) { setIsSettingsOpen(prev => !prev); if(isSynthOpen) setIsSettingsOpen(false); }
@@ -102,7 +104,7 @@ export const useKeyboardControls = ({
         isSettingsOpen, 
         isSynthOpen,
         handleDroneSelect, handleStringSelect, handlePluckedSelect, handleVoiceSelect, handleKeysSelect, handlePercussionSelect,
-        handleSustainToggle, handleBendToggle, handlePanic, handleCenter, handleOff,
+        handleSustainToggle, handleBendToggle, handleShiftToggle, handlePanic, handleCenter, handleOff,
         handleAddChord, handleIncreaseDepth, handleDecreaseDepth, handleArpBpmChange,
         handlePlayAll, handleStopAll, setIsSettingsOpen, setIsSynthOpen, setMasterVolume, setSpatialScale, setIsSequencerOpen
     ]);

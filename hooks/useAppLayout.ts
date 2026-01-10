@@ -118,7 +118,11 @@ const calculateLayout = (w: number, h: number, scale: number, settings: AppSetti
     rightX -= (perfBtn + internalBlockGap); 
     newPos.bend = { x: rightX, y: perfY };
     
-    // Add Modulation Button logic
+    // Add Shift Button logic (Inserted here to be to the left of Bend)
+    rightX -= (perfBtn + internalBlockGap);
+    newPos.shift = { x: rightX, y: perfY };
+    
+    // Add Modulation Button logic (Moves further left)
     rightX -= (perfBtn + internalBlockGap);
     newPos.mod = { x: rightX, y: perfY };
     

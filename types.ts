@@ -125,7 +125,8 @@ export interface KeyMappings {
     latch: string; 
     sustain: string; 
     bend: string; 
-    modulate: string; // NEW: Toggle Modulation mode
+    shift: string; // NEW: Shift Chord
+    modulate: string; // Toggle Modulation mode
     modeDrone: string; 
     modeStrings: string; 
     modePlucked: string; 
@@ -241,6 +242,8 @@ export interface AppSettings {
   showFractionBar: boolean;
 
   isPitchBendEnabled: boolean;
+  isShiftModeActive: boolean; // NEW: Shift Chord Mode
+  shiftAutoExpandsDepth: boolean; // NEW: Automatically increase depth when shifting
   isSustainEnabled: boolean; 
   isStrumEnabled: boolean; 
   chordsAlwaysRelatch: boolean; 
@@ -307,6 +310,7 @@ export interface AppSettings {
     latch: XYPos; 
     sust: XYPos;
     bend: XYPos;
+    shift: XYPos; // NEW: Shift Button
     center: XYPos;
     depth: XYPos;
     decreaseDepth: XYPos;
@@ -315,7 +319,7 @@ export interface AppSettings {
     arpeggioBar: XYPos;
     instruments: XYPos; 
     complexity: XYPos; 
-    mod: XYPos; // NEW: Modulation button position
+    mod: XYPos; 
   };
   uiSizes: {
     volume: UISize;

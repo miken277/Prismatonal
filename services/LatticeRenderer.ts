@@ -31,7 +31,8 @@ export interface RenderState {
     view: ViewPort;
     time: number;
     latchMode: number;
-    phantomNodes?: Map<string, LatticeNode>; // Added
+    phantomNodes?: Map<string, LatticeNode>; 
+    shiftGhostNodes?: Map<string, LatticeNode>; // Changed from internal Set logic to explicit Map of Nodes
 }
 
 const MODE_PRIORITY: Record<string | number, number> = {
@@ -202,7 +203,7 @@ export class LatticeRenderer {
 
     private renderDynamic(bgCanvas: HTMLCanvasElement, activeCanvas: HTMLCanvasElement, state: RenderState) {
         const { 
-            data, settings, visualLatchedNodes, activeLines, brightenedLines, phantomNodes,
+            data, settings, visualLatchedNodes, activeLines, brightenedLines, phantomNodes, shiftGhostNodes,
             effectiveScale, centerOffset, view, time 
         } = state;
 
@@ -241,7 +242,7 @@ export class LatticeRenderer {
 
         bgCtx.lineCap = 'round'; activeCtx.lineCap = 'round';
 
-        // --- DRAW MODULATION PATH (ON BG CANVAS) ---
+        // --- DRAW MODULATION PATH ---
         if (settings.modulationPath.length > 1) {
             bgCtx.beginPath();
             let started = false;
@@ -286,7 +287,32 @@ export class LatticeRenderer {
             }
         }
 
-        // 1. Draw Brightened Lines (Neighbor Hints) - MOVED TO ACTIVE CANVAS
+        // --- RENDER GHOSTS (SHIFT MODE) ---
+        if (shiftGhostNodes && shiftGhostNodes.size > 0) {
+            shiftGhostNodes.forEach((ghostNode) => {
+                const gx = ghostNode.x * spacing + centerOffset;
+                const gy = ghostNode.y * spacing + centerOffset;
+                if (gx < cullLeft || gx > cullRight || gy < cullTop || gy > cullBottom) return;
+
+                const gRadius = Math.max(0, baseRadius * settings.latchedZoomScale);
+                activeCtx.beginPath();
+                if (isDiamond) {
+                    activeCtx.moveTo(gx, gy - gRadius); activeCtx.lineTo(gx + gRadius, gy); activeCtx.lineTo(gx, gy + gRadius); activeCtx.lineTo(gx - gRadius, gy);
+                } else {
+                    activeCtx.arc(gx, gy, gRadius, 0, Math.PI * 2);
+                }
+                activeCtx.closePath();
+                activeCtx.fillStyle = 'rgba(6, 182, 212, 0.2)'; // Cyan tint
+                activeCtx.fill();
+                activeCtx.strokeStyle = '#22d3ee';
+                activeCtx.lineWidth = 2 * effectiveScale;
+                activeCtx.setLineDash([4 * effectiveScale, 4 * effectiveScale]);
+                activeCtx.stroke();
+                activeCtx.setLineDash([]);
+            });
+        }
+
+        // 1. Draw Brightened Lines (Neighbor Hints)
         if (brightenedLines.length > 0) {
             for (const line of brightenedLines) {
                 const x1 = line.x1 * spacing + centerOffset; const y1 = line.y1 * spacing + centerOffset;
@@ -300,7 +326,7 @@ export class LatticeRenderer {
             }
         }
 
-        // 2. Draw Active Lines (Strong connection) - MOVED TO ACTIVE CANVAS
+        // 2. Draw Active Lines (Strong connection)
         for (const line of activeLines) {
             const x1 = line.x1 * spacing + centerOffset; const y1 = line.y1 * spacing + centerOffset;
             const x2 = line.x2 * spacing + centerOffset; const y2 = line.y2 * spacing + centerOffset;

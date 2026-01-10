@@ -1,5 +1,6 @@
 
 
+
 const DSP_CONSTANTS = `
 // --- 1. DSP UTILS & CONSTANTS ---
 const TWO_PI = 2 * Math.PI;
@@ -492,6 +493,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
       else if (msg.type === 'note_on') { this.triggerVoice(msg.id, msg.freq, msg.voiceType, msg.mode); }
       else if (msg.type === 'note_off') { this.releaseVoice(msg.id); }
       else if (msg.type === 'glide') { this.glideVoice(msg.id, msg.freq); }
+      else if (msg.type === 'transfer') { this.transferVoice(msg.id, msg.newId, msg.freq); }
       else if (msg.type === 'stop_all') { this.voices.forEach(v => v.hardStop()); this.eventQueue = []; }
       else if (msg.type === 'stop_group') { const prefix = msg.prefix; if (prefix) { this.eventQueue = this.eventQueue.filter(e => { if ((e.type === 'note_on' || e.type === 'note_off' || e.type === 'glide') && e.id && typeof e.id === 'string' && e.id.startsWith(prefix)) { return false; } return true; }); this.voices.forEach(v => { if (v.active && v.id.startsWith(prefix)) { v.release(); } }); } }
   }
@@ -526,6 +528,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
 
   releaseVoice(id) { for (let i = 0; i < this.voices.length; i++) { if (this.voices[i].active && this.voices[i].id === id) { this.voices[i].release(); } } }
   glideVoice(id, freq) { for (let i = 0; i < this.voices.length; i++) { if (this.voices[i].active && this.voices[i].id === id) { this.voices[i].targetFreq = freq; } } }
+  transferVoice(oldId, newId, freq) { for (let i = 0; i < this.voices.length; i++) { if (this.voices[i].active && this.voices[i].id === oldId) { this.voices[i].id = newId; this.voices[i].targetFreq = freq; return; } } }
 
   process(inputs, outputs, parameters) {
     while (this.eventQueue.length > 0 && this.eventQueue[0].time <= currentTime) { this.handleMessage(this.eventQueue.shift()); }

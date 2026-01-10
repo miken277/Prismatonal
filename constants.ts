@@ -54,14 +54,15 @@ export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
     latch: 'l', 
     sustain: ' ', 
     bend: 'b',
-    modulate: 'm', // Key for Mod mode
+    shift: 'shift', // Shift Key
+    modulate: 'm', 
     modeDrone: '1',
     modeStrings: '2',
     modePlucked: '3',
     modeBrass: '4', 
     modeKeys: '5', 
     modePercussion: '6', 
-    synth: 'p', // Changed from m
+    synth: 'p', 
 
     // Chords
     addChord: 'enter',
@@ -140,7 +141,8 @@ const getDefaults = () => {
         latch: { x: w - 80 - margin, y: h - 280 },
         sust: { x: w - 80 - margin, y: h - 330 },
         bend: { x: w - 80 - margin, y: h - 380 },
-        mod: { x: w - 80 - margin, y: h - 430 }, // Modulation button
+        shift: { x: w - 80 - margin, y: h - 430 }, // NEW Shift Button
+        mod: { x: w - 80 - margin, y: h - 480 }, // Moved up
         center: { x: margin, y: h - 48 - margin },
         depth: { x: margin + 60, y: h - 48 - margin },
         decreaseDepth: { x: margin + 120, y: h - 48 - margin },
@@ -230,6 +232,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   nodeTextSizeScale: 1.0,
   showFractionBar: false,
   isPitchBendEnabled: false, 
+  isShiftModeActive: false, 
+  shiftAutoExpandsDepth: true, // NEW
   isSustainEnabled: false, 
   isStrumEnabled: false, 
   chordsAlwaysRelatch: false, 
@@ -295,6 +299,15 @@ const MALLETS_HEADER: SynthPreset = {
     isHeader: true
 };
 
+// Export Default Presets for Store/Engine
+export const DEFAULT_NORMAL_PRESET = preservedAnalogStrings;
+export const DEFAULT_LATCH_PRESET = preservedDeepOcean;
+export const DEFAULT_STRUM_PRESET = PLUCKED_PATCHES[0];
+export const DEFAULT_BRASS_PRESET = BRASS_PATCHES[0];
+export const DEFAULT_KEYS_PRESET = ETHEREAL_KEYS[0];
+export const DEFAULT_PERCUSSION_PRESET = PERCUSSION_PATCHES[0];
+export const DEFAULT_PRESET = DEFAULT_NORMAL_PRESET;
+
 // Combine all presets into one flat list for the UI
 export const PRESETS: SynthPreset[] = [
     preservedNoiseWash, // Default
@@ -308,16 +321,8 @@ export const PRESETS: SynthPreset[] = [
     ...ETHEREAL_LEADS,
     ...ETHEREAL_BASS,
     ...ETHEREAL_KEYS,
-    ...BRASS_PATCHES,
-    ...PERCUSSION_PATCHES, // Drums first
     MALLETS_HEADER,
-    ...ETHEREAL_MALLETS.map(p => ({ ...p, category: 'Percussion' })) // Merge Mallets into Percussion category
+    ...ETHEREAL_MALLETS,
+    ...BRASS_PATCHES,
+    ...PERCUSSION_PATCHES
 ];
-
-export const DEFAULT_NORMAL_PRESET = preservedAnalogStrings; 
-export const DEFAULT_STRUM_PRESET = PLUCKED_PATCHES[0]; 
-export const DEFAULT_LATCH_PRESET = preservedNoiseWash;
-export const DEFAULT_BRASS_PRESET = BRASS_PATCHES[0]; 
-export const DEFAULT_KEYS_PRESET = ETHEREAL_KEYS[0]; 
-export const DEFAULT_PERCUSSION_PRESET = ETHEREAL_MALLETS[0]; 
-export const DEFAULT_PRESET = preservedAnalogStrings;
