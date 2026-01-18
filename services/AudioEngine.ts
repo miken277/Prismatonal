@@ -11,7 +11,6 @@ interface WorkletMessageBase {
     time?: number; 
 }
 
-// ... (Keep existing interfaces UpdatePresetMessage etc.) ...
 interface UpdatePresetMessage extends WorkletMessageBase {
     type: 'update_preset';
     mode: string;
@@ -248,7 +247,10 @@ class AudioEngine {
         if (!this.ctx) {
             const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
             const settings = store.getSnapshot().settings;
-            const latencyHint = settings.audioLatencyHint || 'playback';
+            const rawLatencyHint = settings.audioLatencyHint || 'playback';
+            
+            // Map 'very-high' to numeric value (seconds)
+            const latencyHint = rawLatencyHint === 'very-high' ? 0.2 : rawLatencyHint;
             
             this.ctx = new AudioContextClass({ latencyHint });
 

@@ -63,8 +63,8 @@ export interface ChordDefinition {
   nodes: ChordNode[];
   visible: boolean; // Is shortcut on screen?
   position: { x: number; y: number }; // Relative position or legacy absolute
-  soundConfig?: SynthPreset; // Legacy single patch
   soundConfigs?: Partial<Record<PlayMode, SynthPreset>>; // New multi-patch storage
+  soundConfig?: SynthPreset; // Legacy single patch
 }
 
 export interface ArpeggioStep {
@@ -201,7 +201,7 @@ export interface AppSettings {
   
   // Audio Settings
   baseFrequency: number; 
-  audioLatencyHint: 'interactive' | 'balanced' | 'playback'; 
+  audioLatencyHint: 'interactive' | 'balanced' | 'playback' | 'very-high'; 
   enableOversampling: boolean; 
   wavetableSize: 2048 | 8192 | 65536; 
   interpolationType: 'linear' | 'cubic'; 

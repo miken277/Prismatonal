@@ -97,14 +97,14 @@ const BehaviorTab: React.FC<Props> = ({ settings, updateSettings }) => {
 
                 <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">
                     <label className="block text-sm font-semibold text-slate-300">Audio Latency Mode</label>
-                    <div className="flex gap-2">
-                        {['interactive', 'balanced', 'playback'].map(mode => (
-                            <button key={mode} onClick={() => handleChange('audioLatencyHint', mode)} className={`flex-1 py-2 text-xs font-bold rounded border capitalize ${settings.audioLatencyHint === mode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>
-                                {mode === 'interactive' ? 'Low (Fast)' : mode === 'playback' ? 'High (Stable)' : mode}
+                    <div className="flex flex-wrap gap-2">
+                        {['interactive', 'balanced', 'playback', 'very-high'].map(mode => (
+                            <button key={mode} onClick={() => handleChange('audioLatencyHint', mode)} className={`flex-1 min-w-[80px] py-2 text-[10px] font-bold rounded border capitalize ${settings.audioLatencyHint === mode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-400'}`}>
+                                {mode === 'interactive' ? 'Low (Fast)' : mode === 'very-high' ? 'Very High (Legacy)' : mode}
                             </button>
                         ))}
                     </div>
-                    <p className="text-[10px] text-slate-500 italic">Lower latency is better for performance but may cause clicks on weaker devices.</p>
+                    <p className="text-[10px] text-slate-500 italic">Lower latency is better for performance but may cause clicks on weaker devices. Use 'Very High' for legacy hardware.</p>
                 </div>
                 
                 <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-3">

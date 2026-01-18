@@ -1,14 +1,14 @@
 
-import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, ArpeggioDefinition, KeyMappings, BackgroundPreset, SynthPreset } from './types';
-import { generateInitPatch } from './patchHelpers';
-import { preservedAnalogStrings, STRINGS_PATCHES, PLUCKED_PATCHES } from './bank_strings';
-import { ETHEREAL_KEYS, ETHEREAL_MALLETS } from './bank_keys';
-import { ATMOSPHERE_PATCHES, BRASS_PATCHES, preservedNoiseWash, preservedDeepOcean } from './bank_winds';
-import { ETHEREAL_PADS, ETHEREAL_LEADS, ETHEREAL_BASS, DIAGNOSTIC_PATCHES } from './bank_synth';
-import { PERCUSSION_PATCHES } from './bank_percussion';
+import { AppSettings, ButtonShape, ChordDefinition, LimitColorMap, ArpeggioDefinition, KeyMappings, BackgroundPreset, SynthPreset } from '../types';
+import { generateInitPatch } from '../patchHelpers';
+import { preservedAnalogStrings, STRINGS_PATCHES, PLUCKED_PATCHES } from '../bank_strings';
+import { ETHEREAL_KEYS, ETHEREAL_MALLETS } from '../bank_keys';
+import { ATMOSPHERE_PATCHES, BRASS_PATCHES, preservedNoiseWash, preservedDeepOcean } from '../bank_winds';
+import { ETHEREAL_PADS, ETHEREAL_LEADS, ETHEREAL_BASS, DIAGNOSTIC_PATCHES } from '../bank_synth';
+import { PERCUSSION_PATCHES } from '../bank_percussion';
 
 // Re-export Reverb Defaults from helpers for other consumers
-export { REVERB_DEFAULTS } from './patchHelpers';
+export { REVERB_DEFAULTS } from '../patchHelpers';
 
 // Lattice Constants
 export const GRID_CELL_SIZE = 100; 
@@ -54,15 +54,15 @@ export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
     latch: 'l', 
     sustain: ' ', 
     bend: 'b',
-    shift: 'shift', // Shift Key
-    modulate: 'm', 
+    shift: 'shift', // Added to match types
+    modulate: 'm', // Key for Mod mode
     modeDrone: '1',
     modeStrings: '2',
     modePlucked: '3',
     modeBrass: '4', 
     modeKeys: '5', 
     modePercussion: '6', 
-    synth: 'p', 
+    synth: 'p', // Changed from m
 
     // Chords
     addChord: 'enter',
@@ -141,8 +141,8 @@ const getDefaults = () => {
         latch: { x: w - 80 - margin, y: h - 280 },
         sust: { x: w - 80 - margin, y: h - 330 },
         bend: { x: w - 80 - margin, y: h - 380 },
-        shift: { x: w - 80 - margin, y: h - 430 }, // NEW Shift Button
-        mod: { x: w - 80 - margin, y: h - 480 }, // Moved up
+        shift: { x: w - 80 - margin, y: h - 430 }, // Added shift
+        mod: { x: w - 80 - margin, y: h - 480 }, // Moved mod up to accommodate shift
         center: { x: margin, y: h - 48 - margin },
         depth: { x: margin + 60, y: h - 48 - margin },
         decreaseDepth: { x: margin + 120, y: h - 48 - margin },
@@ -232,8 +232,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   nodeTextSizeScale: 1.0,
   showFractionBar: false,
   isPitchBendEnabled: false, 
-  isShiftModeActive: false, 
-  shiftAutoExpandsDepth: true, // NEW
+  isShiftModeActive: false, // Ensure this property exists
+  shiftAutoExpandsDepth: true, // Ensure this property exists
   isSustainEnabled: false, 
   isStrumEnabled: false, 
   chordsAlwaysRelatch: false, 
@@ -299,18 +299,6 @@ const MALLETS_HEADER: SynthPreset = {
     isHeader: true
 };
 
-// Export Default Presets for Store/Engine
-export const DEFAULT_NORMAL_PRESET = preservedAnalogStrings;
-export const DEFAULT_STRUM_PRESET = PLUCKED_PATCHES[0];
-export const DEFAULT_BRASS_PRESET = BRASS_PATCHES[0];
-export const DEFAULT_KEYS_PRESET = ETHEREAL_KEYS[0];
-
-// RESTORED DEFAULTS FROM OLD BUILD
-export const DEFAULT_LATCH_PRESET = preservedNoiseWash; // The distinctive drone
-export const DEFAULT_PERCUSSION_PRESET = ETHEREAL_MALLETS[0]; // The distinctive Crystal Rain
-
-export const DEFAULT_PRESET = DEFAULT_NORMAL_PRESET;
-
 // Combine all presets into one flat list for the UI
 export const PRESETS: SynthPreset[] = [
     preservedNoiseWash, // Default
@@ -325,7 +313,15 @@ export const PRESETS: SynthPreset[] = [
     ...ETHEREAL_BASS,
     ...ETHEREAL_KEYS,
     ...BRASS_PATCHES,
-    ...PERCUSSION_PATCHES, // Drums
+    ...PERCUSSION_PATCHES, // Drums first
     MALLETS_HEADER,
-    ...ETHEREAL_MALLETS.map(p => ({ ...p, category: 'Percussion' })) // Merge Mallets into Percussion
+    ...ETHEREAL_MALLETS.map(p => ({ ...p, category: 'Percussion' })) // Merge Mallets into Percussion category
 ];
+
+export const DEFAULT_NORMAL_PRESET = preservedAnalogStrings; 
+export const DEFAULT_STRUM_PRESET = PLUCKED_PATCHES[0]; 
+export const DEFAULT_LATCH_PRESET = preservedNoiseWash;
+export const DEFAULT_BRASS_PRESET = BRASS_PATCHES[0]; 
+export const DEFAULT_KEYS_PRESET = ETHEREAL_KEYS[0]; 
+export const DEFAULT_PERCUSSION_PRESET = ETHEREAL_MALLETS[0]; 
+export const DEFAULT_PRESET = preservedAnalogStrings;
