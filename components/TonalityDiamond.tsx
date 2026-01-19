@@ -4,7 +4,7 @@ import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, Playbac
 import { getPitchRatioFromScreenDelta, PITCH_SCALE } from '../services/ProjectionService';
 import AudioEngine from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
-import { LatticeRenderer } from '../services/LatticeRenderer';
+import { LatticeRenderer, RenderState } from '../services/LatticeRenderer';
 import { useLatticeData } from '../hooks/useLatticeData';
 import { GRID_CELL_SIZE } from '../constants';
 import { reconstructNode } from '../services/LatticeService';
@@ -80,34 +80,46 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const prevDynamicSizeRef = useRef(dynamicSize);
   
-  const [activeCursors, setActiveCursors] = useState<Map<number, ActiveCursor>>(new Map());
+  // OPTIMIZATION: activeCursors moved to Ref only to prevent re-renders on every move
+  const activeCursorsRef = useRef<Map<number, ActiveCursor>>(new Map());
+  const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
+  const lastBendUpdateRef = useRef<number>(0); // For throttling glide messages
+
   const [persistentLatches, setPersistentLatches] = useState<Map<string, Map<number, number>>>(new Map());
   const [shiftingNodeIds, setShiftingNodeIds] = useState<Set<string>>(new Set()); 
   const [externalTriggers, setExternalTriggers] = useState<Map<string, number>>(new Map()); 
   const nodeTriggerHistory = useRef<Map<string, number>>(new Map());
 
+  // Visual Cache Refs (Dirty Flag Pattern)
+  const visualsDirtyRef = useRef(true);
+  const cachedVisualLatchedNodes = useRef<Map<string, NodeActivation[]>>(new Map());
+  const cachedActiveLines = useRef<any[]>([]);
+  const cachedBrightenedLines = useRef<any[]>([]);
+  const cachedShiftGhostNodes = useRef<Map<string, LatticeNode>>(new Map());
+  const cachedHarmonicNeighbors = useRef<Map<string, number>>(new Map());
+
   // --- GROUPING STATE FOR INDEPENDENT SHIFTING ---
   const [nodeGroups, setNodeGroups] = useState<Map<string, string>>(new Map());
   const activeGroupId = useRef<string>(`group-${Date.now()}`);
 
-  // When Shift Mode is deactivated, generate a NEW group ID for subsequent notes.
-  // This separates new chords from the previous ones.
   useEffect(() => {
       if (!settings.isShiftModeActive) {
           activeGroupId.current = `group-${Date.now()}`;
       }
   }, [settings.isShiftModeActive]);
 
-  // Track transferred voices to avoid re-triggering envelopes on React state update
   const transferredVoicesRef = useRef<Set<string>>(new Set());
-
-  // Ref to track sustain state immediately inside pointer handlers without closure staleness
   const isSustainEnabledRef = useRef(isCurrentSustainEnabled);
   useEffect(() => { isSustainEnabledRef.current = isCurrentSustainEnabled; }, [isCurrentSustainEnabled]);
 
-  // Sync Shifting IDs ref
   const shiftingNodeIdsRef = useRef(shiftingNodeIds);
-  useEffect(() => { shiftingNodeIdsRef.current = shiftingNodeIds; }, [shiftingNodeIds]);
+  useEffect(() => { shiftingNodeIdsRef.current = shiftingNodeIds; visualsDirtyRef.current = true; }, [shiftingNodeIds]);
+
+  // Mark visuals dirty when key props change
+  useEffect(() => { visualsDirtyRef.current = true; }, [
+      persistentLatches, activeChordIds, externalTriggers, latchMode, isCurrentSustainEnabled, 
+      settings.voiceLeadingSteps, settings.lineBrighteningEnabled, settings.isShiftModeActive, settings.limitVisuals
+  ]);
 
   // Notify parent of active modes
   useEffect(() => {
@@ -134,7 +146,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                   }
                   return changed ? next : prev;
               });
-              // Also clean up group
               setNodeGroups(prev => {
                   const next = new Map(prev);
                   if (next.has(nodeId)) {
@@ -245,219 +256,26 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               if (node) phantoms.set(id, node);
           }
       });
-      activeCursors.forEach(cursor => {
-          if (cursor.hoverNodeId && !nodeMap.has(cursor.hoverNodeId) && !phantoms.has(cursor.hoverNodeId)) {
-              const node = reconstructNode(cursor.hoverNodeId, settings);
-              if (node) phantoms.set(cursor.hoverNodeId, node);
-          }
-      });
+      // Note: We check activeCursors in the render loop now for phantoms to avoid state dep
       return phantoms;
-  }, [audioLatchedNodes, activeCursors, nodeMap, settings]);
-
-  const visualLatchedNodes = useMemo(() => {
-      const visual = new Map<string, NodeActivation[]>();
-      audioLatchedNodes.forEach((v, k) => visual.set(k, [...v]));
-
-      activeCursors.forEach(cursor => {
-          const isSustainingInstrument = latchMode >= 1; 
-          const isSustainActive = isCurrentSustainEnabled;
-          const isBendEnabled = settings.isPitchBendEnabled;
-          const isShiftMode = settings.isShiftModeActive;
-          const isModulating = settings.isModulationModeActive;
-          
-          if (isModulating) return;
-
-          const showCursor = !isShiftMode && (isBendEnabled || !isSustainingInstrument || !isSustainActive || cursor.isShiftAnchor);
-
-          if (showCursor && cursor.hoverNodeId) {
-              const nodeId = cursor.hoverNodeId;
-              if (!visual.has(nodeId)) visual.set(nodeId, []);
-              const list = visual.get(nodeId)!;
-              const activation = { mode: latchMode, timestamp: Date.now(), presetId: 'cursor' };
-              list.push(activation);
-              list.sort((a, b) => a.timestamp - b.timestamp);
-          }
-      });
-
-      externalTriggers.forEach((timestamp, nodeId) => {
-          if (!visual.has(nodeId)) visual.set(nodeId, []);
-          const list = visual.get(nodeId)!;
-          list.push({ mode: 'arp', timestamp, presetId: 'arpeggio' });
-      });
-
-      return visual;
-  }, [audioLatchedNodes, activeCursors, settings.isPitchBendEnabled, settings.isModulationModeActive, settings.isShiftModeActive, latchMode, isCurrentSustainEnabled, externalTriggers]);
-
-  // Calculate Shift Ghosts
-  const shiftGhostNodes = useMemo(() => {
-      const ghosts = new Map<string, LatticeNode>();
-      if (!settings.isShiftModeActive) return ghosts;
-
-      let anchorCursor: ActiveCursor | null = null;
-      for (const c of activeCursors.values()) {
-          if (c.isShiftAnchor && c.originNodeId && c.hoverNodeId) {
-              anchorCursor = c;
-              break;
-          }
-      }
-
-      if (anchorCursor && anchorCursor.originNodeId && anchorCursor.hoverNodeId) {
-          const anchorNode = nodeMap.get(anchorCursor.originNodeId) || phantomNodes.get(anchorCursor.originNodeId);
-          const targetNode = nodeMap.get(anchorCursor.hoverNodeId) || phantomNodes.get(anchorCursor.hoverNodeId);
-
-          if (anchorNode && targetNode) {
-              const transpositionRatio = targetNode.ratio / anchorNode.ratio;
-              const diffCoords = targetNode.coords.map((c, i) => c - (anchorNode.coords[i] || 0));
-
-              shiftingNodeIds.forEach((sourceId) => {
-                  const sourceNode = nodeMap.get(sourceId) || phantomNodes.get(sourceId);
-                  if (sourceNode) {
-                      const maxLength = Math.max(sourceNode.coords.length, diffCoords.length);
-                      const newCoords: number[] = [];
-                      for(let i=0; i<maxLength; i++) {
-                          const val = (sourceNode.coords[i] || 0) + (diffCoords[i] || 0);
-                          newCoords.push(val);
-                      }
-                      
-                      const tempId = `${newCoords.join(',')}:0`;
-                      const tempNode = reconstructNode(tempId, settings);
-                      
-                      if (tempNode) {
-                          const normalizedBaseRatio = tempNode.ratio;
-                          const idealRatio = sourceNode.ratio * transpositionRatio;
-                          const neededOctave = Math.round(Math.log2(idealRatio / normalizedBaseRatio));
-                          
-                          const newId = `${newCoords.join(',')}:${neededOctave}`;
-                          
-                          const existing = nodeMap.get(newId);
-                          if (existing) {
-                              ghosts.set(newId, existing);
-                          } else {
-                              const ghost = reconstructNode(newId, settings);
-                              if (ghost) ghosts.set(newId, ghost);
-                          }
-                      }
-                  }
-              });
-          }
-      }
-      return ghosts;
-  }, [settings.isShiftModeActive, activeCursors, shiftingNodeIds, nodeMap, phantomNodes, settings]);
-
-  const harmonicNeighbors = useMemo(() => {
-      const neighbors = new Map<string, number>();
-      const activeIds = new Set<string>();
-      
-      activeCursors.forEach(c => { if(c.hoverNodeId) activeIds.add(c.hoverNodeId); });
-      visualLatchedNodes.forEach((_, id) => activeIds.add(id));
-      
-      if (activeIds.size === 0) return neighbors;
-
-      activeIds.forEach(sourceId => {
-          const adj = adjacencyMap.get(sourceId);
-          if (adj) {
-              adj.forEach(edge => {
-                  if (edge.limit <= 5 && !activeIds.has(edge.target)) {
-                      const current = neighbors.get(edge.target) || 99;
-                      if (edge.limit < current) neighbors.set(edge.target, edge.limit);
-                  }
-              });
-          }
-      });
-      return neighbors;
-  }, [activeCursors, visualLatchedNodes, adjacencyMap]);
-
-  const activeLines = useMemo(() => {
-    const latched = visualLatchedNodes;
-    const lines = data.lines;
-    const active: LatticeLine[] = [];
-    const reach = settings.voiceLeadingSteps || 1;
-    if (latched.size < 2) return [];
-
-    if (reach === 1) {
-        for (const line of lines) {
-            if (latched.has(line.sourceId) && latched.has(line.targetId)) active.push(line);
-        }
-    } 
-    else if (reach === 2) {
-        const activeNodes = Array.from(latched.keys()).map(id => nodeMap.get(id) || phantomNodes.get(id)).filter(n => n) as LatticeNode[];
-        for (let i=0; i<activeNodes.length; i++) {
-            for (let j=i+1; j<activeNodes.length; j++) {
-                const A = activeNodes[i];
-                const B = activeNodes[j];
-                let coordDist = 0;
-                for (let k=0; k < A.coords.length; k++) coordDist += Math.abs(A.coords[k] - B.coords[k]);
-                const octaveDist = Math.abs(A.octave - B.octave);
-                const totalDist = coordDist + octaveDist;
-
-                if (totalDist <= 2) {
-                    let lineLimit = Math.max(A.maxPrime, B.maxPrime);
-                    if (coordDist === 0 && octaveDist !== 0) lineLimit = LimitType.LIMIT_2;
-                    active.push({
-                        id: `${A.id}-${B.id}`,
-                        x1: A.x, y1: A.y, x2: B.x, y2: B.y,
-                        limit: lineLimit, 
-                        sourceId: A.id, targetId: B.id
-                    });
-                }
-            }
-        }
-    }
-    return active;
-  }, [data.lines, visualLatchedNodes, settings.voiceLeadingSteps, nodeMap, phantomNodes]);
-  
-  const brightenedLines = useMemo(() => {
-      if (!settings.lineBrighteningEnabled || visualLatchedNodes.size === 0) return [];
-      const activeIds = new Set(visualLatchedNodes.keys());
-      const resultLines = new Set<LatticeLine>();
-      const step1Neighbors = new Set<string>();
-
-      data.lines.forEach(line => {
-          if (activeIds.has(line.sourceId) || activeIds.has(line.targetId)) {
-              resultLines.add(line);
-              if (activeIds.has(line.sourceId)) step1Neighbors.add(line.targetId);
-              if (activeIds.has(line.targetId)) step1Neighbors.add(line.sourceId);
-          }
-      });
-
-      if (settings.lineBrighteningSteps === 2) {
-          data.lines.forEach(line => {
-              if (resultLines.has(line)) return;
-              if (step1Neighbors.has(line.sourceId) || step1Neighbors.has(line.targetId)) resultLines.add(line);
-          });
-      }
-      return Array.from(resultLines);
-  }, [visualLatchedNodes, data.lines, settings.lineBrighteningEnabled, settings.lineBrighteningSteps]);
+  }, [audioLatchedNodes, nodeMap, settings]);
 
   // Refs for Render Loop
   const settingsRef = useRef(settings);
   const dataRef = useRef(data);
-  const activeCursorsRef = useRef<Map<number, ActiveCursor>>(activeCursors);
-  const visualLatchedRef = useRef(visualLatchedNodes);
-  const shiftGhostNodesRef = useRef(shiftGhostNodes); 
-  const phantomNodesRef = useRef(phantomNodes);
-  const activeLinesRef = useRef(activeLines);
-  const brightenedLinesRef = useRef(brightenedLines);
-  const harmonicNeighborsRef = useRef(harmonicNeighbors);
   const effectiveScaleRef = useRef(effectiveScale);
   const latchModeRef = useRef(latchMode);
   const nodeMapRef = useRef(nodeMap);
   const spatialGridRef = useRef(spatialGrid);
   const persistentLatchesRef = useRef<Map<string, Map<number, number>>>(persistentLatches);
   const audioLatchedNodesRef = useRef(audioLatchedNodes);
-  const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
   const centerOffsetRef = useRef(centerOffset);
   const nodeGroupsRef = useRef(nodeGroups);
+  const phantomNodesRef = useRef(phantomNodes);
+  const adjacencyMapRef = useRef(adjacencyMap);
 
   useLayoutEffect(() => { settingsRef.current = settings; }, [settings]);
   useLayoutEffect(() => { dataRef.current = data; }, [data]);
-  useLayoutEffect(() => { activeCursorsRef.current = activeCursors; }, [activeCursors]);
-  useLayoutEffect(() => { visualLatchedRef.current = visualLatchedNodes; }, [visualLatchedNodes]);
-  useLayoutEffect(() => { shiftGhostNodesRef.current = shiftGhostNodes; }, [shiftGhostNodes]);
-  useLayoutEffect(() => { phantomNodesRef.current = phantomNodes; }, [phantomNodes]);
-  useLayoutEffect(() => { activeLinesRef.current = activeLines; }, [activeLines]);
-  useLayoutEffect(() => { brightenedLinesRef.current = brightenedLines; }, [brightenedLines]);
-  useLayoutEffect(() => { harmonicNeighborsRef.current = harmonicNeighbors; }, [harmonicNeighbors]);
   useLayoutEffect(() => { effectiveScaleRef.current = effectiveScale; }, [effectiveScale]);
   useLayoutEffect(() => { latchModeRef.current = latchMode; }, [latchMode]);
   useLayoutEffect(() => { nodeMapRef.current = nodeMap; }, [nodeMap]);
@@ -466,6 +284,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   useLayoutEffect(() => { audioLatchedNodesRef.current = audioLatchedNodes; }, [audioLatchedNodes]);
   useLayoutEffect(() => { centerOffsetRef.current = centerOffset; }, [centerOffset]);
   useLayoutEffect(() => { nodeGroupsRef.current = nodeGroups; }, [nodeGroups]);
+  useLayoutEffect(() => { phantomNodesRef.current = phantomNodes; }, [phantomNodes]);
+  useLayoutEffect(() => { adjacencyMapRef.current = adjacencyMap; }, [adjacencyMap]);
   
   const lastTouchedLimitRef = useRef<number | null>(null);
   const depthHistoryRef = useRef<number[]>([]);
@@ -487,6 +307,164 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       };
   }, []);
 
+  // --- DERIVED CALCULATIONS (Moved out of React State for Performance) ---
+  
+  const updateVisualState = () => {
+      const activeCursors = activeCursorsRef.current;
+      const audioLatched = audioLatchedNodesRef.current;
+      const nodeMap = nodeMapRef.current;
+      const phantoms = phantomNodesRef.current;
+      const settings = settingsRef.current;
+      const mode = latchModeRef.current;
+      const isSustainActive = isSustainEnabledRef.current;
+      const lines = dataRef.current.lines;
+      const adjacency = adjacencyMapRef.current;
+
+      // 1. Calculate Visual Latched Nodes
+      const visual = new Map<string, NodeActivation[]>();
+      audioLatched.forEach((v, k) => visual.set(k, [...v]));
+
+      activeCursors.forEach(cursor => {
+          const isSustainingInstrument = mode >= 1; 
+          const isBendEnabled = settings.isPitchBendEnabled;
+          const isShiftMode = settings.isShiftModeActive;
+          const isModulating = settings.isModulationModeActive;
+          
+          if (isModulating) return;
+
+          const showCursor = !isShiftMode && (isBendEnabled || !isSustainingInstrument || !isSustainActive || cursor.isShiftAnchor);
+
+          if (showCursor && cursor.hoverNodeId) {
+              const nodeId = cursor.hoverNodeId;
+              if (!visual.has(nodeId)) visual.set(nodeId, []);
+              const list = visual.get(nodeId)!;
+              const activation = { mode: mode, timestamp: Date.now(), presetId: 'cursor' };
+              list.push(activation);
+          }
+      });
+
+      // Add Phantoms from cursors if missing
+      activeCursors.forEach(cursor => {
+          if (cursor.hoverNodeId && !nodeMap.has(cursor.hoverNodeId) && !phantoms.has(cursor.hoverNodeId)) {
+              const node = reconstructNode(cursor.hoverNodeId, settings);
+              if (node) phantoms.set(cursor.hoverNodeId, node);
+          }
+      });
+
+      cachedVisualLatchedNodes.current = visual;
+
+      // 2. Calculate Active Lines
+      const activeLinesArr: any[] = [];
+      const reach = settings.voiceLeadingSteps || 1;
+      
+      if (visual.size >= 2) {
+          if (reach === 1) {
+              for (const line of lines) {
+                  if (visual.has(line.sourceId) && visual.has(line.targetId)) activeLinesArr.push(line);
+              }
+          } 
+          else if (reach === 2) {
+              const activeNodes = Array.from(visual.keys()).map(id => nodeMap.get(id) || phantoms.get(id)).filter(n => n) as LatticeNode[];
+              for (let i=0; i<activeNodes.length; i++) {
+                  for (let j=i+1; j<activeNodes.length; j++) {
+                      const A = activeNodes[i];
+                      const B = activeNodes[j];
+                      let coordDist = 0;
+                      for (let k=0; k < A.coords.length; k++) coordDist += Math.abs(A.coords[k] - B.coords[k]);
+                      const octaveDist = Math.abs(A.octave - B.octave);
+                      const totalDist = coordDist + octaveDist;
+
+                      if (totalDist <= 2) {
+                          let lineLimit = Math.max(A.maxPrime, B.maxPrime);
+                          if (coordDist === 0 && octaveDist !== 0) lineLimit = LimitType.LIMIT_2;
+                          activeLinesArr.push({
+                              id: `${A.id}-${B.id}`,
+                              x1: A.x, y1: A.y, x2: B.x, y2: B.y,
+                              limit: lineLimit, 
+                              sourceId: A.id, targetId: B.id
+                          });
+                      }
+                  }
+              }
+          }
+      }
+      cachedActiveLines.current = activeLinesArr;
+
+      // 3. Brightened Lines
+      const brightLinesArr: any[] = [];
+      if (settings.lineBrighteningEnabled && visual.size > 0) {
+          const activeIds = new Set(visual.keys());
+          const resultSet = new Set<any>();
+          const step1Neighbors = new Set<string>();
+
+          lines.forEach(line => {
+              if (activeIds.has(line.sourceId) || activeIds.has(line.targetId)) {
+                  resultSet.add(line);
+                  if (activeIds.has(line.sourceId)) step1Neighbors.add(line.targetId);
+                  if (activeIds.has(line.targetId)) step1Neighbors.add(line.sourceId);
+              }
+          });
+
+          if (settings.lineBrighteningSteps === 2) {
+              lines.forEach(line => {
+                  if (resultSet.has(line)) return;
+                  if (step1Neighbors.has(line.sourceId) || step1Neighbors.has(line.targetId)) resultSet.add(line);
+              });
+          }
+          brightLinesArr.push(...Array.from(resultSet));
+      }
+      cachedBrightenedLines.current = brightLinesArr;
+
+      // 4. Shift Ghosts
+      const ghosts = new Map<string, LatticeNode>();
+      if (settings.isShiftModeActive) {
+          let anchorCursor: ActiveCursor | null = null;
+          for (const c of activeCursors.values()) {
+              if (c.isShiftAnchor && c.originNodeId && c.hoverNodeId) {
+                  anchorCursor = c;
+                  break;
+              }
+          }
+
+          if (anchorCursor && anchorCursor.originNodeId && anchorCursor.hoverNodeId) {
+              const anchorNode = nodeMap.get(anchorCursor.originNodeId) || phantoms.get(anchorCursor.originNodeId);
+              const targetNode = nodeMap.get(anchorCursor.hoverNodeId) || phantoms.get(anchorCursor.hoverNodeId);
+
+              if (anchorNode && targetNode) {
+                  const transpositionRatio = targetNode.ratio / anchorNode.ratio;
+                  const diffCoords = targetNode.coords.map((c, i) => c - (anchorNode.coords[i] || 0));
+
+                  shiftingNodeIdsRef.current.forEach((sourceId) => {
+                      const sourceNode = nodeMap.get(sourceId) || phantoms.get(sourceId);
+                      if (sourceNode) {
+                          const maxLength = Math.max(sourceNode.coords.length, diffCoords.length);
+                          const newCoords: number[] = [];
+                          for(let i=0; i<maxLength; i++) {
+                              const val = (sourceNode.coords[i] || 0) + (diffCoords[i] || 0);
+                              newCoords.push(val);
+                          }
+                          const tempId = `${newCoords.join(',')}:0`;
+                          const tempNode = reconstructNode(tempId, settings);
+                          if (tempNode) {
+                              const normalizedBaseRatio = tempNode.ratio;
+                              const idealRatio = sourceNode.ratio * transpositionRatio;
+                              const neededOctave = Math.round(Math.log2(idealRatio / normalizedBaseRatio));
+                              const newId = `${newCoords.join(',')}:${neededOctave}`;
+                              const existing = nodeMap.get(newId);
+                              if (existing) ghosts.set(newId, existing);
+                              else {
+                                  const ghost = reconstructNode(newId, settings);
+                                  if (ghost) ghosts.set(newId, ghost);
+                              }
+                          }
+                      }
+                  });
+              }
+          }
+      }
+      cachedShiftGhostNodes.current = ghosts;
+  };
+
   useImperativeHandle(ref, () => ({
     clearLatches: (mode?: number) => {
         if (mode === undefined) {
@@ -504,7 +482,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     else nodeIdsToRemove.push(nodeId);
                 });
                 
-                // Clean up groups for nodes that are fully removed
                 if (nodeIdsToRemove.length > 0) {
                     setNodeGroups(gPrev => {
                         const gNext = new Map(gPrev);
@@ -512,7 +489,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                         return gNext;
                     });
                 }
-                
                 return next;
             });
         }
@@ -574,7 +550,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
   }, [isGenerating, data.nodes.length, isInitialLoad]);
 
-  // Adjust scroll position when dynamic size changes to keep view centered relative to content
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -701,10 +676,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const x = viewportX + scrollLeft;
       const y = (viewportY - pixelOffset) + scrollTop;
 
-      const spacing = settings.buttonSpacingScale * effectiveScale;
-      const baseRadius = (60 * settings.buttonSizeScale * effectiveScale) / 2;
+      const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
+      const baseRadius = (60 * settingsRef.current.buttonSizeScale * effectiveScale) / 2;
       
-      // Radius check for exact click vs larger area for "fuzzy" drop target
       const hitRadius = fuzzy ? spacing * 0.6 : baseRadius * settingsRef.current.latchedZoomScale;
       const hitDistSq = hitRadius * hitRadius;
 
@@ -719,55 +693,30 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       ];
       
       const grid = spatialGridRef.current;
-      let closest: LatticeNode | null = null;
-      let closestDistSq = Infinity;
+      const center = centerOffsetRef.current;
 
-      // Check Grid
       for(const key of cellsToCheck) {
           const nodesInCell = grid.get(key);
           if (nodesInCell) {
               for (const node of nodesInCell) {
-                  const nx = node.x * spacing + centerOffset;
-                  const ny = node.y * spacing + centerOffset;
+                  const nx = node.x * spacing + center;
+                  const ny = node.y * spacing + center;
                   const dx = x - nx;
                   const dy = y - ny;
-                  const dSq = dx*dx + dy*dy;
-                  
-                  if (dSq < hitDistSq) {
-                      if (fuzzy) {
-                          if (dSq < closestDistSq) {
-                              closestDistSq = dSq;
-                              closest = node;
-                          }
-                      } else {
-                          return node; // Immediate return for direct hit
-                      }
-                  }
+                  if (dx*dx + dy*dy < hitDistSq) return node;
               }
           }
       }
 
-      // Check Phantoms
       for (const node of phantomNodesRef.current.values()) {
-          const nx = node.x * spacing + centerOffset;
-          const ny = node.y * spacing + centerOffset;
+          const nx = node.x * spacing + center;
+          const ny = node.y * spacing + center;
           const dx = x - nx;
           const dy = y - ny;
-          const dSq = dx*dx + dy*dy;
-          
-          if (dSq < hitDistSq) {
-              if (fuzzy) {
-                  if (dSq < closestDistSq) {
-                      closestDistSq = dSq;
-                      closest = node;
-                  }
-              } else {
-                  return node;
-              }
-          }
+          if (dx*dx + dy*dy < hitDistSq) return node;
       }
 
-      return closest;
+      return null;
   };
 
   const getVoiceParams = (mode: number, isStrumEnabled: boolean): { preset: PresetSlot, playback: PlaybackMode } => {
@@ -787,22 +736,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             coords: node.coords,
             octave: node.octave
         };
-        
         const newPath = [...settingsRef.current.modulationPath, newOrigin];
-        
-        updateSettings({ 
-            modulationPath: newPath,
-            isModulationModeActive: false 
-        });
+        updateSettings({ modulationPath: newPath, isModulationModeActive: false });
   };
 
-  // Helper to execute Shift with Group Mapping
-  // Returns: { latches: newMap, moves: Map<oldId, newId> } or null
   const executeShift = (
       anchorNode: LatticeNode, 
       targetNode: LatticeNode, 
       currentLatches: Map<string, Map<number, number>>,
-      shiftingGroup: Set<string> // Must be provided
+      shiftingGroup: Set<string> 
   ) => {
       if (anchorNode.id === targetNode.id) return null;
 
@@ -811,7 +753,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       
       const newLatches = new Map<string, Map<number, number>>(currentLatches); 
       const nodesToMove = new Map<string, Map<number, number>>();
-      const idMappings = new Map<string, string>(); // old -> new
+      const idMappings = new Map<string, string>(); 
       
       shiftingGroup.forEach(sourceId => {
           const modes = newLatches.get(sourceId);
@@ -844,14 +786,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
                   if (newNode) {
                       idMappings.set(sourceId, newId);
-
                       modes.forEach((ts, m) => {
                           const oldVoiceId = `node-${sourceId}-${m}`;
                           const newVoiceId = `node-${newId}-${m}`;
                           audioEngine.transferVoice(oldVoiceId, newVoiceId, newNode.ratio, settingsRef.current.baseFrequency);
                           transferredVoicesRef.current.add(newVoiceId);
                       });
-
                       const targetModes = newLatches.get(newId) || new Map<number, number>();
                       modes.forEach((ts, m) => targetModes.set(m, Date.now()));
                       newLatches.set(newId, targetModes);
@@ -865,27 +805,24 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   const handlePointerDown = (e: React.PointerEvent) => {
       if (audioEngine) audioEngine.resume();
-
       if (uiUnlocked) return;
       e.preventDefault();
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
       updateRect();
+      cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      visualsDirtyRef.current = true; // Flag update
 
-      let canvasPos = { x: e.clientX, y: e.clientY };
-      cursorPositionsRef.current.set(e.pointerId, canvasPos);
-
-      // Hit test logic
       const hitNode = findNodeAtPosition(e.clientX, e.clientY, false);
       const nodeId = hitNode ? hitNode.id : null;
 
       if (hitNode) {
-        if (settings.isModulationModeActive && !settings.isShiftModeActive) {
+        if (settingsRef.current.isModulationModeActive && !settingsRef.current.isShiftModeActive) {
             triggerModulation(hitNode);
             return; 
         }
 
-        const isShiftMode = settings.isShiftModeActive;
+        const isShiftMode = settingsRef.current.isShiftModeActive;
         const allLatches = getAllLatchesAsMap(); 
         const isClickedLatched = allLatches.has(hitNode.id);
 
@@ -894,27 +831,22 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              let effectiveShiftingGroup = new Set<string>();
              
              if (isClickedLatched) {
-                 // Identify Group of clicked node
                  const groupId = nodeGroupsRef.current.get(hitNode.id);
                  if (groupId) {
-                     // Select ONLY nodes in this group
                      nodeGroupsRef.current.forEach((gid, nid) => {
                          if (gid === groupId && allLatches.has(nid)) {
                              effectiveShiftingGroup.add(nid);
                          }
                      });
                  } else {
-                     // Check if it belongs to an active Saved Chord (which acts as an implicit group)
-                     const activeChords = settings.savedChords.filter(c => activeChordIds.includes(c.id));
+                     const activeChords = settingsRef.current.savedChords.filter(c => activeChordIds.includes(c.id));
                      const parentChord = activeChords.find(c => c.nodes.some(n => n.id === hitNode.id));
                      
                      if (parentChord) {
-                         // Collect all currently active nodes from this chord
                          parentChord.nodes.forEach(n => {
                              if (allLatches.has(n.id)) effectiveShiftingGroup.add(n.id);
                          });
                      } else {
-                         // Fallback: Just this node
                          effectiveShiftingGroup.add(hitNode.id);
                      }
                  }
@@ -922,26 +854,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              } 
              
              if (anchorNode) {
-                 setShiftingNodeIds(effectiveShiftingGroup);
+                 setShiftingNodeIds(effectiveShiftingGroup); // State Update!
                  shiftingNodeIdsRef.current = effectiveShiftingGroup;
 
-                 const newCursor: ActiveCursor = {
+                 activeCursorsRef.current.set(e.pointerId, {
                     pointerId: e.pointerId,
                     originNodeId: anchorNode.id, 
                     hoverNodeId: anchorNode.id,
                     hasMoved: false,
                     interactionLockedNodeId: null,
                     isShiftAnchor: true
-                };
-                
-                const nextRef = new Map(activeCursorsRef.current);
-                nextRef.set(e.pointerId, newCursor);
-                activeCursorsRef.current = nextRef;
-
-                setActiveCursors(prev => {
-                    const next = new Map(prev);
-                    next.set(e.pointerId, newCursor);
-                    return next;
                 });
                 return;
              }
@@ -949,7 +871,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
         nodeTriggerHistory.current.set(hitNode.id, Date.now());
 
-        const topLayer = settings.layerOrder[settings.layerOrder.length - 1];
+        const topLayer = settingsRef.current.layerOrder[settingsRef.current.layerOrder.length - 1];
         if (hitNode.maxPrime !== topLayer) onLimitInteraction(hitNode.maxPrime);
         lastTouchedLimitRef.current = hitNode.maxPrime;
 
@@ -957,15 +879,16 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             onNodeTrigger(hitNode.id, hitNode.ratio, hitNode.n, hitNode.d, hitNode.maxPrime);
         }
 
-        const isSustainingInstrument = latchMode >= 1;
-        const isSustainActive = isCurrentSustainEnabled;
-        const isBendEnabled = settings.isPitchBendEnabled; 
+        const mode = latchModeRef.current;
+        const isSustainingInstrument = mode >= 1;
+        const isSustainActive = isSustainEnabledRef.current;
+        const isBendEnabled = settingsRef.current.isPitchBendEnabled; 
 
         let pendingUnlatch = false;
 
         if (isSustainingInstrument && isSustainActive && !isShiftMode) {
              const nodeModes = persistentLatchesRef.current.get(hitNode.id);
-             const isAlreadyLatched = nodeModes && nodeModes.has(latchMode);
+             const isAlreadyLatched = nodeModes && nodeModes.has(mode);
 
              if (isBendEnabled && isAlreadyLatched) {
                  pendingUnlatch = true;
@@ -974,9 +897,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                      const next = new Map(prev);
                      const nModes = next.get(hitNode.id) || new Map<number, number>();
                      
-                     if (nModes.has(latchMode)) {
-                         nModes.delete(latchMode);
-                         // Also remove from group if completely unlatched
+                     if (nModes.has(mode)) {
+                         nModes.delete(mode);
                          if (nModes.size === 0) {
                              next.delete(hitNode.id);
                              setNodeGroups(gPrev => {
@@ -988,9 +910,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                              next.set(hitNode.id, nModes);
                          }
                      } else {
-                         nModes.set(latchMode, Date.now());
+                         nModes.set(mode, Date.now());
                          next.set(hitNode.id, nModes);
-                         // Assign current active group to new latch
                          setNodeGroups(gPrev => {
                              const gNext = new Map(gPrev);
                              gNext.set(hitNode.id, activeGroupId.current);
@@ -1003,7 +924,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
 
         if (((isBendEnabled || !isSustainActive) && !isShiftMode) && !pendingUnlatch) {
-             const newCursor: ActiveCursor = {
+            activeCursorsRef.current.set(e.pointerId, {
                 pointerId: e.pointerId,
                 originNodeId: nodeId, 
                 hoverNodeId: nodeId,
@@ -1011,25 +932,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 interactionLockedNodeId: null,
                 isShiftAnchor: false,
                 pendingUnlatch: false
-            };
-
-            const nextRef = new Map(activeCursorsRef.current);
-            nextRef.set(e.pointerId, newCursor);
-            activeCursorsRef.current = nextRef;
-
-            setActiveCursors(prev => {
-                const next = new Map(prev);
-                next.set(e.pointerId, newCursor);
-                return next;
             });
 
-            const { preset, playback } = getVoiceParams(latchMode, settings.isStrumEnabled);
+            const { preset, playback } = getVoiceParams(mode, settingsRef.current.isStrumEnabled);
             const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
             
-            audioEngine.startVoice(voiceId, hitNode.ratio, settings.baseFrequency, preset, playback);
-            if (settings.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settings.baseFrequency, settings.midiPitchBendRange);
+            audioEngine.startVoice(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, preset, playback);
+            if (settingsRef.current.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
         } else if (pendingUnlatch) {
-             const newCursor: ActiveCursor = {
+            activeCursorsRef.current.set(e.pointerId, {
                 pointerId: e.pointerId,
                 originNodeId: nodeId, 
                 hoverNodeId: nodeId,
@@ -1037,39 +948,33 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 interactionLockedNodeId: null,
                 isShiftAnchor: false,
                 pendingUnlatch: true
-            };
-            const nextRef = new Map(activeCursorsRef.current);
-            nextRef.set(e.pointerId, newCursor);
-            activeCursorsRef.current = nextRef;
-            setActiveCursors(prev => {
-                const next = new Map(prev);
-                next.set(e.pointerId, newCursor);
-                return next;
             });
         }
       } else {
-          const newCursor: ActiveCursor = {
+          activeCursorsRef.current.set(e.pointerId, {
               pointerId: e.pointerId,
               originNodeId: null, 
               hoverNodeId: null,
               hasMoved: false,
               interactionLockedNodeId: null,
               isShiftAnchor: false
-          };
-          setActiveCursors(prev => {
-              const next = new Map(prev);
-              next.set(e.pointerId, newCursor);
-              return next;
           });
-          activeCursorsRef.current.set(e.pointerId, newCursor);
       }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (uiUnlocked) return;
-    if (!activeCursorsRef.current.has(e.pointerId)) return;
+    const cursor = activeCursorsRef.current.get(e.pointerId);
+    if (!cursor) return;
 
-    const cursor = activeCursorsRef.current.get(e.pointerId)!;
+    if (scrollContainerRef.current) {
+        const r = scrollContainerRef.current.getBoundingClientRect();
+        cursorPositionsRef.current.set(e.pointerId, { 
+            x: e.clientX - r.left + scrollContainerRef.current.scrollLeft, 
+            y: e.clientY - r.top + scrollContainerRef.current.scrollTop 
+        });
+        visualsDirtyRef.current = true;
+    }
     
     let worldY = e.clientY;
     if (scrollContainerRef.current) {
@@ -1079,47 +984,43 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         worldY = (e.clientY - r.top) - pixelOffset + scrollContainerRef.current.scrollTop;
     }
     
-    if (scrollContainerRef.current) {
-        const r = scrollContainerRef.current.getBoundingClientRect();
-        cursorPositionsRef.current.set(e.pointerId, { 
-            x: e.clientX - r.left + scrollContainerRef.current.scrollLeft, 
-            y: e.clientY - r.top + scrollContainerRef.current.scrollTop 
-        });
-    }
-    
     let hasMoved = cursor.hasMoved;
     const hitNode = findNodeAtPosition(e.clientX, e.clientY, false);
     const hitId = hitNode ? hitNode.id : null;
 
-    const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
+    const { playback } = getVoiceParams(latchModeRef.current, settingsRef.current.isStrumEnabled);
     
-    const isSustainingInstrument = latchMode >= 1;
+    const isSustainingInstrument = latchModeRef.current >= 1;
     const isSustainActive = isSustainEnabledRef.current;
     const isBendEnabled = settingsRef.current.isPitchBendEnabled; 
     const isShiftMode = settingsRef.current.isShiftModeActive;
     
     // --- SHIFT LOGIC (Glide) ---
     if (isShiftMode && cursor.isShiftAnchor && cursor.originNodeId) {
-         const anchorNode = nodeMapRef.current.get(cursor.originNodeId) || phantomNodesRef.current.get(cursor.originNodeId);
-         if (anchorNode) {
-             const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
-             const originWorldY = (anchorNode.y * spacing) + centerOffset;
-             const currentDeltaY = worldY - originWorldY;
-             const glideRatio = getPitchRatioFromScreenDelta(currentDeltaY, settingsRef.current.buttonSpacingScale * effectiveScale);
-             
-             const shiftingGroup = shiftingNodeIdsRef.current;
-             audioLatchedNodesRef.current.forEach((activations, nodeId) => {
-                 if (!shiftingGroup.has(nodeId)) return; 
-
-                 const node = nodeMapRef.current.get(nodeId) || phantomNodesRef.current.get(nodeId);
-                 if (node) {
-                     const targetRatio = node.ratio * glideRatio;
-                     activations.forEach(act => {
-                         const voiceId = `node-${nodeId}-${act.mode}`;
-                         audioEngine.glideVoice(voiceId, targetRatio, settingsRef.current.baseFrequency);
-                     });
-                 }
-             });
+         // Throttle shift updates for performance
+         if (Date.now() - lastBendUpdateRef.current > 30) {
+             const anchorNode = nodeMapRef.current.get(cursor.originNodeId) || phantomNodesRef.current.get(cursor.originNodeId);
+             if (anchorNode) {
+                 const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
+                 const originWorldY = (anchorNode.y * spacing) + centerOffsetRef.current;
+                 const currentDeltaY = worldY - originWorldY;
+                 const glideRatio = getPitchRatioFromScreenDelta(currentDeltaY, settingsRef.current.buttonSpacingScale * effectiveScale);
+                 
+                 const shiftingGroup = shiftingNodeIdsRef.current;
+                 audioLatchedNodesRef.current.forEach((activations, nodeId) => {
+                     if (!shiftingGroup.has(nodeId)) return; 
+    
+                     const node = nodeMapRef.current.get(nodeId) || phantomNodesRef.current.get(nodeId);
+                     if (node) {
+                         const targetRatio = node.ratio * glideRatio;
+                         activations.forEach(act => {
+                             const voiceId = `node-${nodeId}-${act.mode}`;
+                             audioEngine.glideVoice(voiceId, targetRatio, settingsRef.current.baseFrequency);
+                         });
+                     }
+                 });
+             }
+             lastBendUpdateRef.current = Date.now();
          }
     }
 
@@ -1127,48 +1028,51 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     const isBending = isBendEnabled && !!cursor.originNodeId && !isShiftMode;
 
     if (isBending && dynamicCanvasRef.current) {
-         const originNode = nodeMapRef.current.get(cursor.originNodeId!) || phantomNodesRef.current.get(cursor.originNodeId!);
-         if (originNode) {
-             const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
-             const originWorldY = (originNode.y * spacing) + centerOffset;
-             const currentDeltaY = worldY - originWorldY;
-             const bentRatio = getPitchRatioFromScreenDelta(currentDeltaY, settingsRef.current.buttonSpacingScale * effectiveScale);
-             const finalRatio = originNode.ratio * bentRatio;
-             
-             const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
-             audioEngine.glideVoice(voiceId, finalRatio, settingsRef.current.baseFrequency);
-             if (settingsRef.current.midiEnabled) midiService.pitchBend(voiceId, finalRatio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
-
-             if (cursor.pendingUnlatch || persistentLatchesRef.current.has(cursor.originNodeId!)) {
-                 const latchedModes = persistentLatchesRef.current.get(cursor.originNodeId!);
-                 if (latchedModes) {
-                     latchedModes.forEach((_, mode) => {
-                         const latchedVoiceId = `node-${cursor.originNodeId}-${mode}`;
-                         audioEngine.glideVoice(latchedVoiceId, finalRatio, settingsRef.current.baseFrequency);
-                     });
+         if (Date.now() - lastBendUpdateRef.current > 30) {
+             const originNode = nodeMapRef.current.get(cursor.originNodeId!) || phantomNodesRef.current.get(cursor.originNodeId!);
+             if (originNode) {
+                 const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
+                 const originWorldY = (originNode.y * spacing) + centerOffsetRef.current;
+                 const currentDeltaY = worldY - originWorldY;
+                 const bentRatio = getPitchRatioFromScreenDelta(currentDeltaY, settingsRef.current.buttonSpacingScale * effectiveScale);
+                 const finalRatio = originNode.ratio * bentRatio;
+                 
+                 const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
+                 audioEngine.glideVoice(voiceId, finalRatio, settingsRef.current.baseFrequency);
+                 if (settingsRef.current.midiEnabled) midiService.pitchBend(voiceId, finalRatio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
+    
+                 if (cursor.pendingUnlatch || persistentLatchesRef.current.has(cursor.originNodeId!)) {
+                     const latchedModes = persistentLatchesRef.current.get(cursor.originNodeId!);
+                     if (latchedModes) {
+                         latchedModes.forEach((_, mode) => {
+                             const latchedVoiceId = `node-${cursor.originNodeId}-${mode}`;
+                             audioEngine.glideVoice(latchedVoiceId, finalRatio, settingsRef.current.baseFrequency);
+                         });
+                     }
                  }
              }
+             lastBendUpdateRef.current = Date.now();
          }
     }
 
     let nextInteractionLock = cursor.interactionLockedNodeId;
-    let shouldUpdateState = false;
+    let needsRefUpdate = false;
 
     if (hitNode) {
          if (isSustainingInstrument && isSustainActive && isBendEnabled && !isShiftMode) {
              if (cursor.interactionLockedNodeId !== hitNode.id) {
                  const currentModes = persistentLatchesRef.current.get(hitNode.id);
-                 const isAlreadyLatched = currentModes && currentModes.has(latchMode);
+                 const mode = latchModeRef.current;
+                 const isAlreadyLatched = currentModes && currentModes.has(mode);
 
                  if (!isAlreadyLatched) {
                      setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                          const next = new Map(prev);
                          const nodeModes = next.get(hitNode.id) || new Map<number, number>();
-                         nodeModes.set(latchMode, Date.now());
+                         nodeModes.set(mode, Date.now());
                          next.set(hitNode.id, nodeModes);
                          return next;
                      });
-                     // Assign group to auto-latched note
                      setNodeGroups(gPrev => {
                          const gNext = new Map(gPrev);
                          gNext.set(hitNode.id, activeGroupId.current);
@@ -1177,14 +1081,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                      
                      nodeTriggerHistory.current.set(hitNode.id, Date.now());
                      nextInteractionLock = hitNode.id;
-                     shouldUpdateState = true;
+                     needsRefUpdate = true;
                  }
              }
          }
     }
 
     if (cursor.hoverNodeId !== hitId) {
-        shouldUpdateState = true;
+        needsRefUpdate = true;
         nextInteractionLock = null;
 
         const isLeavingOrigin = cursor.hoverNodeId === cursor.originNodeId;
@@ -1206,13 +1110,14 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 const isDifferentNode = hitNode.id !== cursor.originNodeId;
                 if (hasMoved || isDifferentNode) {
                     const currentModes = persistentLatchesRef.current.get(hitNode.id);
-                    const isAlreadyLatched = currentModes && currentModes.has(latchMode);
+                    const mode = latchModeRef.current;
+                    const isAlreadyLatched = currentModes && currentModes.has(mode);
                     
                     if (!isAlreadyLatched) { 
                         setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                             const next = new Map(prev);
                             const nodeModes = next.get(hitNode.id) || new Map<number, number>();
-                            nodeModes.set(latchMode, Date.now());
+                            nodeModes.set(mode, Date.now());
                             next.set(hitNode.id, nodeModes);
                             return next;
                         });
@@ -1228,7 +1133,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              else if (!isBending && !isShiftMode) {
                  nodeTriggerHistory.current.set(hitNode.id, Date.now());
 
-                 const { preset, playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
+                 const { preset, playback } = getVoiceParams(latchModeRef.current, settingsRef.current.isStrumEnabled);
                  const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
                  
                  audioEngine.startVoice(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, preset, playback);
@@ -1237,27 +1142,24 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
     }
 
-    if (shouldUpdateState || (hasMoved !== cursor.hasMoved)) {
+    // Only update ref if logical state changed or movement started (not every pixel if stable)
+    if (needsRefUpdate || (hasMoved !== cursor.hasMoved)) {
         const updatedCursor = { 
             ...cursor, 
             hoverNodeId: hitId, 
             hasMoved: hasMoved, 
             interactionLockedNodeId: nextInteractionLock 
         };
-        
         activeCursorsRef.current.set(e.pointerId, updatedCursor);
-        setActiveCursors(prev => {
-            const next = new Map(prev);
-            next.set(e.pointerId, updatedCursor);
-            return next;
-        });
+        visualsDirtyRef.current = true;
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (activeCursorsRef.current.has(e.pointerId)) {
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
-        const { playback } = getVoiceParams(latchMode, settingsRef.current.isStrumEnabled);
+        const mode = latchModeRef.current;
+        const { playback } = getVoiceParams(mode, settingsRef.current.isStrumEnabled);
         
         const isBendEnabled = settingsRef.current.isPitchBendEnabled; 
         const isShiftMode = settingsRef.current.isShiftModeActive;
@@ -1266,7 +1168,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         // --- SHIFT LOGIC (Commit) ---
         if (isShiftMode && cursor.isShiftAnchor && cursor.originNodeId) {
             const anchorNode = nodeMapRef.current.get(cursor.originNodeId) || phantomNodesRef.current.get(cursor.originNodeId);
-            let targetNode = findNodeAtPosition(e.clientX, e.clientY, true); // Fuzzy search for drop
+            let targetNode = findNodeAtPosition(e.clientX, e.clientY, true); 
             if (!targetNode && cursor.hoverNodeId) {
                  targetNode = nodeMapRef.current.get(cursor.hoverNodeId) || phantomNodesRef.current.get(cursor.hoverNodeId) || null;
             }
@@ -1279,8 +1181,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     const shiftResult = executeShift(anchorNode, targetNode, allLatches, shiftingGroup);
                     if (shiftResult) {
                         setPersistentLatches(shiftResult.latches);
-                        
-                        // Update Group IDs: Move group ownership to new node IDs
                         setNodeGroups(gPrev => {
                             const gNext = new Map(gPrev);
                             shiftResult.moves.forEach((newId, oldId) => {
@@ -1300,7 +1200,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     if (settingsRef.current.isModulationModeActive) triggerModulation(targetNode);
                 }
             } else if (!targetNode) {
-                // DROP TO DELETE (Stop Sound)
                 const newLatches = new Map<string, Map<number, number>>(persistentLatchesRef.current);
                 const nodesToRemove: string[] = [];
                 shiftingGroup.forEach(sourceId => {
@@ -1308,7 +1207,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     nodesToRemove.push(sourceId);
                 });
                 setPersistentLatches(newLatches);
-                // Clear groups
                 setNodeGroups(gPrev => {
                     const gNext = new Map(gPrev);
                     nodesToRemove.forEach(id => gNext.delete(id));
@@ -1326,11 +1224,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                          const next = new Map(prev);
                          const nModes = next.get(cursor.originNodeId!) || new Map<number, number>();
-                         nModes.delete(latchMode);
+                         nModes.delete(mode);
                          if (nModes.size > 0) next.set(cursor.originNodeId!, nModes);
                          else {
                              next.delete(cursor.originNodeId!);
-                             // Clean Group
                              setNodeGroups(gPrev => {
                                  const gNext = new Map(gPrev);
                                  gNext.delete(cursor.originNodeId!);
@@ -1344,8 +1241,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                     if (node) {
                         const latchedModes = persistentLatchesRef.current.get(cursor.originNodeId!);
                         if (latchedModes) {
-                             latchedModes.forEach((_, mode) => {
-                                 const latchedVoiceId = `node-${cursor.originNodeId}-${mode}`;
+                             latchedModes.forEach((_, m) => {
+                                 const latchedVoiceId = `node-${cursor.originNodeId}-${m}`;
                                  audioEngine.glideVoice(latchedVoiceId, node.ratio, settingsRef.current.baseFrequency);
                              });
                         }
@@ -1359,7 +1256,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                      setPersistentLatches((prev: Map<string, Map<number, number>>) => {
                          const next = new Map(prev);
                          const nodeModes = next.get(cursor.hoverNodeId!) || new Map<number, number>();
-                         nodeModes.set(latchMode === 0 ? 2 : latchMode, Date.now());
+                         nodeModes.set(mode === 0 ? 2 : mode, Date.now());
                          next.set(cursor.hoverNodeId!, nodeModes);
                          return next;
                      });
@@ -1383,15 +1280,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         }
         
         cursorPositionsRef.current.delete(e.pointerId);
-        const nextRef = new Map(activeCursorsRef.current);
-        nextRef.delete(e.pointerId);
-        activeCursorsRef.current = nextRef;
-
-        setActiveCursors(prev => {
-            const next = new Map(prev);
-            next.delete(e.pointerId);
-            return next;
-        });
+        activeCursorsRef.current.delete(e.pointerId);
+        visualsDirtyRef.current = true;
     }
   };
 
@@ -1413,6 +1303,12 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       const viewW = scroller.clientWidth;
       const viewH = scroller.clientHeight;
 
+      // Update Visual State Imperatively inside RAF loop
+      if (visualsDirtyRef.current) {
+          updateVisualState();
+          visualsDirtyRef.current = false;
+      }
+
       rendererRef.current.render(
           bgCanvas,
           staticCanvas,
@@ -1420,10 +1316,10 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           {
               data: dataRef.current,
               settings: settingsRef.current,
-              visualLatchedNodes: visualLatchedRef.current, 
-              activeLines: activeLinesRef.current,
-              brightenedLines: brightenedLinesRef.current,
-              harmonicNeighbors: harmonicNeighborsRef.current, 
+              visualLatchedNodes: cachedVisualLatchedNodes.current, 
+              activeLines: cachedActiveLines.current,
+              brightenedLines: cachedBrightenedLines.current,
+              harmonicNeighbors: cachedHarmonicNeighbors.current, 
               activeCursors: activeCursorsRef.current,
               cursorPositions: cursorPositionsRef.current,
               nodeTriggerHistory: nodeTriggerHistory.current,
@@ -1434,7 +1330,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               time: time,
               latchMode: latchModeRef.current,
               phantomNodes: phantomNodesRef.current,
-              shiftGhostNodes: shiftGhostNodesRef.current 
+              shiftGhostNodes: cachedShiftGhostNodes.current 
           }
       );
 
@@ -1479,19 +1375,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               if (settings.backgroundImageData) {
                   const tint = settings.bgImageTint || '#000000';
                   const strength = settings.bgImageTintStrength || 0;
-                  
                   const hexToRgba = (hex: string, alpha: number) => {
                       const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
                       return result ? `rgba(${parseInt(result[1], 16)},${parseInt(result[2], 16)},${parseInt(result[3], 16)},${alpha})` : 'rgba(0,0,0,0)';
                   };
-                  
                   const tintRgba = hexToRgba(tint, strength);
                   baseStyle.backgroundImage = `linear-gradient(${tintRgba}, ${tintRgba}), url("${settings.backgroundImageData}")`;
                   baseStyle.backgroundColor = 'transparent'; 
-                  
                   baseStyle.backgroundRepeat = settings.backgroundTiling ? 'repeat' : 'no-repeat';
                   baseStyle.backgroundSize = settings.backgroundTiling ? 'auto' : 'cover'; 
-                  
                   if (settings.bgImageGamma !== 1.0) {
                       baseStyle.filter = `brightness(${settings.bgImageGamma})`;
                   }

@@ -136,7 +136,28 @@ export class LatticeRenderer {
         const cullTop = view.y - cullPad;
         const cullBottom = view.y + view.h + cullPad;
 
-        // Draw Nodes (Lines removed per request)
+        // --- 1. Draw Static Lines (Restored for structure) ---
+        // These are the faint connections between nodes that define the grid.
+        for (const line of data.lines) {
+            const x1 = line.x1 * spacing + centerOffset;
+            const y1 = line.y1 * spacing + centerOffset;
+            const x2 = line.x2 * spacing + centerOffset;
+            const y2 = line.y2 * spacing + centerOffset;
+            
+            if (Math.max(x1, x2) < cullLeft || Math.min(x1, x2) > cullRight || Math.max(y1, y2) < cullTop || Math.min(y1, y2) > cullBottom) continue;
+
+            const limitColor = isFlatSkin ? skin.line : (settings.colors[line.limit] || '#666');
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.lineWidth = 1 * effectiveScale;
+            ctx.strokeStyle = limitColor;
+            ctx.globalAlpha = (isFlatSkin ? 0.4 : 0.15); 
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1.0; // Reset alpha after lines
+
+        // --- 2. Draw Nodes ---
         for (const node of data.nodes) {
             const x = node.x * spacing + centerOffset;
             const y = node.y * spacing + centerOffset;
@@ -178,8 +199,8 @@ export class LatticeRenderer {
                 ctx.strokeStyle = skin.nodeStroke;
                 ctx.stroke();
             } else {
-                const cTop = settings.colors[node.limitTop] || '#666';
-                const cBottom = settings.colors[node.limitBottom] || '#666';
+                const cTop = settings.colors[node.limitTop] || '#EF4444'; // Fallback to Red if undefined
+                const cBottom = settings.colors[node.limitBottom] || '#EF4444';
                 const grad = ctx.createLinearGradient(x, y - radius, x, y + radius);
                 grad.addColorStop(0.45, cTop); grad.addColorStop(0.55, cBottom);
                 ctx.fillStyle = grad; ctx.fill();
@@ -199,6 +220,8 @@ export class LatticeRenderer {
                 ctx.fillText(node.d.toString(), x, y + (radius * spacingY));
             }
         }
+        
+        ctx.globalAlpha = 1.0; // Ensure reset at end of frame
     }
 
     private renderDynamic(bgCanvas: HTMLCanvasElement, activeCanvas: HTMLCanvasElement, state: RenderState) {

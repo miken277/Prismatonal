@@ -4,7 +4,7 @@ import { AppSettings, SynthPreset, PresetState, PlayMode, StoreState } from '../
 import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_STRUM_PRESET, DEFAULT_BRASS_PRESET, DEFAULT_KEYS_PRESET, DEFAULT_PERCUSSION_PRESET, DEFAULT_USER_BANK, DEFAULT_COLORS, REVERB_DEFAULTS } from '../constants';
 import { XmlService } from './XmlService';
 
-const SETTINGS_KEY = 'prismatonal_settings_v5'; 
+const SETTINGS_KEY = 'prismatonal_settings_v6'; // Bumped version for grid mask migration
 const PRESET_KEY = 'prismatonal_presets_v5';
 const USER_BANK_KEY = 'prismatonal_user_bank_v1';
 
@@ -16,7 +16,7 @@ class PrismaStore {
     // Hardware-aware Smart Default Polyphony & Quality
     const cores = navigator.hardwareConcurrency || 4;
     let safePolyphony = 8;
-    let safeOversampling = false; // Changed to false by default
+    let safeOversampling = false; 
 
     if (cores <= 4) {
         safePolyphony = 6;
@@ -39,7 +39,7 @@ class PrismaStore {
                 polyphony: (parsed.polyphony && parsed.polyphony > 16 && cores <= 4) ? 8 : (parsed.polyphony || safePolyphony),
                 enableOversampling: (parsed.enableOversampling !== undefined) ? parsed.enableOversampling : safeOversampling,
                 layoutApproach: parsed.layoutApproach || DEFAULT_SETTINGS.layoutApproach,
-                limitDepths: { ...DEFAULT_SETTINGS.limitDepths, ...(parsed.limitDepths || {}) },
+                enabledGridMask: parsed.enabledGridMask || DEFAULT_SETTINGS.enabledGridMask, // Load Mask
                 colors: { ...DEFAULT_COLORS, ...(parsed.colors || {}) }, 
                 uiPositions: { ...DEFAULT_SETTINGS.uiPositions, ...(parsed.uiPositions || {}) },
                 arpeggios: parsed.arpeggios || DEFAULT_SETTINGS.arpeggios,
@@ -76,18 +76,12 @@ class PrismaStore {
                 latch: this.migratePreset(parsed.latch || DEFAULT_LATCH_PRESET),
                 strum: this.migratePreset(parsed.strum || DEFAULT_STRUM_PRESET),
                 brass: this.migratePreset(parsed.brass || parsed.voice || DEFAULT_BRASS_PRESET),
-                keys: this.migratePreset(parsed.keys || parsed.arpeggio || DEFAULT_KEYS_PRESET), // Migrate Arp->Keys
+                keys: this.migratePreset(parsed.keys || parsed.arpeggio || DEFAULT_KEYS_PRESET), 
                 percussion: this.migratePreset(parsed.percussion || DEFAULT_PERCUSSION_PRESET)
             };
 
-            // Fix for Keys loading incorrect "Normal" default from older storage
-            // If Keys matches "Analog Strings" (default normal) but SHOULD be "Dream Rhodes" (default keys), reset it.
-            // This is a one-time migration heuristic.
             if (loadedPresets.keys.name === DEFAULT_NORMAL_PRESET.name && DEFAULT_KEYS_PRESET.name !== DEFAULT_NORMAL_PRESET.name) {
-                // Check if user accidentally saved it this way vs migration fail? 
-                // We'll assume migration fail if it matches the *old* default exact name.
                 if (loadedPresets.keys.name === 'Analog Strings') {
-                    console.log("Migrating Keys preset from legacy default...");
                     loadedPresets.keys = JSON.parse(JSON.stringify(DEFAULT_KEYS_PRESET));
                 }
             }

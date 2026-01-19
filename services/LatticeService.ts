@@ -1,6 +1,7 @@
 
 import { LatticeNode, LatticeLine, AppSettings, GenerationOrigin } from '../types';
 import { projectCoordinates } from './ProjectionService';
+import { GRID_IDENTITIES } from '../constants';
 
 // --- Math Helpers ---
 
@@ -15,22 +16,10 @@ const gcd = (a: number, b: number): number => {
   return x;
 };
 
-export const getMaxPrime = (n: number): number => {
+export const getOddLimit = (n: number): number => {
   let temp = Math.abs(Math.round(n));
-  while (temp % 2 === 0 && temp > 1) temp /= 2;
-  if (temp === 1) return 1;
-
-  let maxP = 1;
-  let d = 3;
-  while (d * d <= temp) {
-    while (temp % d === 0) {
-      maxP = d;
-      temp /= d;
-    }
-    d += 2;
-  }
-  if (temp > 1) maxP = temp;
-  return maxP;
+  while (temp % 2 === 0 && temp > 0) temp /= 2;
+  return temp;
 };
 
 export class Fraction {
@@ -47,9 +36,14 @@ export class Fraction {
     return new Fraction(this.n * other.n, this.d * other.d);
   }
 
+  div(other: Fraction): Fraction {
+    return new Fraction(this.n * other.d, this.d * other.n);
+  }
+
   normalize(): Fraction {
     let nn = this.n;
     let dd = this.d;
+    if (nn === 0 || dd === 0) return new Fraction(0, 1);
     while (nn >= 2 * dd) dd *= 2;
     while (nn < dd) nn *= 2;
     return new Fraction(nn, dd);
@@ -62,10 +56,15 @@ export class Fraction {
     else if (octave < 0) dd *= Math.pow(2, Math.abs(octave));
     return new Fraction(nn, dd);
   }
+  
+  valueOf() {
+      return this.n / this.d;
+  }
 }
 
 const PRIMES = [3, 5, 7, 11, 13];
-const PRIME_RATIOS = {
+// Prime Ratios for Line Checking (Standard Steps)
+const PRIME_STEPS = {
   3: new Fraction(3, 2),
   5: new Fraction(5, 4),
   7: new Fraction(7, 4),
@@ -73,13 +72,45 @@ const PRIME_RATIOS = {
   13: new Fraction(13, 8),
 };
 
-const ODD_IDENTITIES = [1, 3, 5, 7, 11, 13];
+// Decompose a number into prime powers for [3, 5, 7, 11, 13]
+// Returns array [p3, p5, p7, p11, p13]
+const getPrimeFactors = (n: number): number[] => {
+    let temp = n;
+    const result = [0, 0, 0, 0, 0];
+    
+    // Remove factors of 2 (Octaves don't affect lattice position X)
+    while (temp % 2 === 0 && temp > 0) temp /= 2;
 
-// --- Reconstruction ---
+    PRIMES.forEach((p, idx) => {
+        while (temp % p === 0 && temp > 0) {
+            result[idx]++;
+            temp /= p;
+        }
+    });
+    
+    // Handle remaining composite factors roughly if needed, 
+    // but for the defined GRID_IDENTITIES (1,3,5,7,9,11,13,15) this covers all bases.
+    // 9 is 3^2, 15 is 3*5.
+    
+    return result;
+};
+
+// Calculate vector for a Fraction (Numerator Vector - Denominator Vector)
+const getFractionVector = (frac: Fraction): number[] => {
+    const nVec = getPrimeFactors(frac.n);
+    const dVec = getPrimeFactors(frac.d);
+    return nVec.map((val, i) => val - dVec[i]);
+};
+
+// --- Reconstruction Helper ---
 
 export const reconstructNode = (id: string, settings: AppSettings): LatticeNode | null => {
     try {
         const parts = id.split(':');
+        // Legacy IDs might be different, but Matrix IDs are usually "coords:octave"
+        // However, with Matrix generation, we might want to support reconstruction for 
+        // persistent latches even if they fall outside the current mask.
+        
         if (parts.length !== 2) return null;
         
         const coordStr = parts[0];
@@ -89,15 +120,19 @@ export const reconstructNode = (id: string, settings: AppSettings): LatticeNode 
         
         if (coords.some(isNaN) || isNaN(octave)) return null;
 
+        // Rebuild Fraction from Coords
+        // This is the reverse of decomposition. 
         let frac = new Fraction(1, 1);
         PRIMES.forEach((gen, idx) => {
             const val = coords[idx] || 0;
             // @ts-ignore
-            const gRat = PRIME_RATIOS[gen];
+            const gRat = PRIME_STEPS[gen];
             for(let i=0; i<Math.abs(val); i++) {
                 frac = val > 0 ? frac.mul(gRat).normalize() : frac.mul(new Fraction(gRat.d, gRat.n)).normalize();
             }
         });
+        
+        // Apply octave shift
         frac = frac.shiftOctave(octave);
         
         const ratio = frac.n / frac.d;
@@ -112,9 +147,9 @@ export const reconstructNode = (id: string, settings: AppSettings): LatticeNode 
             d: frac.d,
             label: `${frac.n}/${frac.d}`,
             x, y,
-            limitTop: getMaxPrime(frac.n),
-            limitBottom: getMaxPrime(frac.d),
-            maxPrime: Math.max(getMaxPrime(frac.n), getMaxPrime(frac.d)),
+            limitTop: getOddLimit(frac.n),
+            limitBottom: getOddLimit(frac.d),
+            maxPrime: Math.max(getOddLimit(frac.n), getOddLimit(frac.d)),
             isGhost: true
         };
     } catch (e) {
@@ -122,118 +157,152 @@ export const reconstructNode = (id: string, settings: AppSettings): LatticeNode 
     }
 };
 
-// --- Generation ---
+// --- Main Generation ---
 
 export const generateLattice = (
     settings: AppSettings, 
     generationOrigins: GenerationOrigin[] = [{coords: [0,0,0,0,0], octave: 0}]
 ): { nodes: LatticeNode[], lines: LatticeLine[] } => {
   
-  if (settings.layoutApproach === 'diamond') {
-      return generatePartchDiamond(settings);
-  }
-
   const nodesMap = new Map<string, LatticeNode>();
-  const OCTAVE_RANGE = 2; 
-  const globalMaxDistance = settings.latticeMaxDistance ?? 12;
-
+  const mask = settings.enabledGridMask;
+  const identities = GRID_IDENTITIES;
+  
+  // If mask is invalid size, fallback to default (should be handled in Store, but safety first)
+  const safeMask = (mask && mask.length === 64) ? mask : new Array(64).fill(false);
+  
+  // Pre-calculate vectors for the 8 identities to speed up the loop
+  const identityVectors = identities.map(id => getFractionVector(new Fraction(id.n, id.d)));
+  
+  // Iterate through all Modulation Origins (Poly-Modulation support)
   generationOrigins.forEach(origin => {
-      const localQueue: { coords: number[], ratio: Fraction }[] = [];
       
-      // Calculate start ratio for origin coords
-      let originFrac = new Fraction(1, 1);
-      PRIMES.forEach((p, idx) => {
-          const val = origin.coords[idx];
-          const pRat = PRIME_RATIOS[p as 3|5|7|11|13];
-          for(let i=0; i<Math.abs(val); i++) {
-              originFrac = val > 0 ? originFrac.mul(pRat).normalize() : originFrac.mul(new Fraction(pRat.d, pRat.n)).normalize();
-          }
-      });
-
-      localQueue.push({ coords: origin.coords, ratio: originFrac });
-      const visitedLocal = new Set<string>([origin.coords.join(',')]);
+      // Calculate origin ratio to multiply
+      // (Used for n/d labeling logic if we wanted absolute labels, 
+      // but usually we keep labels relative to 1/1 or just display the calculated ratio)
       
-      const MAX_LOCAL_NODES = 800;
-      let processed = 0;
+      // We iterate the 8x8 Matrix
+      for (let i = 0; i < 64; i++) {
+          if (!safeMask[i]) continue;
 
-      while (localQueue.length > 0 && processed < MAX_LOCAL_NODES) {
-          const current = localQueue.shift()!;
-          processed++;
+          const row = Math.floor(i / 8); // Otonality (Numerator)
+          const col = i % 8;             // Utonality (Denominator)
+          
+          const otonalIdentity = identities[row];
+          const utonalIdentity = identities[col];
+          const oVec = identityVectors[row];
+          const uVec = identityVectors[col];
 
-          for (let oct = origin.octave - OCTAVE_RANGE; oct <= origin.octave + OCTAVE_RANGE; oct++) {
-              const shifted = current.ratio.shiftOctave(oct);
-              const id = `${current.coords.join(',')}:${oct}`;
+          // Resulting Ratio = Otonal / Utonal
+          const baseFrac = new Fraction(otonalIdentity.n, otonalIdentity.d)
+                            .div(new Fraction(utonalIdentity.n, utonalIdentity.d))
+                            .normalize();
+
+          // Resulting Vector = OtonalVec - UtonalVec + OriginVec
+          const combinedCoords = oVec.map((val, idx) => val - uVec[idx] + (origin.coords[idx] || 0));
+          
+          // Generate for Octaves (usually -1, 0, +1 around center for lattice view flexibility)
+          // The "Matrix" defines the chroma, we might want to see it in a few octaves
+          const octaveRange = 1; 
+          
+          for (let oct = origin.octave - octaveRange; oct <= origin.octave + octaveRange; oct++) {
+              
+              // Adjust coords for projection if specific lattice logic requires it?
+              // Standard lattice: Coords define X/Y. Octave defines Y offset.
+              // We pass the coords directly.
+              
+              // Unique ID based on absolute coordinates
+              const id = `${combinedCoords.join(',')}:${oct}`;
               
               if (!nodesMap.has(id)) {
-                  const absoluteRatio = shifted.n / shifted.d;
-                  const { x, y } = projectCoordinates(current.coords, absoluteRatio, settings.latticeAspectRatio, settings.layoutApproach);
+                  const finalFrac = baseFrac.shiftOctave(oct - origin.octave); // Adjust for loop relative to origin
+                  // Note: The origin's own octave shift is conceptual; 
+                  // usually modulation keeps 1/1 at the new center visually.
+                  // If we want absolute frequency ratios, we must multiply by origin's scalar ratio.
+                  // For the UI Label (n/d), we usually display the relationship *within* the matrix.
+                  // Let's stick to the matrix ratio normalized.
+                  
+                  const ratioValue = finalFrac.valueOf();
+                  
+                  // Project
+                  const { x, y } = projectCoordinates(combinedCoords, ratioValue, settings.latticeAspectRatio, settings.layoutApproach);
 
                   nodesMap.set(id, {
                       id,
-                      coords: current.coords,
-                      ratio: absoluteRatio,
-                      n: shifted.n,
-                      d: shifted.d,
-                      label: `${shifted.n}/${shifted.d}`,
+                      coords: combinedCoords,
+                      octave: oct,
+                      ratio: ratioValue, // This ratio is relative to global 1/1 if origin was 1/1
+                      n: finalFrac.n,
+                      d: finalFrac.d,
+                      label: `${finalFrac.n}/${finalFrac.d}`,
                       x, y,
-                      limitTop: getMaxPrime(shifted.n),
-                      limitBottom: getMaxPrime(shifted.d),
-                      maxPrime: Math.max(getMaxPrime(shifted.n), getMaxPrime(shifted.d)),
-                      octave: oct
+                      limitTop: getOddLimit(finalFrac.n),
+                      limitBottom: getOddLimit(finalFrac.d),
+                      maxPrime: Math.max(getOddLimit(finalFrac.n), getOddLimit(finalFrac.d)),
+                      originIndex: 0 // Could track which origin generated it
                   });
               }
           }
-
-          PRIMES.forEach((prime, idx) => {
-              const depthLimit = settings.limitDepths[prime as 3|5|7|11|13];
-              if (depthLimit <= 0) return;
-
-              [1, -1].forEach(dir => {
-                  const nextCoords = [...current.coords];
-                  nextCoords[idx] += dir;
-                  
-                  // 1. Check Per-Axis Depth Limit
-                  if (Math.abs(nextCoords[idx] - origin.coords[idx]) > depthLimit) return;
-
-                  // 2. Check Global Manhattan Distance (Max Tonal Distance)
-                  let totalDist = 0;
-                  for (let k = 0; k < nextCoords.length; k++) {
-                      totalDist += Math.abs(nextCoords[k] - origin.coords[k]);
-                  }
-                  if (totalDist > globalMaxDistance) return;
-                  
-                  const key = nextCoords.join(',');
-                  if (!visitedLocal.has(key)) {
-                      const pRat = PRIME_RATIOS[prime as 3|5|7|11|13];
-                      const nextFrac = dir === 1 ? current.ratio.mul(pRat).normalize() : current.ratio.mul(new Fraction(pRat.d, pRat.n)).normalize();
-                      
-                      visitedLocal.add(key);
-                      localQueue.push({ coords: nextCoords, ratio: nextFrac });
-                  }
-              });
-          });
       }
   });
 
   const nodes = Array.from(nodesMap.values());
   const lines: LatticeLine[] = [];
   
+  // Connect Lines based on Prime Intervals (Lattice Logic)
+  // We check every node against every other to see if they are a 'prime step' away.
+  // Optimization: Only check nodes within a reasonable coordinate distance? 
+  // Given max 64 nodes * 3 octaves = ~200 nodes, $N^2$ is fine (40k checks).
+  
   nodes.forEach(node => {
       PRIMES.forEach((prime, idx) => {
+          // Check for neighbor with coord + 1 in this prime dimension
           const targetCoords = [...node.coords];
           targetCoords[idx] += 1;
           const coordKey = targetCoords.join(',');
           
+          // Check same octave and adjacent octaves (3/2 might cross octave boundary in some representations, 
+          // but here we define connection by coordinate adjacency. 
+          // A step of "3" is a coordinate change of +1 in index 0. 
+          // The octave of the target might be different if we normalized the ratio?
+          // ReconstructNode logic uses explicit coords.
+          // Let's look for exact coordinate matches in the map.
+          
+          // Note: In Just Intonation, moving by a prime ratio often shifts the pitch 
+          // such that we might need to normalize the octave to find the neighbor if we were strictly grid-based.
+          // But here, `coords` tracks the prime powers directly. 
+          // So [1,0,0] is 3/2. [2,0,0] is 9/8. 
+          // A connection exists if coords differ by exactly 1 in one dimension.
+          // The node at `coordKey` might be in any octave.
+          
+          // However, for visual clarity, we usually only connect nodes that are relatively close in pitch (Y axis).
+          // We'll check the current octave and maybe +/- 1.
+          
           for (let o = node.octave - 1; o <= node.octave + 1; o++) {
-              const target = nodesMap.get(`${coordKey}:${o}`);
+              const targetId = `${coordKey}:${o}`;
+              const target = nodesMap.get(targetId);
+              
               if (target) {
+                  // Verify the musical interval is actually the prime (ignoring octave)
+                  // Ratio T / S
                   const ratio = target.ratio / node.ratio;
-                  const test = ratio / (PRIME_RATIOS[prime as 3|5|7|11|13].n / PRIME_RATIOS[prime as 3|5|7|11|13].d);
-                  if (Math.abs(Math.log2(test) - Math.round(Math.log2(test))) < 0.001) {
+                  // Normalize ratio to 1-2
+                  let normRatio = ratio;
+                  while (normRatio < 1.0) normRatio *= 2;
+                  while (normRatio >= 2.0) normRatio /= 2;
+                  
+                  // Expected Prime Ratio (e.g. 1.5 for 3)
+                  // @ts-ignore
+                  const pFrac = PRIME_STEPS[prime];
+                  const pVal = pFrac.n / pFrac.d;
+                  
+                  // Allow slight float error
+                  if (Math.abs(normRatio - pVal) < 0.001) {
                       lines.push({
                           id: `${node.id}-${target.id}`,
                           x1: node.x, y1: node.y, x2: target.x, y2: target.y,
-                          limit: prime, sourceId: node.id, targetId: target.id
+                          limit: prime, 
+                          sourceId: node.id, targetId: target.id
                       });
                   }
               }
@@ -242,78 +311,4 @@ export const generateLattice = (
   });
 
   return { nodes, lines };
-};
-
-/**
- * Generates a Harry Partch-style Tonality Diamond
- */
-const generatePartchDiamond = (settings: AppSettings): { nodes: LatticeNode[], lines: LatticeLine[] } => {
-    const nodes: LatticeNode[] = [];
-    const lines: LatticeLine[] = [];
-    
-    // Find highest enabled odd limit
-    let maxEnabledLimit = 1;
-    settings.layerOrder.forEach(l => {
-        if (!settings.hiddenLimits.includes(l) && ODD_IDENTITIES.includes(l)) {
-            if (l > maxEnabledLimit) maxEnabledLimit = l;
-        }
-    });
-
-    const activeIdentities = ODD_IDENTITIES.filter(id => id <= maxEnabledLimit);
-    const N = activeIdentities.length;
-    const centerOffset = (N - 1) / 2;
-
-    for (let o = 0; o < N; o++) {
-        for (let u = 0; u < N; u++) {
-            const idOton = activeIdentities[o];
-            const idUton = activeIdentities[u];
-            
-            const frac = new Fraction(idOton, idUton).normalize();
-            const ratio = frac.n / frac.d;
-            
-            // Layout indices rotated 45 degrees
-            // 1/1 at (0,0)
-            // o increases: moves top-right
-            // u increases: moves bottom-right
-            const x = (o + u) - (N - 1);
-            const y = (o - u);
-
-            const id = `diamond-${o}-${u}`;
-            
-            nodes.push({
-                id,
-                coords: [o, u, 0, 0, 0], // Not standard prime coords, but used for grid
-                ratio,
-                n: frac.n,
-                d: frac.d,
-                label: `${frac.n}/${frac.d}`,
-                x: x * 1.0,
-                y: y * 0.8, // Slightly squashed vertically
-                limitTop: getMaxPrime(frac.n),
-                limitBottom: getMaxPrime(frac.d),
-                maxPrime: Math.max(getMaxPrime(frac.n), getMaxPrime(frac.d)),
-                octave: 0
-            });
-        }
-    }
-
-    // Connect neighbors in the diamond grid
-    nodes.forEach((node, i) => {
-        const [o, u] = node.coords;
-        nodes.forEach((target, j) => {
-            const [to, tu] = target.coords;
-            const distO = Math.abs(o - to);
-            const distU = Math.abs(u - tu);
-            if ((distO === 1 && distU === 0) || (distO === 0 && distU === 1)) {
-                lines.push({
-                    id: `${node.id}-${target.id}`,
-                    x1: node.x, y1: node.y, x2: target.x, y2: target.y,
-                    limit: Math.max(node.maxPrime, target.maxPrime),
-                    sourceId: node.id, targetId: target.id
-                });
-            }
-        });
-    });
-
-    return { nodes, lines };
 };

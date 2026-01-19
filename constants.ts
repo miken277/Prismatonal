@@ -14,6 +14,20 @@ export { REVERB_DEFAULTS } from './patchHelpers';
 export const GRID_CELL_SIZE = 100; 
 export const VIRTUAL_SIZE = 40000; 
 
+// The specific series of identities for the 8x8 Grid
+// 1/1, 5/4, 3/2, 7/8, 9/8, 11/8, 13/8, 15/8
+// Stored as Numerator/Denominator pairs
+export const GRID_IDENTITIES = [
+    { n: 1, d: 1 },   // 1 (Index 0)
+    { n: 5, d: 4 },   // 5 (Index 1)
+    { n: 3, d: 2 },   // 3 (Index 2)
+    { n: 7, d: 4 },   // 7 (Index 3)
+    { n: 9, d: 8 },   // 9 (Index 4)
+    { n: 11, d: 8 },  // 11 (Index 5)
+    { n: 13, d: 8 },  // 13 (Index 6)
+    { n: 15, d: 8 }   // 15 (Index 7)
+];
+
 export const DEFAULT_COLORS: LimitColorMap = {
   1: '#EF4444', // Red (Unity)
   2: '#EF4444', // Red (Octave)
@@ -76,7 +90,7 @@ export const DEFAULT_KEY_MAPPINGS: KeyMappings = {
     playAllArps: 'p',
     stopAllArps: 'x',
     
-    // Legacy / View (Less prioritized)
+    // Legacy / View scaling
     spatialScaleUp: 'arrowright',
     spatialScaleDown: 'arrowleft',
 };
@@ -188,13 +202,48 @@ export const DEFAULT_BACKGROUNDS: BackgroundPreset[] = [
     { id: 'user-6', name: 'User Slot 6', data: null },
 ];
 
+const generateDefaultMask = () => {
+    // 8x8 Grid. 
+    // Row 0 is 1/1 Otonal Series (1, 5, 3, 7, 9, 11, 13, 15)
+    // Col 0 is 1/1 Utonal Series
+    const mask = Array(64).fill(false);
+    
+    // Enable a 3x3 Square by default (1, 5, 3)
+    // Row 0 (1/1): 1, 5, 3
+    mask[0] = true; mask[1] = true; mask[2] = true;
+    
+    // Row 1 (5/4): 5, 25/4, 15/4
+    mask[8] = true; mask[9] = true; mask[10] = true;
+    
+    // Row 2 (3/2): 3, 15/4, 9/4
+    mask[16] = true; mask[17] = true; mask[18] = true;
+
+    // --- ENABLE 9 AND 15 BY DEFAULT ---
+    
+    // Enable 9 (Index 4) on Axes
+    // Row 0, Col 4 => Otonal 9/1
+    mask[4] = true; 
+    // Row 4, Col 0 => Utonal 1/9 (Index 4 * 8 + 0 = 32)
+    mask[32] = true;
+
+    // Enable 15 (Index 7) on Axes
+    // Row 0, Col 7 => Otonal 15/1
+    mask[7] = true;
+    // Row 7, Col 0 => Utonal 1/15 (Index 7 * 8 + 0 = 56)
+    mask[56] = true;
+    
+    return mask;
+};
+
 export const DEFAULT_SETTINGS: AppSettings = {
   tuningSystem: 'ji',
   layoutApproach: 'lattice',
   activeSkin: 'default',
-  limitDepths: { 3: 3, 5: 2, 7: 1, 9: 1, 11: 1, 13: 1, 15: 1 },
+  
+  // New 64-node Matrix Mask
+  enabledGridMask: generateDefaultMask(),
+  
   enabledIdentities: [1, 3, 5, 7, 9, 11, 13, 15], 
-  latticeMaxDistance: 1, 
   isModulationModeActive: false,
   modulationPath: [{ coords: [0,0,0,0,0,0,0], octave: 0 }], // Start at absolute 1/1
   showIncreaseDepthButton: true,
@@ -203,7 +252,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chordShortcutSizeScale: 0.6,
   arpeggios: generateArpeggioSlots(),
   arpBpm: 120,
-  hiddenLimits: [7, 9, 11, 13, 15],
+  
+  // Restored Lattice Settings (kept for compatibility during migration, though Matrix overrides generation)
+  latticeMaxDistance: 12,
+  limitDepths: { 3: 4, 5: 3, 7: 1, 9: 0, 11: 0, 13: 0, 15: 0 },
+
+  hiddenLimits: [7, 11, 13], // Enabled 9 and 15 by default
   layerOrder: [15, 13, 11, 9, 7, 5, 3, 1], 
   baseFrequency: 196.00, // G3
   audioLatencyHint: 'playback',
@@ -233,7 +287,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   showFractionBar: false,
   isPitchBendEnabled: false, 
   isShiftModeActive: false, 
-  shiftAutoExpandsDepth: true, // NEW
+  shiftAutoExpandsDepth: true, 
   isSustainEnabled: false, 
   isStrumEnabled: false, 
   chordsAlwaysRelatch: false, 

@@ -1,22 +1,45 @@
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { AppSettings, TuningSystem, LayoutApproach } from '../../types';
 import { NumberInput } from './SettingsWidgets';
+import { GRID_IDENTITIES, DEFAULT_COLORS } from '../../constants';
+import { Fraction, getOddLimit } from '../../services/LatticeService';
 
 interface Props {
     settings: AppSettings;
     updateSettings: (s: Partial<AppSettings>) => void;
 }
 
-const PRIMES = [3, 5, 7, 9, 11, 13, 15];
-
 const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
     
     const handleChange = (key: keyof AppSettings, value: any) => updateSettings({ [key]: value });
 
-    const handleLimitDepthChange = (limit: number, val: number) => {
-        // @ts-ignore
-        updateSettings({ limitDepths: { ...settings.limitDepths, [limit]: val } });
+    const toggleGridCell = (index: number) => {
+        const newMask = [...settings.enabledGridMask];
+        newMask[index] = !newMask[index];
+        updateSettings({ enabledGridMask: newMask });
+    };
+
+    const setMatrixPreset = (type: 'all' | 'none' | 'diagonal' | 'square' | 'cross') => {
+        const newMask = new Array(64).fill(false);
+        for(let i=0; i<64; i++) {
+            const row = Math.floor(i / 8);
+            const col = i % 8;
+            
+            if (type === 'all') newMask[i] = true;
+            if (type === 'diagonal') {
+                if (row === col) newMask[i] = true; // 1/1 diagonal
+            }
+            if (type === 'square') {
+                // First 3 identities (1, 5, 3) 3x3 grid
+                if (row < 3 && col < 3) newMask[i] = true;
+            }
+            if (type === 'cross') {
+                // 1/1 Row and 1/1 Col (Identity 0)
+                if (row === 0 || col === 0) newMask[i] = true;
+            }
+        }
+        updateSettings({ enabledGridMask: newMask });
     };
 
     const renderLayoutSelector = (system: TuningSystem) => {
@@ -96,6 +119,26 @@ const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
         </div>
     );
 
+    // Memoize cell data to avoid re-calculating fractions on every render
+    const matrixCells = useMemo(() => {
+        const cells = [];
+        for(let i=0; i<64; i++) {
+            const row = Math.floor(i / 8);
+            const col = i % 8;
+            const otonal = GRID_IDENTITIES[row]; // Numerator source
+            const utonal = GRID_IDENTITIES[col]; // Denominator source
+            
+            // Calc Ratio: (Otonal / Utonal)
+            // Identity is {n, d}
+            const frac = new Fraction(otonal.n, otonal.d).div(new Fraction(utonal.n, utonal.d)).normalize();
+            const limit = Math.max(getOddLimit(frac.n), getOddLimit(frac.d));
+            const color = DEFAULT_COLORS[limit] || '#ffffff';
+            
+            cells.push({ index: i, label: `${frac.n}/${frac.d}`, color, limit });
+        }
+        return cells;
+    }, []);
+
     return (
         <div className="space-y-6 animate-in fade-in duration-300 max-w-2xl mx-auto">
             <div className="flex flex-col md:flex-row gap-4 items-center bg-slate-900/40 p-2 rounded-lg border border-slate-700/50 mb-2">
@@ -127,55 +170,75 @@ const TonalityTab: React.FC<Props> = ({ settings, updateSettings }) => {
                     {renderBaseFrequency()}
                     
                     <h3 className="font-semibold text-blue-300 border-b border-slate-700 pb-1 flex justify-between items-center">
-                        <span>Lattice Axis Depth</span>
-                        <span className="text-[10px] text-blue-500 uppercase font-black">STEPS</span>
+                        <span>Tonality Matrix</span>
+                        <div className="flex gap-1">
+                            <button onClick={() => setMatrixPreset('all')} className="text-[9px] bg-slate-800 px-2 py-0.5 rounded border border-slate-600 hover:bg-slate-700">ALL</button>
+                            <button onClick={() => setMatrixPreset('square')} className="text-[9px] bg-slate-800 px-2 py-0.5 rounded border border-slate-600 hover:bg-slate-700">3x3</button>
+                            <button onClick={() => setMatrixPreset('cross')} className="text-[9px] bg-slate-800 px-2 py-0.5 rounded border border-slate-600 hover:bg-slate-700">CROSS</button>
+                            <button onClick={() => setMatrixPreset('none')} className="text-[9px] bg-slate-800 px-2 py-0.5 rounded border border-slate-600 hover:bg-slate-700">CLR</button>
+                        </div>
                     </h3>
                     
-                    <div className="bg-slate-900/40 p-4 rounded border border-slate-700/50 space-y-4">
-                        <div className="pb-4 mb-2 border-b border-slate-700/50">
-                            <label className="flex justify-between items-center text-xs font-bold text-slate-300 mb-2">
-                                <span>Max Total Distance</span>
-                                <span className="text-blue-400 font-mono bg-slate-800 px-2 rounded">{settings.latticeMaxDistance || 12}</span>
-                            </label>
-                            <input 
-                                type="range" 
-                                min="1" max="20" step="1" 
-                                value={settings.latticeMaxDistance || 12} 
-                                onChange={(e) => handleChange('latticeMaxDistance', parseInt(e.target.value))} 
-                                className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                            />
-                            <p className="text-[9px] text-slate-500 mt-2">Limits the combined distance from center (Manhattan distance). Lower this to filter out complex hybrid intervals.</p>
-                        </div>
-
-                        <div className="space-y-3">
-                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Steps from center per prime limit</p>
-                            {PRIMES.map(limit => (
-                                <div key={limit} className="flex items-center gap-4">
-                                    <span className="w-16 text-xs font-bold text-slate-400">{limit}-Limit</span>
-                                    <div className="flex-grow flex items-center gap-2">
-                                        <button 
-                                            className="w-8 h-8 bg-slate-700 hover:bg-slate-600 rounded flex items-center justify-center text-slate-300 font-bold text-lg transition-colors"
-                                            // @ts-ignore
-                                            onClick={() => handleLimitDepthChange(limit, Math.max(0, (settings.limitDepths?.[limit] ?? 0) - 1))}
-                                        >-</button>
-                                        <div className="flex-1">
-                                            <NumberInput 
-                                                // @ts-ignore
-                                                value={settings.limitDepths?.[limit] ?? 0}
-                                                min={0} max={12} 
-                                                onChange={(val) => handleLimitDepthChange(limit, val)} 
-                                                className="text-center h-8 font-mono font-bold"
-                                            />
-                                        </div>
-                                        <button 
-                                            className="w-8 h-8 bg-slate-700 hover:bg-slate-600 rounded flex items-center justify-center text-slate-300 font-bold text-lg transition-colors"
-                                            // @ts-ignore
-                                            onClick={() => handleLimitDepthChange(limit, Math.min(12, (settings.limitDepths?.[limit] ?? 0) + 1))}
-                                        >+</button>
+                    <div className="bg-slate-900/40 p-4 rounded border border-slate-700/50 space-y-4 overflow-x-auto">
+                        <div className="min-w-[300px]">
+                            {/* Grid Headers */}
+                            <div className="grid grid-cols-[30px_repeat(8,1fr)] gap-1 mb-1">
+                                <div className="text-[8px] font-bold text-slate-600 flex items-end justify-center">O\U</div>
+                                {GRID_IDENTITIES.map((id, i) => (
+                                    <div key={i} className="text-[9px] font-bold text-slate-400 text-center bg-slate-800/50 rounded py-1 border border-slate-700">
+                                        {id.n}/{id.d}
                                     </div>
+                                ))}
+                            </div>
+                            
+                            {/* Grid Rows */}
+                            {GRID_IDENTITIES.map((oId, row) => (
+                                <div key={row} className="grid grid-cols-[30px_repeat(8,1fr)] gap-1 mb-1">
+                                    {/* Row Header */}
+                                    <div className="text-[9px] font-bold text-slate-400 flex items-center justify-center bg-slate-800/50 rounded border border-slate-700">
+                                        {oId.n}/{oId.d}
+                                    </div>
+                                    
+                                    {/* Cells */}
+                                    {Array.from({length: 8}).map((_, col) => {
+                                        const index = row * 8 + col;
+                                        const cell = matrixCells[index];
+                                        const isActive = settings.enabledGridMask[index];
+                                        
+                                        return (
+                                            <button
+                                                key={index}
+                                                onClick={() => toggleGridCell(index)}
+                                                className={`
+                                                    relative h-8 rounded border transition-all duration-150 flex items-center justify-center
+                                                    ${isActive 
+                                                        ? 'bg-slate-800 border-transparent shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]' 
+                                                        : 'bg-slate-900/30 border-slate-800 opacity-40 hover:opacity-70'
+                                                    }
+                                                `}
+                                                title={`Ratio: ${cell.label}, Limit: ${cell.limit}`}
+                                            >
+                                                <div 
+                                                    className={`w-2 h-2 rounded-full transition-transform ${isActive ? 'scale-125' : 'scale-75 grayscale'}`} 
+                                                    style={{ 
+                                                        backgroundColor: cell.color,
+                                                        boxShadow: isActive ? `0 0 8px ${cell.color}` : 'none'
+                                                    }}
+                                                />
+                                                {isActive && (
+                                                    <span className="absolute bottom-0.5 right-1 text-[7px] font-mono text-slate-400 leading-none">
+                                                        {cell.label}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             ))}
                         </div>
+                        <p className="text-[9px] text-slate-500 italic mt-2 text-center">
+                            Enable intersecting Otonal (Rows) and Utonal (Cols) identities to generate the lattice.
+                        </p>
                     </div>
                 </div>
             )}

@@ -5,7 +5,7 @@ import { useDragManager } from '../hooks/useDragManager';
 
 interface Props {
   settings: AppSettings;
-  updateSettings: (s: AppSettings) => void;
+  updateSettings: (s: Partial<AppSettings>) => void;
   draggingId: string | null;
   setDraggingId: (id: string | null) => void;
   uiScale?: number;
@@ -14,43 +14,80 @@ interface Props {
 
 const LIMITS = [1, 3, 5, 7, 9, 11, 13, 15];
 
+// Map visual limits to their index in the GRID_IDENTITIES array
+// GRID_IDENTITIES = [1, 5, 3, 7, 9, 11, 13, 15]
+const LIMIT_TO_INDEX: Record<number, number> = {
+    1: 0,
+    5: 1,
+    3: 2,
+    7: 3,
+    9: 4,
+    11: 5,
+    13: 6,
+    15: 7
+};
+
 const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggingId, setDraggingId, uiScale = 1.0, isShortScreen = false }) => {
   const { uiUnlocked, uiPositions } = settings;
   
-  // Size increased by 1/3: 56 * 1.33 = 75, 28 * 1.33 = 37
   const buttonSize = 75 * uiScale; 
   const iconSize = 37 * uiScale; 
 
+  // Check if the primary nodes for this limit are enabled in the matrix mask
   const isVisible = (limit: number) => {
-    // 1-Limit is always visible
-    if (limit === 1) return true;
-    return !settings.hiddenLimits.includes(limit);
+    if (limit === 1) return true; // 1/1 is always considered visible/anchor
+    const idx = LIMIT_TO_INDEX[limit];
+    if (idx === undefined) return false;
+
+    // Check Otonal Axis (Row idx, Col 0) OR Utonal Axis (Row 0, Col idx)
+    // Grid Index = Row * 8 + Col
+    const otonalIndex = idx * 8 + 0;
+    const utonalIndex = 0 * 8 + idx;
+
+    return settings.enabledGridMask[otonalIndex] || settings.enabledGridMask[utonalIndex];
   };
 
   const toggleVisibility = (limit: number) => {
-    // Prevent hiding 1-Limit
-    if (limit === 1) return;
+    if (limit === 1) return; // Lock 1/1
 
-    const isHidden = settings.hiddenLimits.includes(limit);
+    const idx = LIMIT_TO_INDEX[limit];
+    if (idx === undefined) return;
+
+    const otonalIndex = idx * 8 + 0; // The Limit/1 Node (e.g., 5/4)
+    const utonalIndex = 0 * 8 + idx; // The 1/Limit Node (e.g., 8/5)
+
+    const currentlyVisible = isVisible(limit);
+    const nextState = !currentlyVisible;
+
+    // 1. Update Matrix Mask
+    const newMask = [...settings.enabledGridMask];
+    newMask[otonalIndex] = nextState;
+    newMask[utonalIndex] = nextState;
+
+    // 2. Ensure we unhide from legacy filters if enabling
     let newHidden = [...settings.hiddenLimits];
-    if (isHidden) {
-      newHidden = newHidden.filter(l => l !== limit);
-    } else {
-      newHidden.push(limit);
+    if (nextState) {
+        newHidden = newHidden.filter(l => l !== limit);
     }
-    updateSettings({ ...settings, hiddenLimits: newHidden });
+    // Note: We do NOT add to hiddenLimits when disabling. 
+    // This allows advanced users to keep complex ratios (e.g. 5/3) enabled in the matrix 
+    // while hiding the axis fundamentals (5/1) if they really want to, 
+    // fulfilling the request to "show or hide the first utonal and otonal node".
+
+    updateSettings({ 
+        enabledGridMask: newMask, 
+        hiddenLimits: newHidden 
+    });
   };
 
   const bringToFront = (limit: number) => {
     const newOrder = settings.layerOrder.filter(l => l !== limit);
     newOrder.push(limit);
-    updateSettings({ ...settings, layerOrder: newOrder });
+    updateSettings({ layerOrder: newOrder });
   };
 
-  // Wrapper for updateSettings to match signature expected by hook
   const handlePositionUpdate = (id: string, pos: XYPos) => {
       updateSettings({ 
-          ...settings, 
           uiPositions: { 
               ...settings.uiPositions, 
               layers: pos 
@@ -63,7 +100,7 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
       draggingId,
       setDraggingId,
       handlePositionUpdate,
-      uiPositions as unknown as Record<string, XYPos> // Cast safe here as we access by key
+      uiPositions as unknown as Record<string, XYPos>
   );
 
   return (
@@ -87,6 +124,7 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
               className={`flex items-center justify-center rounded transition-colors ${visible ? (isLocked ? 'text-slate-500 cursor-default opacity-50' : 'text-white') : 'text-slate-600'} hover:bg-white/10 ${uiUnlocked ? 'pointer-events-none' : ''}`}
               style={{ width: iconSize, height: iconSize }}
               onPointerDown={(e) => !uiUnlocked && e.stopPropagation()} 
+              title={visible ? `Hide ${limit}-Limit Fundamentals` : `Show ${limit}-Limit Fundamentals`}
             >
                {visible ? (
                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-full h-full p-0.5">

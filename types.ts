@@ -16,7 +16,7 @@ export enum WaveformType {
   SAWTOOTH = 'sawtooth',
   TRIANGLE = 'triangle',
   NOISE = 'noise',
-  GLOTTAL = 'glottal',
+  GLOTTAL = 'glottal', // Acoustically modeled pulse with spectral tilt
 }
 
 export enum ButtonShape {
@@ -164,27 +164,24 @@ export interface AppSettings {
   layoutApproach: LayoutApproach;
   activeSkin: string; 
 
-  // Individual depths (Steps from center, 0-31)
-  limitDepths: {
-    3: number;
-    5: number;
-    7: number;
-    9: number;
-    11: number;
-    13: number;
-    15: number;
-  };
+  // --- REVISED TONALITY SETTINGS ---
+  // A flat array of 64 booleans representing the 8x8 matrix of Identities
+  enabledGridMask: boolean[]; 
 
   enabledIdentities: number[]; 
-  latticeMaxDistance: number; 
-
+  
   // MODULATION STATE
   isModulationModeActive: boolean;
   modulationPath: GenerationOrigin[]; // List of absolute centers visited
 
-  // Increase Depth Settings
+  // Increase Depth Settings (Renamed/Repurposed conceptually, kept for UI compatibility if needed)
   showIncreaseDepthButton: boolean;
   centerResetsDepth: boolean;
+
+  // LATTICE GENERATION (Restored)
+  latticeMaxDistance: number;
+  limitDepths: { [key: number]: number };
+  limitComplexities?: { [key: number]: number };
 
   // Chords
   savedChords: ChordDefinition[];
@@ -332,18 +329,23 @@ export type FilterType = 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peak' 
 export interface OscillatorConfig {
   enabled: boolean;
   waveform: WaveformType;
+  /** Deviation in cents from the base harmonic pitch */
   coarseDetune: number; 
+  /** Fine pitch adjustment in cents */
   fineDetune: number; 
+  /** Volume of this oscillator relative to others */
   gain: number; 
   
-  // Envelope
+  // Envelope (ADSR)
   attack: number;
   decay: number;
   sustain: number; 
   release: number;
   
   // Extended Envelope
+  /** Time to hold at sustain level after key release (before release phase) */
   holdDecay?: number; 
+  /** Overrides release time when in Latch/Sustain mode */
   pedalDecay?: number; 
 
   // Filter
@@ -356,6 +358,7 @@ export interface OscillatorConfig {
   lfoDepth: number; 
   lfoWaveform: 'sine' | 'triangle' | 'square' | 'sawtooth' | 'noise'; 
   lfoTarget: 'none' | 'pitch' | 'filter' | 'tremolo';
+  /** Time in seconds before LFO begins fading in */
   lfoDelay: number; 
 }
 
@@ -387,27 +390,46 @@ export interface SynthPreset {
   
   modMatrix: ModulationRow[];
   gain: number; 
+  
+  // Acoustic Simulation Parameters
+  /** Mix amount for the formant resonator bank (0.0 - 1.0) */
   resonatorMix?: number; 
+  /** Interpolates between vocal formants (0=A, 0.5=E, 1=I/O) */
   resonatorSweep?: number; 
+  /** Gain for the breath noise generator */
   noiseGain?: number; 
+  /** Cutoff for the highpass filter on the noise generator */
   noiseCutoff?: number; 
+  
+  // Global Performance
+  /** Glide time between notes in seconds */
   portamento?: number; 
+  /** If true, note off is ignored until explicit pedal lift */
   acousticSustain?: boolean; 
+  
+  // Stereo & FX
+  /** Stereo width multiplier */
   spread?: number; 
   stereoPanSpeed?: number; 
   stereoPanDepth?: number; 
+  
   reverbType?: ReverbType; 
   reverbMix: number; 
   reverbSize: number; 
   reverbDamping: number; 
   reverbDiffusion?: number; 
+  
   delayMix: number; 
   delayTime: number; 
   delayFeedback: number; 
+  
   compressorThreshold: number; 
   compressorRatio: number; 
   compressorRelease: number; 
+  
   arpConfig?: ArpConfig;
+  
+  // Legacy aliases for migration
   formantStrength?: number;
   vowel?: number;
   aspirationGain?: number;

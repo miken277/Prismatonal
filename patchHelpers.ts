@@ -1,7 +1,9 @@
 
 import { OscillatorConfig, ReverbType, SynthPreset, WaveformType } from './types';
 
-// Reverb Defaults Helper
+/**
+ * Default Reverb settings for each type to ensure a good starting point.
+ */
 export const REVERB_DEFAULTS: Record<ReverbType, { size: number, damping: number, diffusion: number }> = {
     'room': { size: 1.5, damping: 0.3, diffusion: 0.8 },
     'hall': { size: 3.0, damping: 0.6, diffusion: 0.7 },
@@ -10,21 +12,24 @@ export const REVERB_DEFAULTS: Record<ReverbType, { size: number, damping: number
     'shimmer': { size: 8.0, damping: 0.2, diffusion: 0.5 }
 };
 
-// Helper for default disabled oscillator
+/**
+ * A completely neutral, silent oscillator configuration.
+ * Used as a baseline for unused oscillators to prevent noise bleed.
+ */
 export const defaultDisabledOsc: OscillatorConfig = {
     enabled: false,
     waveform: WaveformType.SINE,
     coarseDetune: 0,
-    fineDetune: 5,
-    gain: 0.5,
+    fineDetune: 0, // Reset to 0 for neutrality
+    gain: 0.0, // Ensure silence
     attack: 0.1,
-    decay: 0.5,
-    sustain: 0.7,
-    release: 1.0,
+    decay: 0.1,
+    sustain: 0.0,
+    release: 0.1,
     holdDecay: 0, // Infinite hold by default
     pedalDecay: 0, // Infinite pedal hold by default
-    filterCutoff: 2000,
-    filterResonance: 0.5,
+    filterCutoff: 20000, // Open filter
+    filterResonance: 0.0,
     filterType: 'lowpass',
     lfoRate: 1,
     lfoDepth: 0,
@@ -33,13 +38,18 @@ export const defaultDisabledOsc: OscillatorConfig = {
     lfoDelay: 0
 };
 
+/**
+ * Generates a clean, initialized patch with safe defaults.
+ * @param name Display name of the patch
+ * @param id Unique ID for the patch
+ */
 export const generateInitPatch = (name: string, id: string): SynthPreset => ({
     id: id,
     name: name,
     category: 'User',
     gain: 0.5,
     modMatrix: [],
-    osc1: { ...defaultDisabledOsc, enabled: true, gain: 0.5 },
+    osc1: { ...defaultDisabledOsc, enabled: true, gain: 0.5, sustain: 1.0 },
     osc2: { ...defaultDisabledOsc },
     osc3: { ...defaultDisabledOsc },
     spread: 0.0,
@@ -56,20 +66,31 @@ export const generateInitPatch = (name: string, id: string): SynthPreset => ({
     compressorThreshold: -10,
     compressorRatio: 4,
     compressorRelease: 0.2,
-    portamento: 0
+    portamento: 0,
+    resonatorMix: 0,
+    noiseGain: 0
 });
 
+/**
+ * Shorthand helper for creating factory presets.
+ * Merges partial configurations into a robust base patch.
+ */
 export const p = (name: string, cat: string, osc1: Partial<OscillatorConfig>, osc2: Partial<OscillatorConfig>, osc3: Partial<OscillatorConfig>, extra: Partial<SynthPreset> = {}): SynthPreset => {
     const base = generateInitPatch(name, `${cat}-${name.replace(/\s+/g, '-').toLowerCase()}-${Math.random().toString(36).substr(2,5)}`);
     base.category = cat;
+    
+    // Deep merge oscillator configs
     if (osc1) base.osc1 = { ...base.osc1, ...osc1 };
     if (osc2) base.osc2 = { ...base.osc2, ...osc2 };
     if (osc3) base.osc3 = { ...base.osc3, ...osc3 };
+    
+    // Ensure reverb defaults if a type is switched but params aren't provided
     if (extra.reverbType && (extra.reverbSize === undefined || extra.reverbDamping === undefined || extra.reverbDiffusion === undefined)) {
         const defaults = REVERB_DEFAULTS[extra.reverbType];
         if (extra.reverbSize === undefined) extra.reverbSize = defaults.size;
         if (extra.reverbDamping === undefined) extra.reverbDamping = defaults.damping;
         if (extra.reverbDiffusion === undefined) extra.reverbDiffusion = defaults.diffusion;
     }
+    
     return { ...base, ...extra };
 };

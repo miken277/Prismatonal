@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { ArpeggioDefinition, ArpeggioStep, ArpConfig, ArpDivision } from '../../types';
 import { DEFAULT_COLORS } from '../../constants';
-import { getMaxPrime } from '../../services/LatticeService';
+import { getOddLimit } from '../../services/LatticeService';
 
 interface Props {
     arpeggios: ArpeggioDefinition[];
@@ -278,8 +278,8 @@ const ArpeggiatorBar: React.FC<Props> = ({
                                             const bgColor = isCurrent ? 'bg-slate-600' : (hasData && isMuted ? 'bg-slate-900' : 'bg-slate-800/80');
                                             const textColor = hasData ? (isMuted ? 'text-slate-600' : 'text-blue-200') : 'text-slate-600';
                                             
-                                            const limitN = hasData ? getMaxPrime(step.n || 1) : 1;
-                                            const limitD = hasData ? getMaxPrime(step.d || 1) : 1;
+                                            const limitN = hasData ? getOddLimit(step.n || 1) : 1;
+                                            const limitD = hasData ? getOddLimit(step.d || 1) : 1;
                                             
                                             const colorN = DEFAULT_COLORS[limitN as keyof typeof DEFAULT_COLORS] || '#fff';
                                             const colorD = DEFAULT_COLORS[limitD as keyof typeof DEFAULT_COLORS] || '#fff';

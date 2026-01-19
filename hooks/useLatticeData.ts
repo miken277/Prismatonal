@@ -46,8 +46,7 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
         return JSON.stringify({
             tuning: settings.tuningSystem,
             layout: settings.layoutApproach,
-            depths: settings.limitDepths,
-            maxDist: settings.latticeMaxDistance, // Ensure distance change triggers regeneration
+            mask: settings.enabledGridMask, // Added dependency for Matrix updates
             hidden: settings.hiddenLimits,
             ratio: settings.latticeAspectRatio,
             skin: settings.activeSkin,
@@ -56,8 +55,7 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
     }, [
         settings.tuningSystem, 
         settings.layoutApproach, 
-        settings.limitDepths, 
-        settings.latticeMaxDistance, // Added dependency
+        settings.enabledGridMask, 
         settings.hiddenLimits, 
         settings.latticeAspectRatio, 
         settings.activeSkin, 
@@ -67,22 +65,21 @@ export const useLatticeData = (settings: AppSettings, globalScale: number) => {
     useEffect(() => {
         setIsGenerating(true);
         const timerId = setTimeout(() => {
-            // 1. Generate full lattice based on depths and history
+            // 1. Generate full lattice based on matrix mask (and depths if crawler logic was active, but now matrix rules)
             const rawResult = generateLattice(settings, settings.modulationPath);
             
             // 2. Strict Filtering based on hiddenLimits
             const hiddenSet = new Set(settings.hiddenLimits);
             
-            // Filter Nodes: A node is visible if neither its Numerator nor Denominator limit is hidden
+            // Filter Nodes: A node is visible if its maxPrime (limit identity) is not hidden
             const visibleNodes = rawResult.nodes.filter(n => {
                 return !hiddenSet.has(n.maxPrime);
             });
             
             const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
 
-            // Filter Lines: Visible if limit is not hidden AND both endpoints are visible
+            // Filter Lines: Visible if both endpoints are visible
             const visibleLines = rawResult.lines.filter(l => {
-                if (hiddenSet.has(l.limit)) return false;
                 if (!visibleNodeIds.has(l.sourceId) || !visibleNodeIds.has(l.targetId)) return false;
                 return true;
             });

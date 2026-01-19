@@ -27,7 +27,12 @@ export const DIAGNOSTIC_PATCHES = [
     )
 ];
 
+/**
+ * SYNTH PADS
+ * Sustained, evolving textures meant for harmony.
+ */
 export const ETHEREAL_PADS = [
+    // Cloud Nine - The standard "heavenly" pad
     p("Cloud Nine", "Pads", 
         // Osc 1: Warm foundation
         { enabled: true, waveform: WaveformType.SINE, gain: 0.6, attack: 1.5, decay: 3.0, sustain: 0.8, release: 4.0 }, 
@@ -37,6 +42,7 @@ export const ETHEREAL_PADS = [
         { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2400, gain: 0.2, attack: 3.0, release: 5.0, lfoTarget: 'tremolo', lfoRate: 6, lfoDepth: 40 }, 
         { spread: 0.8, reverbType: 'shimmer', reverbMix: 0.7, reverbSize: 6.0, delayMix: 0.3 }
     ),
+    // Warm Blanket - Low pass filtered warmth
     p("Warm Blanket", "Pads", 
         // Osc 1: Filtered Triangle
         { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.7, attack: 0.8, sustain: 1.0, release: 2.0, filterType: 'lowpass', filterCutoff: 600, lfoTarget: 'filter', lfoRate: 0.2, lfoDepth: 20 }, 
@@ -46,15 +52,27 @@ export const ETHEREAL_PADS = [
         { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 10, gain: 0.15, filterType: 'lowpass', filterCutoff: 1000 }, 
         { spread: 0.6, reverbType: 'hall', reverbMix: 0.5, reverbDamping: 0.8 } // Dark reverb
     ),
+    // Angel Choir - Formant simulation via Bandpass filters
     p("Angel Choir", "Pads", 
         // Osc 1: Formant-ish Saw (Bandpass)
         { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 1.0, sustain: 0.9, release: 2.0, filterType: 'bandpass', filterCutoff: 800, filterResonance: 4.0 }, 
         // Osc 2: Higher Formant
         { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, attack: 1.0, sustain: 0.9, release: 2.0, filterType: 'bandpass', filterCutoff: 1500, filterResonance: 3.0, coarseDetune: 5 }, 
-        // Osc 3: Air (Very Subtle)
-        { enabled: true, waveform: WaveformType.NOISE, gain: 0.02, filterType: 'highpass', filterCutoff: 4000 }, 
+        // Osc 3: Air - Drastically reduced gain for cleanliness
+        { enabled: true, waveform: WaveformType.NOISE, gain: 0.005, filterType: 'highpass', filterCutoff: 4000 }, 
         { spread: 0.7, reverbType: 'cathedral', reverbMix: 0.8, resonatorMix: 0.3, resonatorSweep: 0.5 }
     ),
+    // Crystal Pad - High pass filtered, glassy texture (NEW)
+    p("Crystal Pad", "Pads",
+        // Osc 1: Thin Pulse
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.5, filterType: 'highpass', filterCutoff: 800, attack: 2.0, release: 3.0 },
+        // Osc 2: Upper Octave Sine
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.4, attack: 1.5, release: 3.0 },
+        // Osc 3: Sparkle (Fast LFO)
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 2400, gain: 0.2, lfoTarget: 'tremolo', lfoRate: 8, lfoDepth: 60 },
+        { spread: 0.9, reverbType: 'plate', reverbMix: 0.7, delayMix: 0.4 }
+    ),
+    // Ice Fields - Cold, static texture
     p("Ice Fields", "Pads", 
         // Osc 1: High Sine
         { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.5, attack: 0.5, release: 3.0 }, 
@@ -66,7 +84,21 @@ export const ETHEREAL_PADS = [
     )
 ];
 
+/**
+ * SYNTH LEADS
+ * Monophonic-style sounds (though engine is poly) for melody.
+ */
 export const ETHEREAL_LEADS = [
+    // Square Lead 101 - Classic analog lead
+    p("Square Lead 101", "Leads",
+        // Osc 1: Main Square
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.6, attack: 0.01, decay: 0.2, sustain: 0.8, release: 0.2, filterType: 'lowpass', filterCutoff: 2000, filterResonance: 2.0 },
+        // Osc 2: Detuned Square (PWM effect via interference)
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 0, fineDetune: 8, gain: 0.6, filterType: 'lowpass', filterCutoff: 2000 },
+        // Osc 3: Sub Oscillator
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.4, filterType: 'lowpass', filterCutoff: 800 },
+        { spread: 0.2, portamento: 0.15, delayMix: 0.4, delayTime: 0.3, reverbMix: 0.2 }
+    ),
     p("Liquid Light", "Leads", 
         { enabled: true, waveform: WaveformType.SINE, gain: 0.8, attack: 0.05, release: 0.5 }, 
         { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 7, gain: 0.6, attack: 0.05 }, 
@@ -78,14 +110,15 @@ export const ETHEREAL_LEADS = [
         { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.7, attack: 0.01, decay: 0.3, sustain: 0.4, release: 0.5, filterType: 'lowpass', filterCutoff: 4000, filterResonance: 2.0 }, 
         // Osc 2: Sync-ish Square
         { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: 1200, gain: 0.4, attack: 0.01, decay: 0.2, sustain: 0.2 }, 
-        { enabled: true, waveform: WaveformType.NOISE, gain: 0.04, decay: 0.1, sustain: 0, filterType: 'highpass', filterCutoff: 5000 }, 
+        // Osc 3: High Click (Filtered Noise - Cleaned up)
+        { enabled: true, waveform: WaveformType.NOISE, gain: 0.01, decay: 0.05, sustain: 0, filterType: 'highpass', filterCutoff: 6000 }, 
         { spread: 0.3, reverbType: 'plate', delayMix: 0.4, delayTime: 0.3, delayFeedback: 0.4 }
     ),
     p("Ghost Flute", "Leads", 
         // Osc 1: Triangle Body
         { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.8, attack: 0.1, release: 0.5, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 10, lfoDelay: 0.5 }, 
-        // Osc 2: Breath (Noise Bandpass - Reduced)
-        { enabled: true, waveform: WaveformType.NOISE, gain: 0.05, filterType: 'bandpass', filterCutoff: 2000, filterResonance: 3.0, attack: 0.2 }, 
+        // Osc 2: Breath (Noise Bandpass - Drastically Reduced gain)
+        { enabled: true, waveform: WaveformType.NOISE, gain: 0.008, filterType: 'bandpass', filterCutoff: 2000, filterResonance: 3.0, attack: 0.2 }, 
         { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1200, gain: 0.1 }, 
         { spread: 0.4, reverbType: 'hall', reverbMix: 0.6 }
     ),
@@ -134,12 +167,17 @@ export const ETHEREAL_LEADS = [
     )
 ];
 
+/**
+ * SYNTH BASS
+ * Heavy low-end patches.
+ */
 export const ETHEREAL_BASS = [
+    // Void Bass - Clean Sub with Texture
     p("Void Bass", "Bass", 
         // Osc 1: Sub Sine
         { enabled: true, waveform: WaveformType.SINE, gain: 0.9, attack: 0.1, release: 0.5 }, 
-        // Osc 2: Noise Texture (Reduced)
-        { enabled: true, waveform: WaveformType.NOISE, gain: 0.04, filterType: 'highpass', filterCutoff: 4000, lfoTarget: 'tremolo', lfoRate: 8, lfoDepth: 30 }, 
+        // Osc 2: Noise Texture (Reduced gain significantly)
+        { enabled: true, waveform: WaveformType.NOISE, gain: 0.005, filterType: 'highpass', filterCutoff: 4000, lfoTarget: 'tremolo', lfoRate: 8, lfoDepth: 30 }, 
         // Osc 3: Slow Filtered Saw
         { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.4, filterType: 'lowpass', filterCutoff: 300, lfoTarget: 'filter', lfoRate: 0.1, lfoDepth: 20 }, 
         { spread: 0.3, stereoPanSpeed: 0.1, stereoPanDepth: 0.2, reverbType: 'room', reverbMix: 0.3 }

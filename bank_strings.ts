@@ -2,6 +2,9 @@
 import { WaveformType } from './types';
 import { p, defaultDisabledOsc } from './patchHelpers';
 
+/**
+ * Default Drone Patch - DO NOT EDIT behavior (Preserved for compatibility)
+ */
 export const preservedAnalogStrings = p("Analog Strings", "Strings",
     { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: -1, gain: 0.3, attack: 0.6, decay: 0.5, sustain: 0.8, release: 1.2, filterCutoff: 2000, filterResonance: 0.2, lfoRate: 0.1, lfoDepth: 30, lfoTarget: 'filter' },
     { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, fineDetune: 1, gain: 0.3, attack: 0.6, decay: 0.5, sustain: 0.8, release: 1.2, filterCutoff: 2000, filterResonance: 0.2, lfoRate: 3.5, lfoDepth: 10, lfoTarget: 'tremolo' },
@@ -11,13 +14,14 @@ export const preservedAnalogStrings = p("Analog Strings", "Strings",
 
 export const STRINGS_PATCHES = [
     // Solo Violin - Expressive, bowed texture with bite
+    // Update: Reduced noise gain to 0.005 for cleaner bowing simulation
     p("Solo Violin", "Strings",
         // Osc 1: Body (Sawtooth, Lowpass) with Vibrato
-        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.7, attack: 0.3, decay: 0.5, sustain: 0.9, release: 0.5, filterCutoff: 2000, lfoWaveform: 'sine', lfoTarget: 'pitch', lfoRate: 5.5, lfoDepth: 8, lfoDelay: 0.4 },
-        // Osc 2: Resonance (Bandpass)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.7, attack: 0.3, decay: 0.5, sustain: 0.9, release: 0.5, filterCutoff: 2200, lfoWaveform: 'sine', lfoTarget: 'pitch', lfoRate: 5.5, lfoDepth: 8, lfoDelay: 0.4 },
+        // Osc 2: Resonance (Bandpass) - Emulates wood body resonance
         { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.4, coarseDetune: 0, fineDetune: 3, filterType: 'bandpass', filterCutoff: 1200, filterResonance: 3.0 },
-        // Osc 3: Bow Noise (Subtle Friction)
-        { enabled: true, waveform: WaveformType.NOISE, gain: 0.04, filterType: 'bandpass', filterCutoff: 4000, filterResonance: 1, attack: 0.1, decay: 0.2, sustain: 0.1 },
+        // Osc 3: Bow Noise (Subtle Friction) - Extremely conservative noise
+        { enabled: true, waveform: WaveformType.NOISE, gain: 0.005, filterType: 'bandpass', filterCutoff: 4000, filterResonance: 1, attack: 0.1, decay: 0.2, sustain: 0.1 },
         { 
             spread: 0.2, 
             reverbType: 'hall', 
@@ -26,12 +30,13 @@ export const STRINGS_PATCHES = [
         }
     ),
     // Tremolo Strings - Rapid, rhythmic bowing for tension
+    // Uses two oscillators with slightly offset LFO rates for stereo width
     p("Tremolo Strings", "Strings",
         // Osc 1: Left Tremolo (Sine LFO)
         { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, filterCutoff: 3000, lfoWaveform: 'sine', lfoRate: 7, lfoDepth: 70, lfoTarget: 'tremolo' },
-        // Osc 2: Right Tremolo (Triangle LFO - slightly different rate)
-        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 5, gain: 0.5, filterCutoff: 3000, lfoWaveform: 'triangle', lfoRate: 7.5, lfoDepth: 70, lfoTarget: 'tremolo' },
-        // Osc 3: Sub Anchor
+        // Osc 2: Right Tremolo (Triangle LFO - slightly different rate for phase variance)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 5, gain: 0.5, filterCutoff: 3000, lfoWaveform: 'triangle', lfoRate: 7.2, lfoDepth: 70, lfoTarget: 'tremolo' },
+        // Osc 3: Sub Anchor - Provides tonal center
         { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, filterCutoff: 600 },
         { spread: 0.9, reverbType: 'hall', reverbMix: 0.5 }
     ),
@@ -39,7 +44,7 @@ export const STRINGS_PATCHES = [
     p("Cinematic Swell", "Strings",
         // Osc 1: Slow Attack Saw
         { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 2.0, sustain: 1.0, release: 2.5, filterCutoff: 800, lfoWaveform: 'sine', lfoRate: 0.1, lfoDepth: 30, lfoTarget: 'filter' },
-        // Osc 2: Detuned Saw
+        // Osc 2: Detuned Saw for thickness
         { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 10, gain: 0.5, attack: 2.5, sustain: 1.0, release: 3.0, filterCutoff: 1000 },
         // Osc 3: High Shimmer
         { enabled: true, waveform: WaveformType.SINE, coarseDetune: 1205, gain: 0.3, attack: 3.0, sustain: 0.8, release: 4.0, lfoWaveform: 'triangle', lfoRate: 4, lfoDepth: 10, lfoTarget: 'tremolo' },
@@ -48,6 +53,7 @@ export const STRINGS_PATCHES = [
             reverbType: 'cathedral', 
             reverbMix: 0.7,
             modMatrix: [
+                // Opens filter as envelope rises
                 { id: 'swell-filter', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 80 }
             ]
         }
@@ -66,7 +72,31 @@ export const STRINGS_PATCHES = [
             reverbMix: 0.4
         }
     ),
-    p("Cello Section", "Strings", { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.5, attack: 0.4, release: 0.8, filterCutoff: 1000 }, { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1205, gain: 0.4, attack: 0.5, release: 0.9, filterCutoff: 800 }, { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1195, gain: 0.4, attack: 0.4, release: 0.8 }, { spread: 0.6, reverbType: 'hall', reverbMix: 0.6 })
+    // Symphonic Section - NEW PATCH
+    // Combines deep low-end support with a bright, detuned top end for a full orchestral feel
+    p("Symphonic Section", "Strings",
+        // Osc 1: Main Section (Detuned Saw)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.4, decay: 0.3, sustain: 0.9, release: 1.5, filterCutoff: 3000, filterResonance: 0.5, coarseDetune: 0, fineDetune: -5 },
+        // Osc 2: Wide Section (Detuned Saw opposite)
+        { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.5, attack: 0.5, decay: 0.3, sustain: 0.9, release: 1.5, filterCutoff: 3000, filterResonance: 0.5, coarseDetune: 0, fineDetune: 5 },
+        // Osc 3: Bass/Cello Support
+        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.4, attack: 0.6, sustain: 1.0, release: 1.0, filterType: 'lowpass', filterCutoff: 600, coarseDetune: -1200 },
+        { 
+            spread: 0.8, 
+            reverbType: 'hall', 
+            reverbMix: 0.6, 
+            modMatrix: [
+                { id: 'sym-swell', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 30 }
+            ]
+        }
+    ),
+    // Cello Section - Re-tuned
+    p("Cello Section", "Strings", 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1200, gain: 0.5, attack: 0.4, release: 0.8, filterCutoff: 1000 }, 
+        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1205, gain: 0.4, attack: 0.5, release: 0.9, filterCutoff: 800 }, 
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -1195, gain: 0.4, attack: 0.4, release: 0.8 }, 
+        { spread: 0.6, reverbType: 'hall', reverbMix: 0.6 }
+    )
 ];
 
 export const PLUCKED_PATCHES = [
@@ -105,14 +135,15 @@ export const PLUCKED_PATCHES = [
             ]
         }
     ),
-    // Guitar-ish
+    // Nylon Guitar - Warm, clean
+    // Noise removed for cleaner sound per user request (was 0.02)
     p("Nylon Guitar", "Plucked",
         // Osc 1: String
         { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.7, attack: 0.01, decay: 1.0, sustain: 0, filterType: 'lowpass', filterCutoff: 3000 },
         // Osc 2: Body Tone
         { enabled: true, waveform: WaveformType.SINE, gain: 0.4, attack: 0.02, decay: 0.8, sustain: 0 },
-        // Osc 3: Finger Noise (Subtle)
-        { enabled: true, waveform: WaveformType.NOISE, gain: 0.02, attack: 0.005, decay: 0.05, filterType: 'highpass', filterCutoff: 5000 }, 
+        // Osc 3: Disabled (was Noise)
+        { enabled: false }, 
         { 
             spread: 0.3, 
             reverbType: 'room', 
