@@ -379,7 +379,6 @@ export const PRESETS: SynthPreset[] = [
     ...ETHEREAL_BASS,
     ...ETHEREAL_KEYS,
     ...BRASS_PATCHES,
-    ...PERCUSSION_PATCHES, // Drums
     MALLETS_HEADER,
     ...ETHEREAL_MALLETS.map(p => ({ ...p, category: 'Percussion' })) // Merge Mallets into Percussion
 ];

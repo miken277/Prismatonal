@@ -146,14 +146,27 @@ export const BRASS_PATCHES = [
         { spread: 0.4, reverbType: 'hall', reverbMix: 0.5, resonatorMix: 0.6, resonatorSweep: 0.3 }
     ),
 
-    // 6. Orchestral Horns - Full Section (NEW)
+    // 6. Orchestral Horns - Full Section
     p("Orchestral Horns", "Brass",
-        // Osc 1: Mellow Saw
         { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.6, attack: 0.3, decay: 0.2, sustain: 0.9, release: 1.2, filterType: 'lowpass', filterCutoff: 600 },
-        // Osc 2: Detuned Saw
         { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 5, gain: 0.5, attack: 0.35, sustain: 0.9, release: 1.2, filterType: 'lowpass', filterCutoff: 600 },
-        // Osc 3: Sub support
         { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.3, filterType: 'lowpass', filterCutoff: 400 },
         { spread: 0.8, reverbType: 'hall', reverbMix: 0.6 }
+    ),
+
+    // 7. Epic Trumpets
+    p("Epic Trumpets", "Brass",
+        { enabled: true, waveform: WaveformType.GLOTTAL, gain: 0.6, attack: 0.02, decay: 0.1, sustain: 0.8, release: 0.15, filterType: 'lowpass', filterCutoff: 900 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 4, gain: 0.4, attack: 0.03, sustain: 0.7, release: 0.2, filterType: 'highpass', filterCutoff: 800 },
+        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 0, gain: 0.2, filterType: 'peak', filterCutoff: 2100, filterResonance: 3.0 },
+        { spread: 0.6, reverbType: 'plate', reverbMix: 0.4, resonatorMix: 0.3 }
+    ),
+
+    // 8. Tuba Sub
+    p("Tuba Sub", "Brass",
+        { enabled: true, waveform: WaveformType.GLOTTAL, coarseDetune: -1200, gain: 0.8, attack: 0.15, decay: 0.2, sustain: 0.8, release: 0.5, filterType: 'lowpass', filterCutoff: 1200, filterResonance: 1.0 },
+        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1204, gain: 0.5, filterType: 'lowpass', filterCutoff: 600, filterResonance: 2.0 },
+        { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: 0, gain: 0.3, filterType: 'lowpass', filterCutoff: 2000 },
+        { spread: 0.5, reverbType: 'room', reverbMix: 0.3, resonatorMix: 0.3, resonatorSweep: 0.1 }
     )
 ];

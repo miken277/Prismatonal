@@ -346,7 +346,7 @@ const App: React.FC = () => {
             isShortScreen={isShortScreen}
           />
           <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} updateSettings={updateSettings} />
-          <SynthControls isOpen={isSynthOpen} onClose={() => setIsSynthOpen(false)} presets={presets} onChange={setPreset} />
+          <SynthControls isOpen={isSynthOpen} onClose={() => setIsSynthOpen(false)} presets={presets} onChange={setPreset} activeInstrumentMode={latchMode} />
           
           <RecordingControls />
         </div>

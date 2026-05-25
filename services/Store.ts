@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS, DEFAULT_NORMAL_PRESET, DEFAULT_LATCH_PRESET, DEFAULT_
 import { XmlService } from './XmlService';
 
 const SETTINGS_KEY = 'prismatonal_settings_v6'; // Bumped version for grid mask migration
-const PRESET_KEY = 'prismatonal_presets_v5';
+const PRESET_KEY = 'prismatonal_presets_v6';
 const USER_BANK_KEY = 'prismatonal_user_bank_v1';
 
 class PrismaStore {

@@ -17,6 +17,9 @@ export enum WaveformType {
   TRIANGLE = 'triangle',
   NOISE = 'noise',
   GLOTTAL = 'glottal', // Acoustically modeled pulse with spectral tilt
+  STRING = 'string',   // Karplus-Strong physical modeling
+  BELL = 'bell',       // 2-operator FM bell
+  EPIANO = 'epiano'    // 2-operator FM electric piano
 }
 
 export enum ButtonShape {

@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { SynthPreset, OscillatorConfig, ModulationRow, ReverbType, PresetState, PlayMode, ArpDirection } from '../types';
 import { PRESETS, REVERB_DEFAULTS } from '../constants';
 import { useStore } from '../services/Store';
@@ -12,10 +12,26 @@ interface Props {
   onChange: (mode: PlayMode, p: SynthPreset) => void;
   isOpen: boolean;
   onClose: () => void;
+  activeInstrumentMode?: number;
 }
 
-const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) => {
+const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose, activeInstrumentMode }) => {
   const [activeVoiceMode, setActiveVoiceMode] = useState<PlayMode>('normal');
+  
+  // Sync when external activeInstrumentMode changes
+  useEffect(() => {
+    if (activeInstrumentMode !== undefined) {
+      switch(activeInstrumentMode) {
+        case 1: setActiveVoiceMode('latch'); break;
+        case 2: setActiveVoiceMode('normal'); break;
+        case 3: setActiveVoiceMode('strum'); break;
+        case 4: setActiveVoiceMode('brass'); break;
+        case 5: setActiveVoiceMode('keys'); break;
+        case 6: setActiveVoiceMode('percussion'); break;
+      }
+    }
+  }, [activeInstrumentMode]);
+
   const [activeTab, setActiveTab] = useState<'osc1' | 'osc2' | 'osc3' | 'matrix' | 'fx' | 'arp'>('osc1');
   const { userBank, saveUserPatch } = useStore();
 
@@ -27,11 +43,25 @@ const SynthControls: React.FC<Props> = ({ presets, onChange, isOpen, onClose }) 
       const groups: Record<string, SynthPreset[]> = {};
       PRESETS.forEach(p => {
           const cat = p.category || 'Uncategorized';
-          if (!groups[cat]) groups[cat] = [];
-          groups[cat].push(p);
+          let include = false;
+          
+          switch (activeVoiceMode) {
+              case 'normal': include = ['Strings', 'Pads'].includes(cat); break;
+              case 'latch': include = ['Atmosphere', 'Drone', 'Bass', 'Diagnostics'].includes(cat); break;
+              case 'strum': include = ['Plucked'].includes(cat); break;
+              case 'brass': include = ['Brass'].includes(cat); break;
+              case 'keys': include = ['Keys', 'Leads'].includes(cat); break;
+              case 'percussion': include = ['Percussion'].includes(cat); break;
+              default: include = true;
+          }
+
+          if (include || cat === 'User') {
+              if (!groups[cat]) groups[cat] = [];
+              groups[cat].push(p);
+          }
       });
       return groups;
-  }, []);
+  }, [activeVoiceMode]);
 
   if (!isOpen) return null;
 

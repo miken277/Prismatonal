@@ -79,35 +79,60 @@ class PolyBLEP {
 }
 
 class SVF {
-  constructor() { this.low = 0.0; this.band = 0.0; this.high = 0.0; this.notch = 0.0; }
-  reset() { this.low = 0.0; this.band = 0.0; this.high = 0.0; this.notch = 0.0; }
-  process(input, cutoff, res, sampleRate, type, peakGain = 1.0) {
-    // 1. Anti-Denormal: Flush state if extremely small to prevent CPU spikes on A10/A12
-    if (Math.abs(this.low) < 1e-18) this.low = 0.0;
-    if (Math.abs(this.band) < 1e-18) this.band = 0.0;
-
-    const safeCutoff = Math.max(20, Math.min(cutoff, sampleRate * 0.45));
-    let f = 2.0 * Math.sin(Math.PI * safeCutoff / sampleRate);
-    const q = 1.0 / (res + 0.5);
+  constructor() {
+    this.ic1eq = 0.0;
+    this.ic2eq = 0.0;
+    this.low = 0.0;
+    this.band = 0.0;
+    this.high = 0.0;
+    this.notch = 0.0;
+  }
+  reset() {
+    this.ic1eq = 0.0;
+    this.ic2eq = 0.0;
+    this.low = 0.0;
+    this.band = 0.0;
+    this.high = 0.0;
+    this.notch = 0.0;
+  }
+  process(v0, cutoff, res, sampleRate, type, peakGain = 1.0) {
+    const safeCutoff = Math.max(10, Math.min(cutoff, sampleRate * 0.499));
+    const g = Math.tan(Math.PI * safeCutoff / sampleRate);
+    const k = 1.0 / (res + 0.5); // damping
     
-    this.low += f * this.band;
-    this.high = input - this.low - q * this.band;
-    this.band += f * this.high;
-    this.notch = this.high + this.low;
+    const a1 = 1.0 / (1.0 + g * (g + k));
+    const a2 = g * a1;
+    const a3 = g * a2;
+    
+    const v1 = a1 * this.ic1eq + a2 * (v0 - this.ic2eq);
+    const v2 = this.ic2eq + a2 * this.ic1eq + a3 * (v0 - this.ic2eq);
+    const v3 = v0 - k * v1 - v2;
+    
+    this.ic1eq = 2.0 * v1 - this.ic1eq;
+    this.ic2eq = 2.0 * v2 - this.ic2eq;
+    
+    if (Number.isNaN(this.ic1eq) || Number.isNaN(this.ic2eq)) {
+        this.reset();
+        return 0.0;
+    }
+    
+    this.low = v2;
+    this.band = v1;
+    this.high = v3;
+    this.notch = v3 + v2;
     
     let out = 0.0;
     switch((type|0)) {
-        case 0: out = this.low; break;
-        case 1: out = this.high; break;
-        case 2: out = this.band; break;
-        case 3: out = this.notch; break;
-        case 4: out = this.low + this.high + (this.band * peakGain); break;
-        case 5: out = (this.low * peakGain) + this.high + this.band; break;
-        case 6: out = this.low + (this.high * peakGain) + this.band; break;
+        case 0: out = this.low; break; // lowpass
+        case 1: out = this.high; break; // highpass
+        case 2: out = this.band; break; // bandpass
+        case 3: out = this.notch; break; // notch
+        case 4: out = this.low + this.high + (this.band * peakGain); break; 
+        case 5: out = (this.low * peakGain) + this.high + this.band; break; 
+        case 6: out = this.low + (this.high * peakGain) + this.band; break; 
         default: out = this.low;
     }
     
-    // Hard clip to prevent blowouts
     return out < -10.0 ? -10.0 : (out > 10.0 ? 10.0 : out);
   }
 }
@@ -185,11 +210,64 @@ class Envelope {
 }
 
 class Oscillator {
-  constructor(sampleRate) { this.phase = 0.0; this.blep = new PolyBLEP(sampleRate); this.sampleRate = sampleRate; }
-  reset() { this.phase = 0.0; }
+  constructor(sampleRate) { 
+      this.phase = 0.0; 
+      this.blep = new PolyBLEP(sampleRate); 
+      this.sampleRate = sampleRate; 
+      this.time = 0.0;
+      
+      this.ksBuffer = new Float32Array(Math.floor(sampleRate / 20)); // Handle down to 20Hz
+      this.ksWriteIdx = 0;
+      this.ksLastOutput = 0.0;
+      this.ksIsNoise = true;
+  }
+  reset() { 
+      this.phase = 0.0; 
+      this.time = 0.0;
+      this.ksBuffer.fill(0.0);
+      this.ksWriteIdx = 0;
+      this.ksLastOutput = 0.0;
+      this.ksIsNoise = true;
+  }
   process(freq, type, dt) {
     if (freq <= 0 || freq > 24000) return 0.0;
     
+    this.time += dt;
+
+    // Karplus-Strong Physical Modeling
+    if (type === 'string') {
+        let periodSamples = this.sampleRate / freq;
+        if (periodSamples > this.ksBuffer.length) periodSamples = this.ksBuffer.length;
+        
+        let out = 0.0;
+        this.phase += dt * freq;
+        if (this.phase < 1.0 && this.ksIsNoise) {
+            // Noise burst excitation
+            out = NOISE_TABLE[(this.time * 987654.3) % WAVETABLE_SIZE | 0] || 0;
+            this.ksBuffer[this.ksWriteIdx | 0] = out;
+        } else {
+            this.ksIsNoise = false;
+            let readIdx = this.ksWriteIdx - periodSamples;
+            if (readIdx < 0) readIdx += this.ksBuffer.length;
+            
+            let pos1 = readIdx | 0;
+            let pos2 = (pos1 + 1) >= this.ksBuffer.length ? 0 : pos1 + 1;
+            let frac = readIdx - pos1;
+            let sample = this.ksBuffer[pos1] + frac * (this.ksBuffer[pos2] - this.ksBuffer[pos1]);
+            
+            // Lowpass filter + slight decay in feedback loop
+            out = (sample + this.ksLastOutput) * 0.495; 
+            this.ksLastOutput = out;
+            this.ksBuffer[this.ksWriteIdx | 0] = out;
+        }
+        
+        this.ksWriteIdx++;
+        if (this.ksWriteIdx >= this.ksBuffer.length) this.ksWriteIdx = 0;
+        
+        if (this.phase >= 1.0) this.phase -= 1.0;
+        return out * 2.0; // gain compensation
+    }
+
     this.phase += dt * freq;
     // Optimization: Fast wrap using subtract instead of mod
     if (this.phase >= 1.0) this.phase -= 1.0;
@@ -225,14 +303,49 @@ class Oscillator {
         break;
       case 'noise': 
         {
-            // Optimization: Look-up table noise
-            const index = (this.phase * 98765.4321) % WAVETABLE_SIZE;
+            const index = (this.time * 987654.3) % WAVETABLE_SIZE;
             const i = index | 0;
-            sample = NOISE_TABLE[i]; 
+            sample = NOISE_TABLE[i] || 0;
         } 
         break;
+      case 'bell':
+        {
+            // 2-Op FM Bell. Ratio = 2.0, non-linear envelope on modulator.
+            const modPhase = (this.phase * 2.0) % 1.0;
+            const i2 = (modPhase * WAVETABLE_SIZE) | 0;
+            const modSample = SINE_TABLE[i2];
+            
+            const modIndex = 3.0 * Math.exp(-this.time * 6.0); // sharp decay
+            let carPhase = this.phase + (modSample * modIndex);
+            
+            while(carPhase >= 1.0) carPhase -= 1.0;
+            while(carPhase < 0.0) carPhase += 1.0;
+            const i1 = (carPhase * WAVETABLE_SIZE) | 0;
+            sample = SINE_TABLE[i1];
+        }
+        break;
+      case 'epiano':
+        {
+            // 2-Op FM EPiano. Modulator fixed ratio (e.g., 14 for tine bite)
+            const modPhase = (this.phase * 14.0) % 1.0;
+            const i2 = (modPhase * WAVETABLE_SIZE) | 0;
+            const modSample = SINE_TABLE[i2];
+            
+            const modIndex = 1.5 * Math.exp(-this.time * 4.0); // moderate decay
+            let carPhase = this.phase + (modSample * modIndex) * 0.1;
+            
+            while(carPhase >= 1.0) carPhase -= 1.0;
+            while(carPhase < 0.0) carPhase += 1.0;
+            const i1 = (carPhase * WAVETABLE_SIZE) | 0;
+            sample = SINE_TABLE[i1];
+            
+            // Mix with fundamental for body
+            const iBody = (this.phase * WAVETABLE_SIZE) | 0;
+            sample = (sample * 0.3) + (SINE_TABLE[iBody] * 0.7);
+        }
+        break;
     }
-    return sample;
+    return Number.isNaN(sample) ? 0.0 : sample;
   }
 }
 `;
@@ -266,6 +379,7 @@ class Voice {
     this.baseFreq = freq; this.targetFreq = freq;
     this.active = true; this.startTime = currentTime; this.releaseTime = 0; this.activeTime = 0.0;
     this.envs.forEach(env => env.trigger());
+    this.oscs.forEach(osc => osc.reset());
     this.lfoPhases.fill(0.0);
     this.lfoRandoms[0] = (Math.random() * 2.0) - 1.0;
     this.lfoRandoms[1] = (Math.random() * 2.0) - 1.0;
@@ -273,7 +387,7 @@ class Voice {
   }
 
   release() { this.releaseTime = currentTime; this.envs.forEach(env => env.release()); }
-  hardStop() { this.active = false; this.envs.forEach(env => env.reset()); this.filters.forEach(f => f.reset()); this.resonator.reset(); this.noiseFilter.reset(); }
+  hardStop() { this.active = false; this.envs.forEach(env => env.reset()); this.filters.forEach(f => f.reset()); this.resonator.reset(); this.noiseFilter.reset(); this.oscs.forEach(osc => osc.reset()); }
   getLevel() { 
       // Optimization: Simple max check instead of Math.max arguments
       let m = this.envs[0].value;
@@ -330,17 +444,23 @@ class Voice {
     if (enabled1) {
         if (osc1.lfoTarget === 'pitch') osc1ModPitch = true;
         if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc1_pitch')) osc1ModPitch = true;
-        if (!osc1ModPitch) { const cents = osc1.coarseDetune + osc1.fineDetune; osc1StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); }
+        let cDetune = osc1.coarseDetune; if(typeof cDetune !== 'number') cDetune = 0;
+        let fDetune = osc1.fineDetune; if(typeof fDetune !== 'number') fDetune = 0;
+        if (!osc1ModPitch) { const cents = cDetune + fDetune; osc1StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); if(Number.isNaN(osc1StaticFreq)) osc1StaticFreq = 440; }
     }
     if (enabled2 && !isSerialMode) {
         if (osc2.lfoTarget === 'pitch') osc2ModPitch = true;
         if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc2_pitch')) osc2ModPitch = true;
-        if (!osc2ModPitch) { const cents = osc2.coarseDetune + osc2.fineDetune; osc2StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); }
+        let cDetune = osc2.coarseDetune; if(typeof cDetune !== 'number') cDetune = 0;
+        let fDetune = osc2.fineDetune; if(typeof fDetune !== 'number') fDetune = 0;
+        if (!osc2ModPitch) { const cents = cDetune + fDetune; osc2StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); if(Number.isNaN(osc2StaticFreq)) osc2StaticFreq = 440; }
     }
     if (enabled3 && !isSerialMode) {
         if (osc3.lfoTarget === 'pitch') osc3ModPitch = true;
         if (hasMatrix && matrix.some(r => r.enabled && r.target === 'osc3_pitch')) osc3ModPitch = true;
-        if (!osc3ModPitch) { const cents = osc3.coarseDetune + osc3.fineDetune; osc3StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); }
+        let cDetune = osc3.coarseDetune; if(typeof cDetune !== 'number') cDetune = 0;
+        let fDetune = osc3.fineDetune; if(typeof fDetune !== 'number') fDetune = 0;
+        if (!osc3ModPitch) { const cents = cDetune + fDetune; osc3StaticFreq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); if(Number.isNaN(osc3StaticFreq)) osc3StaticFreq = 440; }
     }
     
     this.activeTime += (len * dt);
@@ -433,10 +553,13 @@ class Voice {
             const target = osc1.lfoTarget;
             if (target === 'pitch') hardPitch = v * d; else if (target === 'filter') hardFilter = v * d * 20; else if (target === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
             
-            let freq;
+            let freq = 440;
             if (osc1ModPitch) {
-                const cents = osc1.coarseDetune + osc1.fineDetune + hardPitch + (modP1 * 1200);
+                let cDetune = osc1.coarseDetune; if(typeof cDetune !== 'number') cDetune = 0;
+                let fDetune = osc1.fineDetune; if(typeof fDetune !== 'number') fDetune = 0;
+                const cents = cDetune + fDetune + hardPitch + (modP1 * 1200);
                 freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0);
+                if (Number.isNaN(freq)) freq = 440;
             } else { freq = osc1StaticFreq; }
             
             let sig = oscs0.process(freq, wave1, dt);
@@ -472,8 +595,14 @@ class Voice {
                 let hardPitch = 0, hardFilter = 0, hardAmp = 1.0; const d = osc2.lfoDepth || 0; const v = this.lfoVals[1];
                 const target = osc2.lfoTarget;
                 if (target === 'pitch') hardPitch = v * d; else if (target === 'filter') hardFilter = v * d * 20; else if (target === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
-                let freq;
-                if (osc2ModPitch) { const cents = osc2.coarseDetune + osc2.fineDetune + hardPitch + (modP2 * 1200); freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); } else { freq = osc2StaticFreq; }
+                let freq = 440;
+                if (osc2ModPitch) {
+                    let cDetune = osc2.coarseDetune; if(typeof cDetune !== 'number') cDetune = 0;
+                    let fDetune = osc2.fineDetune; if(typeof fDetune !== 'number') fDetune = 0;
+                    const cents = cDetune + fDetune + hardPitch + (modP2 * 1200); 
+                    freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); 
+                    if (Number.isNaN(freq)) freq = 440;
+                } else { freq = osc2StaticFreq; }
                 let sig = oscs1.process(freq, wave2, dt);
                 const cut = osc2.filterCutoff + hardFilter + (modC2 * 5000); const res = Math.max(0, osc2.filterResonance + (modR2 * 10));
                 sig = flt1.process(sig, cut, res, this.sampleRate, fType2);
@@ -484,8 +613,14 @@ class Voice {
                 let hardPitch = 0, hardFilter = 0, hardAmp = 1.0; const d = osc3.lfoDepth || 0; const v = this.lfoVals[2];
                 const target = osc3.lfoTarget;
                 if (target === 'pitch') hardPitch = v * d; else if (target === 'filter') hardFilter = v * d * 20; else if (target === 'tremolo') hardAmp = 1.0 - (v * d * 0.005);
-                let freq;
-                if (osc3ModPitch) { const cents = osc3.coarseDetune + osc3.fineDetune + hardPitch + (modP3 * 1200); freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); } else { freq = osc3StaticFreq; }
+                let freq = 440;
+                if (osc3ModPitch) {
+                    let cDetune = osc3.coarseDetune; if(typeof cDetune !== 'number') cDetune = 0;
+                    let fDetune = osc3.fineDetune; if(typeof fDetune !== 'number') fDetune = 0;
+                    const cents = cDetune + fDetune + hardPitch + (modP3 * 1200); 
+                    freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); 
+                    if (Number.isNaN(freq)) freq = 440;
+                } else { freq = osc3StaticFreq; }
                 let sig = oscs2.process(freq, wave3, dt);
                 const cut = osc3.filterCutoff + hardFilter + (modC3 * 5000); const res = Math.max(0, osc3.filterResonance + (modR3 * 10));
                 sig = flt2.process(sig, cut, res, this.sampleRate, fType3);
@@ -544,6 +679,7 @@ class PrismaProcessor extends AudioWorkletProcessor {
   }
 
   normalizePreset(data) {
+      if (!data) data = {};
       return {
           osc1: { ...DUMMY_OSC_CONFIG, ...(data.osc1 || {}) }, osc2: { ...DUMMY_OSC_CONFIG, ...(data.osc2 || {}) }, osc3: { ...DUMMY_OSC_CONFIG, ...(data.osc3 || {}) },
           modMatrix: (data.modMatrix || []).map(row => ({ ...row, amount: (Number.isFinite(row.amount) ? row.amount : 0) / 100.0 })),
@@ -601,20 +737,22 @@ class PrismaProcessor extends AudioWorkletProcessor {
     if (OVERSAMPLE === 2) {
         for (let s = 0; s < len; s++) {
             const osIdx = s * 2;
-            // Optimization: Use fast_tanh instead of Math.tanh for saturation
             let sl1 = fast_tanh(this.mixBufferL[osIdx] * 0.8); let sr1 = fast_tanh(this.mixBufferR[osIdx] * 0.8);
             let sl2 = fast_tanh(this.mixBufferL[osIdx+1] * 0.8); let sr2 = fast_tanh(this.mixBufferR[osIdx+1] * 0.8);
             const outL = (sl1 + sl2) * 0.5; const outR = (sr1 + sr2) * 0.5;
-            const yL = outL - this.xm1L + 0.995 * this.ym1L; this.xm1L = outL; this.ym1L = yL;
-            const yR = outR - this.xm1R + 0.995 * this.ym1R; this.xm1R = outR; this.ym1R = yR;
+            let yL = outL - this.xm1L + 0.995 * this.ym1L; this.xm1L = outL; this.ym1L = yL;
+            let yR = outR - this.xm1R + 0.995 * this.ym1R; this.xm1R = outR; this.ym1R = yR;
+            if (Number.isNaN(yL)) { yL = 0.0; this.ym1L = 0.0; } 
+            if (Number.isNaN(yR)) { yR = 0.0; this.ym1R = 0.0; }
             channelL[s] = yL; if (channelR) channelR[s] = yR;
         }
     } else {
         for (let s = 0; s < len; s++) {
-            // Optimization: Use fast_tanh instead of Math.tanh
             const sl = fast_tanh(this.mixBufferL[s] * 0.8); const sr = fast_tanh(this.mixBufferR[s] * 0.8);
-            const yL = sl - this.xm1L + 0.995 * this.ym1L; this.xm1L = sl; this.ym1L = yL;
-            const yR = sr - this.xm1R + 0.995 * this.ym1R; this.xm1R = sr; this.ym1R = yR;
+            let yL = sl - this.xm1L + 0.995 * this.ym1L; this.xm1L = sl; this.ym1L = yL;
+            let yR = sr - this.xm1R + 0.995 * this.ym1R; this.xm1R = sr; this.ym1R = yR;
+            if (Number.isNaN(yL)) { yL = 0.0; this.ym1L = 0.0; } 
+            if (Number.isNaN(yR)) { yR = 0.0; this.ym1R = 0.0; }
             channelL[s] = yL; if (channelR) channelR[s] = yR;
         }
     }
