@@ -7,6 +7,7 @@ import FloatingControls from './components/FloatingControls';
 import LimitLayerControls from './components/LimitLayerControls';
 import RecordingControls from './components/RecordingControls';
 import SplashScreen from './components/SplashScreen';
+import DiagnosticOverlay from './components/DiagnosticOverlay';
 import { audioEngine } from './services/AudioEngine';
 import { midiService } from './services/MidiService';
 import { useStore } from './services/Store';
@@ -32,7 +33,18 @@ const App: React.FC = () => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSynthOpen, setIsSynthOpen] = useState(false);
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
   const [isSequencerOpen, setIsSequencerOpen] = useState(false);
+  const [isPhone, setIsPhone] = useState(false);
+
+  useEffect(() => {
+    const checkPhone = () => {
+      setIsPhone(window.innerWidth < 768);
+    };
+    checkPhone();
+    window.addEventListener('resize', checkPhone);
+    return () => window.removeEventListener('resize', checkPhone);
+  }, []);
 
   const diamondRef = useRef<TonalityDiamondHandle>(null);
 
@@ -98,6 +110,9 @@ const App: React.FC = () => {
   const handleAppStart = () => {
       startAudio();
       setHasStarted(true);
+      setTimeout(() => {
+          diamondRef.current?.centerView();
+      }, 150);
   };
 
   const handleLimitInteraction = (limit: number) => {
@@ -135,6 +150,7 @@ const App: React.FC = () => {
   const handleCenter = () => diamondRef.current?.centerView();
   const handleIncreaseDepth = () => diamondRef.current?.increaseDepth();
   const handleDecreaseDepth = () => diamondRef.current?.decreaseDepth();
+  const handleResetDepth = () => diamondRef.current?.resetDepth();
 
   const handleAddChord = () => {
       if (diamondRef.current) {
@@ -254,11 +270,14 @@ const App: React.FC = () => {
         {!hasStarted && <SplashScreen onStart={handleAppStart} />}
         
         <div className={`relative w-full h-[100dvh] overflow-hidden bg-slate-900 font-sans text-white transition-opacity duration-1000 ${hasStarted ? 'opacity-100' : 'opacity-0'}`}>
-          <div className="absolute z-50 pointer-events-none" style={{ top: headerTop, left: leftOffset }}>
-            <h1 className="text-sm font-bold tracking-widest text-slate-500 opacity-20 leading-none">PRISMATONAL</h1>
-          </div>
+          {!isPhone && (
+            <div className="absolute z-50 pointer-events-none" style={{ top: headerTop, left: leftOffset }}>
+              <h1 className="text-sm font-bold tracking-widest text-slate-500 opacity-20 leading-none">PRISMATONAL</h1>
+            </div>
+          )}
 
-          <div className="absolute z-50 flex gap-2 pointer-events-auto" style={{ top: headerTop, right: rightOffset }}>
+          <div className="absolute z-50 flex gap-1.5 pointer-events-auto" style={{ top: headerTop, right: rightOffset }}>
+              <button id="header-btn-diagnostic" onClick={() => setIsDiagnosticOpen(true)} className={headerBtnClass}>{isPhone ? "Labs" : "Labs & Demo"}</button>
               <button onClick={() => setIsSettingsOpen(true)} className={headerBtnClass}>Settings</button>
               <button onClick={() => setIsSynthOpen(true)} className={headerBtnClass}>Synth</button>
           </div>
@@ -281,6 +300,8 @@ const App: React.FC = () => {
           />
 
           <FloatingControls 
+            settings={settings}
+            updateSettings={updateSettings}
             volume={masterVolume} setVolume={setMasterVolume}
             spatialScale={spatialScale} setSpatialScale={setSpatialScale}
             brightness={brightness} setBrightness={setBrightness}
@@ -302,7 +323,7 @@ const App: React.FC = () => {
             onModulationReset={handleModulationReset}
             onShiftToggle={handleShiftToggle} isShiftModeActive={settings.isShiftModeActive}
             onCenter={handleCenter}
-            onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth}
+            onIncreaseDepth={handleIncreaseDepth} onDecreaseDepth={handleDecreaseDepth} onResetDepth={handleResetDepth}
             onAddChord={handleAddChord} toggleChord={toggleChord}
             onRemoveChord={handleRemoveChord}
             activeChordIds={activeChordIds} savedChords={settings.savedChords}
@@ -337,16 +358,99 @@ const App: React.FC = () => {
             onPresetChange={setPreset}
           />
 
-          <LimitLayerControls 
+          {!isPhone && (
+            <LimitLayerControls 
+              settings={settings} 
+              updateSettings={updateSettings} 
+              draggingId={draggingId} 
+              setDraggingId={setDraggingId} 
+              uiScale={effectiveScale}
+              isShortScreen={isShortScreen}
+            />
+          )}
+          <SettingsModal 
+            isOpen={isSettingsOpen} 
+            onClose={() => setIsSettingsOpen(false)} 
             settings={settings} 
-            updateSettings={updateSettings} 
-            draggingId={draggingId} 
-            setDraggingId={setDraggingId} 
-            uiScale={effectiveScale}
-            isShortScreen={isShortScreen}
+            updateSettings={updateSettings}
+            presets={presets}
+            setPreset={setPreset}
+            volume={masterVolume}
+            setVolume={setMasterVolume}
+            spatialScale={spatialScale}
+            setSpatialScale={setSpatialScale}
+            brightness={brightness}
+            setBrightness={setBrightness}
+            viewZoom={viewZoom}
+            setViewZoom={setViewZoom}
+            onPanic={handlePanic}
+            onOff={handleOff}
+            latchMode={latchMode}
+            onCenter={handleCenter}
+            onIncreaseDepth={handleIncreaseDepth}
+            onDecreaseDepth={handleDecreaseDepth}
+            onAddChord={handleAddChord}
+            onDroneSelect={handleDroneSelect}
+            onStringSelect={handleStringSelect}
+            onPluckedSelect={handlePluckedSelect}
+            onVoiceSelect={handleVoiceSelect}
+            onKeysSelect={handleKeysSelect}
+            onPercussionSelect={handlePercussionSelect}
+            onSustainToggle={handleSustainToggle}
+            onBendToggle={handleBendToggle}
+            onShiftToggle={handleShiftToggle}
+            onModulationToggle={handleModulationToggle}
+            onModulationUndo={handleModulationUndo}
+            onModulationReset={handleModulationReset}
+            activeChordIds={activeChordIds}
+            savedChords={settings.savedChords}
+            onArpToggle={handleArpToggle}
+            onArpBpmChange={handleArpBpmChange}
+            onPlayAll={handlePlayAll}
+            onStopAll={handleStopAll}
           />
-          <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} settings={settings} updateSettings={updateSettings} />
           <SynthControls isOpen={isSynthOpen} onClose={() => setIsSynthOpen(false)} presets={presets} onChange={setPreset} activeInstrumentMode={latchMode} />
+          <DiagnosticOverlay 
+            isOpen={isDiagnosticOpen} 
+            onClose={() => setIsDiagnosticOpen(false)} 
+            settings={settings}
+            updateSettings={updateSettings}
+            presets={presets}
+            setPreset={setPreset}
+            volume={masterVolume}
+            setVolume={setMasterVolume}
+            spatialScale={spatialScale}
+            setSpatialScale={setSpatialScale}
+            brightness={brightness}
+            setBrightness={setBrightness}
+            viewZoom={viewZoom}
+            setViewZoom={setViewZoom}
+            onPanic={handlePanic}
+            onOff={handleOff}
+            latchMode={latchMode}
+            onCenter={handleCenter}
+            onIncreaseDepth={handleIncreaseDepth}
+            onDecreaseDepth={handleDecreaseDepth}
+            onAddChord={handleAddChord}
+            onDroneSelect={handleDroneSelect}
+            onStringSelect={handleStringSelect}
+            onPluckedSelect={handlePluckedSelect}
+            onVoiceSelect={handleVoiceSelect}
+            onKeysSelect={handleKeysSelect}
+            onPercussionSelect={handlePercussionSelect}
+            onSustainToggle={handleSustainToggle}
+            onBendToggle={handleBendToggle}
+            onShiftToggle={handleShiftToggle}
+            onModulationToggle={handleModulationToggle}
+            onModulationUndo={handleModulationUndo}
+            onModulationReset={handleModulationReset}
+            activeChordIds={activeChordIds}
+            savedChords={settings.savedChords}
+            onArpToggle={handleArpToggle}
+            onArpBpmChange={handleArpBpmChange}
+            onPlayAll={handlePlayAll}
+            onStopAll={handleStopAll}
+          />
           
           <RecordingControls />
         </div>

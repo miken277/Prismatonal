@@ -87,6 +87,7 @@ class AudioEngine {
   
   // Final Output Stage
   private finalMasterGain: GainNode | null = null;
+  private analyserNode: AnalyserNode | null = null;
 
   private currentMasterVol: number = 0.8;
   private globalSpatialScale: number = 1.0;
@@ -355,6 +356,9 @@ class AudioEngine {
     this.masterFilter.connect(this.limiter);
     this.limiter.connect(this.finalMasterGain);
     this.finalMasterGain.connect(this.ctx.destination);
+    if (this.analyserNode) {
+        try { this.finalMasterGain.connect(this.analyserNode); } catch (e) {}
+    }
 
     this.dryGain = this.ctx.createGain();
     this.dryGain.connect(this.masterFilter);
@@ -547,6 +551,23 @@ class AudioEngine {
 
   public getContext(): AudioContext | null {
       return this.ctx;
+  }
+
+  public getAnalyser(): AnalyserNode | null {
+      if (this.isRemoteEngine) return null;
+      if (!this.ctx) return null;
+      if (!this.analyserNode) {
+          try {
+              this.analyserNode = this.ctx.createAnalyser();
+              this.analyserNode.fftSize = 512;
+              if (this.finalMasterGain) {
+                  this.finalMasterGain.connect(this.analyserNode);
+              }
+          } catch (e) {
+              console.warn("Could not create analyser node", e);
+          }
+      }
+      return this.analyserNode;
   }
 
   public connectToRecordingDestination(destination: AudioNode) {

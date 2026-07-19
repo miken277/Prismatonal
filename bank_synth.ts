@@ -147,23 +147,6 @@ export const ETHEREAL_LEADS = [
         { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.4, filterType: 'lowpass', filterCutoff: 400 }, 
         { enabled: false }, 
         { spread: 0.2, delayMix: 0.3, reverbType: 'plate', compressorThreshold: -15, compressorRatio: 8, modMatrix: [{ id: 'env-cut', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 50 }] }
-    ),
-    p("Phase Shift", "Leads", 
-        // Osc 1: Square
-        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.5 }, 
-        // Osc 2: Detuned Square (LFO Detune)
-        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.5, lfoTarget: 'pitch', lfoRate: 0.2, lfoDepth: 15 }, 
-        { enabled: false }, 
-        { spread: 0.8, stereoPanSpeed: 0.2, stereoPanDepth: 0.5, reverbType: 'plate' }
-    ),
-    p("Soft Glow", "Leads", 
-        // Osc 1: Soft Triangle
-        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.8, filterType: 'lowpass', filterCutoff: 1200, attack: 0.1, release: 0.5 }, 
-        // Osc 2: Sine support
-        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 7, gain: 0.4 }, 
-        // Osc 3: 5th
-        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 702, gain: 0.3 }, 
-        { spread: 0.5, reverbType: 'hall', reverbMix: 0.6, delayMix: 0.3 }
     )
 ];
 
@@ -207,12 +190,6 @@ export const ETHEREAL_BASS = [
         { enabled: false }, 
         { spread: 0.5, stereoPanSpeed: 2.0, stereoPanDepth: 0.4, reverbType: 'room' }
     ),
-    p("Sub Drone", "Bass", 
-        { enabled: true, waveform: WaveformType.SINE, gain: 0.9 }, 
-        { enabled: true, waveform: WaveformType.SINE, coarseDetune: 5, gain: 0.5 }, 
-        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.2, filterType: 'lowpass', filterCutoff: 100 }, 
-        { spread: 0.6, reverbType: 'cathedral', reverbMix: 0.5 }
-    ),
     p("Reso Bass", "Bass", 
         // Osc 1: Acid-ish
         { enabled: true, waveform: WaveformType.SAWTOOTH, gain: 0.7, filterType: 'lowpass', filterCutoff: 400, filterResonance: 8.0, lfoTarget: 'filter', lfoRate: 0.2, lfoDepth: 20 }, 
@@ -220,14 +197,6 @@ export const ETHEREAL_BASS = [
         { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.5 }, 
         { enabled: false }, 
         { spread: 0.2, delayMix: 0.3, reverbType: 'plate', modMatrix: [{ id: 'env-cut', enabled: true, source: 'env1', target: 'osc1_cutoff', amount: 50 }] }
-    ),
-    p("Pluck Abyss", "Bass", 
-        // Osc 1: Short Square
-        { enabled: true, waveform: WaveformType.SQUARE, gain: 0.7, decay: 0.4, sustain: 0, filterType: 'lowpass', filterCutoff: 800 }, 
-        // Osc 2: Sub Triangle
-        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: -1200, gain: 0.6, decay: 0.6, sustain: 0 }, 
-        { enabled: false }, 
-        { spread: 0.3, reverbType: 'room', reverbMix: 0.3 }
     ),
     p("Growling Star", "Bass", 
         // Osc 1: Detuned Saw Stack

@@ -357,6 +357,7 @@ class Voice {
     this.sampleRate = sampleRate;
     this.active = false; this.id = ''; this.type = 'normal'; this.mode = 'gate'; this.panPos = 0; 
     this.baseFreq = 440; this.targetFreq = 440; this.startTime = 0; this.releaseTime = 0; this.activeTime = 0.0;
+    this.osc1SmoothedFreq = 440; this.osc2SmoothedFreq = 440; this.osc3SmoothedFreq = 440;
     this.oscs = [new Oscillator(sampleRate), new Oscillator(sampleRate), new Oscillator(sampleRate)];
     this.filters = [ new SVF(), new SVF(), new SVF() ];
     this.resonator = new ResonatorBank();
@@ -377,6 +378,7 @@ class Voice {
   trigger(id, freq, type, mode) {
     this.id = id; this.type = type || 'normal'; this.mode = mode || 'gate';
     this.baseFreq = freq; this.targetFreq = freq;
+    this.osc1SmoothedFreq = freq; this.osc2SmoothedFreq = freq; this.osc3SmoothedFreq = freq;
     this.active = true; this.startTime = currentTime; this.releaseTime = 0; this.activeTime = 0.0;
     this.envs.forEach(env => env.trigger());
     this.oscs.forEach(osc => osc.reset());
@@ -426,6 +428,8 @@ class Voice {
     const noiseGain = preset.noiseGain || 0;
     const noiseCutoff = preset.noiseCutoff || 4000;
     const glideParam = preset.portamento || 0;
+    const smoothTimeConst = 0.003; // 3ms time constant for ultra-smooth continuous pitch changes
+    const smoothCoef = 1.0 - Math.exp(-dt / smoothTimeConst);
     
     const diff = this.targetFreq - this.baseFreq;
     if (Math.abs(diff) > 0.001) {
@@ -562,7 +566,8 @@ class Voice {
                 if (Number.isNaN(freq)) freq = 440;
             } else { freq = osc1StaticFreq; }
             
-            let sig = oscs0.process(freq, wave1, dt);
+            this.osc1SmoothedFreq += (freq - this.osc1SmoothedFreq) * smoothCoef;
+            let sig = oscs0.process(this.osc1SmoothedFreq, wave1, dt);
             const tiltMod = isSerialMode ? (ev1 * 2000) : 0;
             const cut1 = osc1.filterCutoff + hardFilter + (modC1 * 5000) + tiltMod;
             const res1 = Math.max(0, osc1.filterResonance + (modR1 * 10));
@@ -603,7 +608,8 @@ class Voice {
                     freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); 
                     if (Number.isNaN(freq)) freq = 440;
                 } else { freq = osc2StaticFreq; }
-                let sig = oscs1.process(freq, wave2, dt);
+                this.osc2SmoothedFreq += (freq - this.osc2SmoothedFreq) * smoothCoef;
+                let sig = oscs1.process(this.osc2SmoothedFreq, wave2, dt);
                 const cut = osc2.filterCutoff + hardFilter + (modC2 * 5000); const res = Math.max(0, osc2.filterResonance + (modR2 * 10));
                 sig = flt1.process(sig, cut, res, this.sampleRate, fType2);
                 voiceMix += sig * gain2 * ev2 * hardAmp * Math.max(0, 1.0 + modG2);
@@ -621,7 +627,8 @@ class Voice {
                     freq = this.baseFreq * globalBend * Math.pow(2, cents / 1200.0); 
                     if (Number.isNaN(freq)) freq = 440;
                 } else { freq = osc3StaticFreq; }
-                let sig = oscs2.process(freq, wave3, dt);
+                this.osc3SmoothedFreq += (freq - this.osc3SmoothedFreq) * smoothCoef;
+                let sig = oscs2.process(this.osc3SmoothedFreq, wave3, dt);
                 const cut = osc3.filterCutoff + hardFilter + (modC3 * 5000); const res = Math.max(0, osc3.filterResonance + (modR3 * 10));
                 sig = flt2.process(sig, cut, res, this.sampleRate, fType3);
                 voiceMix += sig * gain3 * ev3 * hardAmp * Math.max(0, 1.0 + modG3);

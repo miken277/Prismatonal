@@ -19,7 +19,11 @@ const VolumeWheel: React.FC<Props> = ({ value, onChange, color, width, height, u
 
   const handlePointerDown = (e: React.PointerEvent) => {
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch (err) {
+      // Safe fallback for simulated or offline pointer systems
+    }
     setIsDragging(true);
     dragStartValue.current = value;
     dragStartY.current = e.clientY;

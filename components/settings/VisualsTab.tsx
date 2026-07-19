@@ -142,6 +142,10 @@ const VisualsTab: React.FC<Props> = ({ settings, updateSettings }) => {
                             <input type="checkbox" checked={settings.uiUnlocked} onChange={(e) => handleChange('uiUnlocked', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-yellow-500 focus:ring-yellow-500" />
                             <div><span className={`font-bold block ${settings.uiUnlocked ? 'text-yellow-400' : 'text-slate-300'}`}>Unlock UI Layout</span></div>
                         </label>
+                        <label className="flex items-center space-x-3 cursor-pointer p-3 bg-slate-700/50 rounded-lg border border-purple-500/30">
+                            <input type="checkbox" checked={settings.enableMapPanning} onChange={(e) => handleChange('enableMapPanning', e.target.checked)} className="w-5 h-5 rounded border-slate-600 text-purple-500 focus:ring-purple-500" />
+                            <div><span className={`font-bold block ${settings.enableMapPanning ? 'text-purple-400' : 'text-slate-300'}`}>Enable Touch/Drag Panning</span></div>
+                        </label>
                         <div className="bg-slate-900/40 p-3 rounded border border-slate-700/50 space-y-2">
                             <label className="block text-sm font-semibold text-slate-300">Global UI Scale</label>
                             <div className="flex gap-2">

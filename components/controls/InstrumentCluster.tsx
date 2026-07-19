@@ -24,15 +24,16 @@ interface Props {
     position: { x: number, y: number };
     onDragStart: (e: React.PointerEvent) => void;
     uiUnlocked: boolean;
+    isPhone?: boolean;
 }
 
 const InstrumentCluster: React.FC<Props> = ({
     latchMode, onLatch, onSust, onPluck, onVoice, onKeys, onPercussion, activeSustainedModes, onClearSustain,
-    presets, onPresetChange, uiScale, position, onDragStart, uiUnlocked
+    presets, onPresetChange, uiScale, position, onDragStart, uiUnlocked, isPhone = false
 }) => {
     
-    // Resize to ~75% of original (104 -> 78)
-    const instrButtonSize = 78 * uiScale; 
+    // Resize to ~75% of original (104 -> 78) on desktop; make even more compact on phone
+    const instrButtonSize = isPhone ? 54 : 78 * uiScale; 
     const wheelWidth = instrButtonSize * 0.45;
     
     const updatePatchGain = (mode: PlayMode, val: number) => {
@@ -68,7 +69,7 @@ const InstrumentCluster: React.FC<Props> = ({
         const baseStyle = {
             width: instrButtonSize,
             height: instrButtonSize,
-            fontSize: 12 * uiScale, // Scaled down font size
+            fontSize: isPhone ? 10 : 12 * uiScale, // Scaled down font size
             borderColor: isSelected ? color : 'rgba(148, 163, 184, 0.2)', // slate-400/20
             backgroundColor: isSelected ? `${color}20` : 'rgba(30, 41, 59, 0.6)', // slate-800/60
             color: isSelected ? 'white' : 'rgba(148, 163, 184, 0.8)',
@@ -123,20 +124,22 @@ const InstrumentCluster: React.FC<Props> = ({
 
     return (
         <div 
-            className={`absolute flex flex-col gap-3 z-[140] bg-slate-950/80 p-2.5 rounded-2xl backdrop-blur-md border border-slate-700/50 shadow-2xl cursor-move transition-shadow ${uiUnlocked ? 'ring-2 ring-yellow-500/50' : 'hover:shadow-[0_0_20px_rgba(0,0,0,0.5)]'}`}
-            style={{ 
+            className={isPhone ? "relative flex flex-col gap-2.5 w-full bg-transparent p-0 border-0 shadow-none" : `absolute flex flex-col gap-3 z-[140] bg-slate-950/80 p-2.5 rounded-2xl backdrop-blur-md border border-slate-700/50 shadow-2xl cursor-move transition-shadow ${uiUnlocked ? 'ring-2 ring-yellow-500/50' : 'hover:shadow-[0_0_20px_rgba(0,0,0,0.5)]'}`}
+            style={isPhone ? { touchAction: 'none' } : { 
                 left: position.x, 
                 top: position.y,
                 touchAction: 'none'
             }}
-            onPointerDown={onDragStart}
+            onPointerDown={isPhone ? undefined : onDragStart}
         >
             <div className="absolute inset-0 bg-gradient-to-b from-white/5 to-transparent rounded-2xl pointer-events-none" />
             
-            {/* Header / Handle */}
-            <div className="flex justify-center pb-1 border-b border-white/5 mb-1 opacity-50">
-                <div className="w-8 h-1 bg-slate-600 rounded-full" />
-            </div>
+            {/* Header / Handle (only visible on desktop) */}
+            {!isPhone && (
+                <div className="flex justify-center pb-1 border-b border-white/5 mb-1 opacity-50">
+                    <div className="w-8 h-1 bg-slate-600 rounded-full" />
+                </div>
+            )}
 
             {/* Strings (Blue) - Top */}
             {renderInstrument(2, "Strings", 'normal', onSust, MODE_COLORS[2])}

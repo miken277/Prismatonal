@@ -10,6 +10,7 @@ interface Props {
   setDraggingId: (id: string | null) => void;
   uiScale?: number;
   isShortScreen?: boolean;
+  isPhone?: boolean;
 }
 
 const LIMITS = [1, 3, 5, 7, 9, 11, 13, 15];
@@ -27,11 +28,20 @@ const LIMIT_TO_INDEX: Record<number, number> = {
     15: 7
 };
 
-const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggingId, setDraggingId, uiScale = 1.0, isShortScreen = false }) => {
+const EXPLORER_LEVELS_TO_ILLUMINATE: Record<number, number> = {
+  1: 5,
+  2: 7,
+  3: 11,
+  4: 13,
+  5: 15,
+  6: 15
+};
+
+const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggingId, setDraggingId, uiScale = 1.0, isShortScreen = false, isPhone = false }) => {
   const { uiUnlocked, uiPositions } = settings;
   
-  const buttonSize = 75 * uiScale; 
-  const iconSize = 37 * uiScale; 
+  const buttonSize = isPhone ? 46 : 75 * uiScale; 
+  const iconSize = isPhone ? 24 : 37 * uiScale; 
 
   // Check if the primary nodes for this limit are enabled in the matrix mask
   const isVisible = (limit: number) => {
@@ -105,9 +115,9 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
 
   return (
     <div 
-        className={`absolute flex flex-col gap-1 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-        style={{ left: uiPositions.layers.x, top: uiPositions.layers.y, touchAction: 'none' }}
-        onPointerDown={(e) => handleDrag(e, 'layers')}
+        className={isPhone ? "relative flex flex-col gap-1.5 w-full bg-transparent p-1 border-0 shadow-none" : `absolute flex flex-col gap-1 z-[140] bg-slate-900/50 p-2 rounded-xl backdrop-blur-sm border border-slate-700/50 ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+        style={isPhone ? {} : { left: uiPositions.layers.x, top: uiPositions.layers.y, touchAction: 'none' }}
+        onPointerDown={isPhone ? undefined : (e) => handleDrag(e, 'layers')}
     >
       {LIMITS.map(limit => {
         const visible = isVisible(limit);
@@ -140,22 +150,29 @@ const LimitLayerControls: React.FC<Props> = ({ settings, updateSettings, draggin
             </button>
             
             {/* Color/Select Layer Button */}
-            <button 
-              onClick={(e) => { e.stopPropagation(); !uiUnlocked && bringToFront(limit); }}
-              className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-shadow ${uiUnlocked ? 'pointer-events-none' : ''}`}
-              style={{ 
-                width: buttonSize, 
-                height: buttonSize,
-                fontSize: 16 * uiScale,
-                backgroundColor: color, 
-                borderColor: isTop ? 'white' : 'transparent',
-                boxShadow: isTop ? '0 0 10px rgba(255,255,255,0.5)' : 'none',
-                opacity: visible ? 1 : 0.2
-              }}
-              onPointerDown={(e) => !uiUnlocked && e.stopPropagation()}
-            >
-              {limit}
-            </button>
+            {(() => {
+              const isIlluminated = settings.explorerDepthLevel !== undefined && EXPLORER_LEVELS_TO_ILLUMINATE[settings.explorerDepthLevel] === limit;
+              return (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); !uiUnlocked && bringToFront(limit); }}
+                  className={`rounded-lg shadow-md border-2 transition-all transform active:scale-95 flex items-center justify-center font-bold text-shadow ${isIlluminated ? 'animate-pulse scale-105 border-yellow-400' : ''} ${uiUnlocked ? 'pointer-events-none' : ''}`}
+                  style={{ 
+                    width: buttonSize, 
+                    height: buttonSize,
+                    fontSize: 16 * uiScale,
+                    backgroundColor: color, 
+                    borderColor: isIlluminated ? '#f59e0b' : (isTop ? 'white' : 'transparent'),
+                    boxShadow: isIlluminated 
+                      ? '0 0 25px #f59e0b, inset 0 0 12px rgba(255,255,255,0.7)' 
+                      : (isTop ? '0 0 10px rgba(255,255,255,0.5)' : 'none'),
+                    opacity: (visible || isIlluminated) ? 1 : 0.2
+                  }}
+                  onPointerDown={(e) => !uiUnlocked && e.stopPropagation()}
+                >
+                  {limit}
+                </button>
+              );
+            })()}
           </div>
         );
       })}

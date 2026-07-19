@@ -232,7 +232,35 @@ class PrismaStore {
           if (partial) {
               const nextState = { ...this.state, ...partial };
               
-              // Migrate imported data
+              const cores = navigator.hardwareConcurrency || 4;
+              const safePolyphony = cores <= 4 ? 6 : (cores >= 8 ? 12 : 8);
+              const safeOversampling = false;
+
+              // Migrate imported settings with comprehensive deep merge to ensure backwards compatibility
+              if (nextState.settings) {
+                  const parsed = nextState.settings;
+                  nextState.settings = {
+                      ...DEFAULT_SETTINGS,
+                      ...parsed,
+                      // Self-heal empty or stripped background presets with app defaults
+                      backgroundPresets: (!parsed.backgroundPresets || parsed.backgroundPresets.length === 0)
+                          ? DEFAULT_SETTINGS.backgroundPresets
+                          : parsed.backgroundPresets,
+                      // Self-heal null background image with app default
+                      backgroundImageData: !parsed.backgroundImageData
+                          ? DEFAULT_SETTINGS.backgroundImageData
+                          : parsed.backgroundImageData,
+                      // Safety check polyphony limit for weak devices
+                      polyphony: (parsed.polyphony && parsed.polyphony > 16 && cores <= 4) ? 8 : (parsed.polyphony || safePolyphony),
+                      enableOversampling: (parsed.enableOversampling !== undefined) ? parsed.enableOversampling : safeOversampling,
+                      colors: { ...DEFAULT_COLORS, ...(parsed.colors || {}) },
+                      keyMappings: { ...DEFAULT_SETTINGS.keyMappings, ...(parsed.keyMappings || {}) },
+                      uiPositions: { ...DEFAULT_SETTINGS.uiPositions, ...(parsed.uiPositions || {}) },
+                      uiSizes: { ...DEFAULT_SETTINGS.uiSizes, ...(parsed.uiSizes || {}) },
+                  };
+              }
+
+              // Migrate imported presets
               if (nextState.presets) {
                   nextState.presets = {
                       normal: this.migratePreset(nextState.presets.normal),

@@ -2,5 +2,5 @@
   "name": "PrismaTonal Web",
   "description": "A high-performance multitouch microtonal synthesizer featuring a configurable Tonality Diamond, polyphonic synthesis, and customizable micro-pitch interactions.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

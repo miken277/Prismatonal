@@ -57,12 +57,6 @@ export const ATMOSPHERE_PATCHES = [
         { enabled: true, waveform: WaveformType.SAWTOOTH, coarseDetune: -2405, gain: 0.3, filterCutoff: 100 }, 
         { spread: 0.7, reverbType: 'cathedral', reverbMix: 0.9, compressorThreshold: -25 }
     ),
-    p("Swamp", "Atmosphere", 
-        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.6, lfoTarget: 'pitch', lfoRate: 6, lfoDepth: 20, filterCutoff: 600 }, 
-        { enabled: true, waveform: WaveformType.TRIANGLE, coarseDetune: 700, gain: 0.4, lfoTarget: 'pitch', lfoRate: 5, lfoDepth: 15 }, 
-        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.3, filterCutoff: 400 }, 
-        { spread: 0.6, reverbType: 'plate', reverbMix: 0.6 }
-    ),
     // Industrial - Rhythmic, metallic, gritty (Cleaned up noise)
     p("Industrial", "Atmosphere",
         // Osc 1: Deep Drone

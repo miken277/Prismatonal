@@ -6,16 +6,94 @@ import BehaviorTab from './settings/BehaviorTab';
 import VisualsTab from './settings/VisualsTab';
 import MidiTab from './settings/MidiTab';
 import DataTab from './settings/DataTab';
+import DiagnosticOverlay from './DiagnosticOverlay';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   settings: AppSettings;
   updateSettings: (s: Partial<AppSettings> | ((prev: AppSettings) => AppSettings)) => void;
+  
+  // Developer Suite Props
+  presets?: any;
+  setPreset?: any;
+  volume?: any;
+  setVolume?: any;
+  spatialScale?: any;
+  setSpatialScale?: any;
+  brightness?: any;
+  setBrightness?: any;
+  viewZoom?: any;
+  setViewZoom?: any;
+  onPanic?: any;
+  onOff?: any;
+  latchMode?: any;
+  onCenter?: any;
+  onIncreaseDepth?: any;
+  onDecreaseDepth?: any;
+  onAddChord?: any;
+  onDroneSelect?: any;
+  onStringSelect?: any;
+  onPluckedSelect?: any;
+  onVoiceSelect?: any;
+  onKeysSelect?: any;
+  onPercussionSelect?: any;
+  onSustainToggle?: any;
+  onBendToggle?: any;
+  onShiftToggle?: any;
+  onModulationToggle?: any;
+  onModulationUndo?: any;
+  onModulationReset?: any;
+  activeChordIds?: any;
+  savedChords?: any;
+  onArpToggle?: any;
+  onArpBpmChange?: any;
+  onPlayAll?: any;
+  onStopAll?: any;
 }
 
-const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSettings }) => {
-  const [activeTab, setActiveTab] = useState<'tonality' | 'behavior' | 'visuals' | 'midi' | 'data'>('tonality');
+const SettingsModal: React.FC<Props> = ({ 
+  isOpen, 
+  onClose, 
+  settings, 
+  updateSettings,
+  presets,
+  setPreset,
+  volume,
+  setVolume,
+  spatialScale,
+  setSpatialScale,
+  brightness,
+  setBrightness,
+  viewZoom,
+  setViewZoom,
+  onPanic,
+  onOff,
+  latchMode,
+  onCenter,
+  onIncreaseDepth,
+  onDecreaseDepth,
+  onAddChord,
+  onDroneSelect,
+  onStringSelect,
+  onPluckedSelect,
+  onVoiceSelect,
+  onKeysSelect,
+  onPercussionSelect,
+  onSustainToggle,
+  onBendToggle,
+  onShiftToggle,
+  onModulationToggle,
+  onModulationUndo,
+  onModulationReset,
+  activeChordIds,
+  savedChords,
+  onArpToggle,
+  onArpBpmChange,
+  onPlayAll,
+  onStopAll
+}) => {
+  const [activeTab, setActiveTab] = useState<'tonality' | 'behavior' | 'visuals' | 'midi' | 'data' | 'developer'>('tonality');
 
   if (!isOpen) return null;
 
@@ -42,6 +120,7 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
            <button onClick={() => setActiveTab('visuals')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap text-sm md:text-base ${activeTab === 'visuals' ? 'text-pink-400 border-b-2 border-pink-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Visuals</button>
            <button onClick={() => setActiveTab('midi')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap text-sm md:text-base ${activeTab === 'midi' ? 'text-green-400 border-b-2 border-green-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>MIDI</button>
            <button onClick={() => setActiveTab('data')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap text-sm md:text-base ${activeTab === 'data' ? 'text-orange-400 border-b-2 border-orange-400 bg-slate-800' : 'text-slate-500 hover:text-slate-300'}`}>Data</button>
+           <button onClick={() => setActiveTab('developer')} className={`flex-1 py-3 px-4 font-semibold transition whitespace-nowrap text-sm md:text-base ${activeTab === 'developer' ? 'text-rose-400 border-b-2 border-rose-400 bg-slate-800' : 'text-slate-500 hover:text-rose-300'}`}>Developer Suite</button>
         </div>
 
         {/* Content */}
@@ -64,6 +143,51 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, settings, updateSetti
 
             {activeTab === 'data' && (
                 <DataTab onClose={onClose} />
+            )}
+
+            {activeTab === 'developer' && (
+                <DiagnosticOverlay
+                    isOpen={true}
+                    onClose={() => {}}
+                    inline={true}
+                    settings={settings}
+                    updateSettings={updateSettings}
+                    presets={presets}
+                    setPreset={setPreset}
+                    volume={volume}
+                    setVolume={setVolume}
+                    spatialScale={spatialScale}
+                    setSpatialScale={setSpatialScale}
+                    brightness={brightness}
+                    setBrightness={setBrightness}
+                    viewZoom={viewZoom}
+                    setViewZoom={setViewZoom}
+                    onPanic={onPanic}
+                    onOff={onOff}
+                    latchMode={latchMode}
+                    onCenter={onCenter}
+                    onIncreaseDepth={onIncreaseDepth}
+                    onDecreaseDepth={onDecreaseDepth}
+                    onAddChord={onAddChord}
+                    onDroneSelect={onDroneSelect}
+                    onStringSelect={onStringSelect}
+                    onPluckedSelect={onPluckedSelect}
+                    onVoiceSelect={onVoiceSelect}
+                    onKeysSelect={onKeysSelect}
+                    onPercussionSelect={onPercussionSelect}
+                    onSustainToggle={onSustainToggle}
+                    onBendToggle={onBendToggle}
+                    onShiftToggle={onShiftToggle}
+                    onModulationToggle={onModulationToggle}
+                    onModulationUndo={onModulationUndo}
+                    onModulationReset={onModulationReset}
+                    activeChordIds={activeChordIds}
+                    savedChords={savedChords}
+                    onArpToggle={onArpToggle}
+                    onArpBpmChange={onArpBpmChange}
+                    onPlayAll={onPlayAll}
+                    onStopAll={onStopAll}
+                />
             )}
         </div>
       </div>

@@ -33,6 +33,8 @@ export interface RenderState {
     latchMode: number;
     phantomNodes?: Map<string, LatticeNode>; 
     shiftGhostNodes?: Map<string, LatticeNode>; // Changed from internal Set logic to explicit Map of Nodes
+    explorerPhantomNodes?: Map<string, LatticeNode>;
+    explorerPermanentNodes?: Map<string, LatticeNode>;
 }
 
 const MODE_PRIORITY: Record<string | number, number> = {
@@ -85,7 +87,7 @@ export class LatticeRenderer {
     }
 
     private renderStatic(canvas: HTMLCanvasElement, state: RenderState) {
-        const { data, settings, effectiveScale, centerOffset, view } = state;
+        const { data, settings, effectiveScale, centerOffset, view, explorerPhantomNodes, explorerPermanentNodes } = state;
         
         const deps = JSON.stringify({
             tuning: settings.tuningSystem,
@@ -102,7 +104,9 @@ export class LatticeRenderer {
             nodesLen: data.nodes.length,
             linesLen: data.lines.length,
             path: settings.modulationPath,
-            vx: view.x, vy: view.y, vw: view.w, vh: view.h 
+            vx: view.x, vy: view.y, vw: view.w, vh: view.h,
+            explorerDepthLevel: settings.explorerDepthLevel,
+            explorerAnchorNodeId: settings.explorerAnchorNodeId
         });
 
         if (deps === this.prevStaticDeps) return;
@@ -158,7 +162,20 @@ export class LatticeRenderer {
         ctx.globalAlpha = 1.0; // Reset alpha after lines
 
         // --- 2. Draw Nodes ---
-        for (const node of data.nodes) {
+        const staticNodes = [...data.nodes];
+        
+        // Append any permanent explorer nodes that are NOT mathematically part of the current active standard lattice
+        const finalStaticNodes = [...staticNodes];
+        if (explorerPermanentNodes) {
+            const existingIds = new Set(staticNodes.map(n => n.id));
+            explorerPermanentNodes.forEach((node, id) => {
+                if (!existingIds.has(id)) {
+                    finalStaticNodes.push(node);
+                }
+            });
+        }
+
+        for (const node of finalStaticNodes) {
             const x = node.x * spacing + centerOffset;
             const y = node.y * spacing + centerOffset;
             if (x < cullLeft || x > cullRight || y < cullTop || y > cullBottom) continue;
@@ -227,6 +244,7 @@ export class LatticeRenderer {
     private renderDynamic(bgCanvas: HTMLCanvasElement, activeCanvas: HTMLCanvasElement, state: RenderState) {
         const { 
             data, settings, visualLatchedNodes, activeLines, brightenedLines, phantomNodes, shiftGhostNodes,
+            explorerPhantomNodes, explorerPermanentNodes,
             effectiveScale, centerOffset, view, time 
         } = state;
 
@@ -335,6 +353,77 @@ export class LatticeRenderer {
             });
         }
 
+        // --- RENDER EXPLORER PHANTOM NODES (GHOSTLY OUTLINES) ---
+        if (explorerPhantomNodes && explorerPhantomNodes.size > 0) {
+            explorerPhantomNodes.forEach((phantomNode) => {
+                const px = phantomNode.x * spacing + centerOffset;
+                const py = phantomNode.y * spacing + centerOffset;
+                if (px < cullLeft || px > cullRight || py < cullTop || py > cullBottom) return;
+
+                const vis = settings.limitVisuals?.[phantomNode.limitTop] || { size: 1 };
+                const pRadius = Math.max(0, baseRadius * vis.size * settings.latchedZoomScale);
+
+                // Determine if this exact coordinate nodeId is already showing as a solid regular/permanent node
+                let isAlreadyShowing = this.cachedNodeMap.has(phantomNode.id) || 
+                                         !!(explorerPermanentNodes && explorerPermanentNodes.has(phantomNode.id));
+                
+                if (!isAlreadyShowing) {
+                     // Check if an overlapping node visually occupies this space 
+                     for (const staticNode of this.cachedNodeMap.values()) {
+                         if (Math.abs(staticNode.x - phantomNode.x) < 0.01 && Math.abs(staticNode.y - phantomNode.y) < 0.01) {
+                             isAlreadyShowing = true;
+                             break;
+                         }
+                     }
+                }
+
+                activeCtx.beginPath();
+                if (isDiamond) {
+                    activeCtx.moveTo(px, py - pRadius); activeCtx.lineTo(px + pRadius, py); activeCtx.lineTo(px, py + pRadius); activeCtx.lineTo(px - pRadius, py);
+                } else {
+                    activeCtx.arc(px, py, pRadius, 0, Math.PI * 2);
+                }
+                activeCtx.closePath();
+
+                if (isAlreadyShowing) {
+                    // Dotted line outline only, representing pointing out where these nodes are; no duplication of label/fill
+                    activeCtx.strokeStyle = isFlatSkin ? '#64748b' : 'rgba(255, 255, 255, 0.75)';
+                    activeCtx.lineWidth = 1.8 * effectiveScale;
+                    activeCtx.setLineDash([3 * effectiveScale, 3 * effectiveScale]);
+                    activeCtx.stroke();
+                    activeCtx.setLineDash([]);
+                } else {
+                    // Translucency overlay
+                    activeCtx.fillStyle = isFlatSkin ? 'rgba(100, 116, 139, 0.05)' : 'rgba(255, 255, 255, 0.03)';
+                    activeCtx.fill();
+                    
+                    // Dashed outline
+                    activeCtx.strokeStyle = isFlatSkin ? '#64748b' : 'rgba(255, 255, 255, 0.7)';
+                    activeCtx.lineWidth = 1.5 * effectiveScale;
+                    activeCtx.setLineDash([3 * effectiveScale, 3 * effectiveScale]);
+                    activeCtx.stroke();
+                    activeCtx.setLineDash([]);
+
+                    // Draw Text label
+                    if (settings.buttonSizeScale * vis.size > 0.4) {
+                        activeCtx.fillStyle = isFlatSkin ? '#475569' : 'rgba(255, 255, 255, 0.6)';
+                        activeCtx.textAlign = 'center'; activeCtx.textBaseline = 'middle';
+                        let fontSize = Math.max(10, Math.min(18, 14 * settings.buttonSizeScale * vis.size)) * settings.nodeTextSizeScale * effectiveScale;
+                        activeCtx.font = `bold ${fontSize}px sans-serif`;
+                        const spacingY = settings.showFractionBar ? 0.55 : 0.50;
+                        activeCtx.fillText(phantomNode.n.toString(), px, py - (pRadius * spacingY));
+                        if (settings.showFractionBar) {
+                            activeCtx.beginPath(); activeCtx.moveTo(px - (pRadius * 0.4), py); activeCtx.lineTo(px + (pRadius * 0.4), py);
+                            activeCtx.lineWidth = 1 * effectiveScale;
+                            activeCtx.strokeStyle = isFlatSkin ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.3)';
+                            activeCtx.stroke();
+                        }
+                        activeCtx.fillText(phantomNode.d.toString(), px, py + (pRadius * spacingY));
+                    }
+                }
+            });
+        }
+
         // 1. Draw Brightened Lines (Neighbor Hints)
         if (brightenedLines.length > 0) {
             for (const line of brightenedLines) {
@@ -363,11 +452,24 @@ export class LatticeRenderer {
 
         // 3. Draw Active Nodes (Normal & Phantom)
         for (const [id, activations] of visualLatchedNodes.entries()) {
-             // Check both main grid and phantom fallback
-             const node = this.cachedNodeMap.get(id) || phantomNodes?.get(id);
+             // Check both main grid, shift phantoms, and explorer phantoms/permanents
+             const node = this.cachedNodeMap.get(id) || 
+                          phantomNodes?.get(id) || 
+                          explorerPhantomNodes?.get(id) || 
+                          explorerPermanentNodes?.get(id);
              if (!node) continue;
              
              const isPhantom = !!(phantomNodes?.has(id));
+             let isExplorerPhantom = !!(explorerPhantomNodes?.has(id)) && !this.cachedNodeMap.has(id) && !(explorerPermanentNodes?.has(id));
+             
+             if (isExplorerPhantom) {
+                 for (const staticNode of this.cachedNodeMap.values()) {
+                      if (Math.abs(staticNode.x - node.x) < 0.01 && Math.abs(staticNode.y - node.y) < 0.01) {
+                          isExplorerPhantom = false;
+                          break;
+                      }
+                 }
+             }
              
              const x = node.x * spacing + centerOffset; const y = node.y * spacing + centerOffset;
              if (x < cullLeft || x > cullRight || y < cullTop || y > cullBottom) continue;
@@ -394,7 +496,7 @@ export class LatticeRenderer {
              
              // Phantom Visual Style: Reduced Opacity or Dashed Outline
              if (isPhantom) {
-                 activeCtx.globalAlpha = 0.5; // "Ghost" look
+                 activeCtx.globalAlpha = 0.5; // "Ghost" look (keep standard shift ghosts)
                  activeCtx.fill();
                  activeCtx.globalAlpha = 1.0;
                  
@@ -404,6 +506,16 @@ export class LatticeRenderer {
                  activeCtx.lineWidth = 2 * effectiveScale;
                  activeCtx.stroke();
                  activeCtx.setLineDash([]);
+             } else if (isExplorerPhantom) {
+                 // Resemble the standard nodes but with a darkened limit coloration scheme
+                 activeCtx.fill();
+                 activeCtx.fillStyle = 'rgba(0, 0, 0, 0.45)'; // 45% black translucent overlay to darken color
+                 activeCtx.fill();
+                 
+                 // Dash structure consistent with phantom but with subtle dark outline
+                 activeCtx.strokeStyle = isFlatSkin ? '#475569' : 'rgba(255, 255, 255, 0.5)';
+                 activeCtx.lineWidth = 1.5 * effectiveScale;
+                 activeCtx.stroke();
              } else {
                  activeCtx.fill();
              }

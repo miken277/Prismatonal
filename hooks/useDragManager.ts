@@ -23,7 +23,11 @@ export const useDragManager = (
         const initialLeft = initialPos.x;
         const initialTop = initialPos.y;
 
-        el.setPointerCapture(e.pointerId);
+        try {
+            el.setPointerCapture(e.pointerId);
+        } catch (err) {
+            // Support headless pointer situations in lab audits safely
+        }
         setDraggingId(id);
 
         const onMove = (evt: PointerEvent) => {

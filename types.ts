@@ -167,6 +167,9 @@ export interface AppSettings {
   layoutApproach: LayoutApproach;
   activeSkin: string; 
 
+  explorerDepthLevel: number;
+  explorerAnchorNodeId: string | null;
+
   // --- REVISED TONALITY SETTINGS ---
   // A flat array of 64 booleans representing the 8x8 matrix of Identities
   enabledGridMask: boolean[]; 
@@ -294,6 +297,7 @@ export interface AppSettings {
 
   // Behavior
   enableKeyboardShortcuts: boolean;
+  enableMapPanning: boolean;
   keyMappings: KeyMappings;
   strumDuration: number; 
   enableAudioRecording: boolean; 

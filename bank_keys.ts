@@ -48,12 +48,6 @@ export const ETHEREAL_KEYS = [
         { enabled: true, waveform: WaveformType.EPIANO, coarseDetune: 1902, gain: 0.3, decay: 1.5, sustain: 0 }, 
         { enabled: true, waveform: WaveformType.SINE, coarseDetune: 2786, gain: 0.15, decay: 1.0, sustain: 0 }, 
         { spread: 0.6, reverbType: 'plate', reverbMix: 0.5, delayMix: 0.4 }
-    ),
-    p("Plucked Tone", "Keys", 
-        { enabled: true, waveform: WaveformType.TRIANGLE, gain: 0.6, decay: 0.3, sustain: 0.1 }, 
-        { enabled: true, waveform: WaveformType.SQUARE, coarseDetune: -1200, gain: 0.2, decay: 0.4, filterType: 'lowpass', filterCutoff: 800 }, 
-        { enabled: false }, 
-        { spread: 0.4, reverbType: 'room', reverbMix: 0.3 }
     )
 ];
 

@@ -27,13 +27,15 @@ interface Props {
     onDragStart: (e: React.PointerEvent) => void;
     isFlashingRed: boolean;
     uiUnlocked: boolean;
+    isPhone?: boolean;
 }
 
 const ArpeggiatorBar: React.FC<Props> = ({
     arpeggios, arpBpm, onArpToggle, onArpBpmChange, onArpRowConfigChange, onArpPatternUpdate,
     recordingArpId, currentArpStep, onPlayAll, onStopAll,
     isSequencerOpen, onToggleSequencer,
-    uiScale, position, isConstrained, width, onDragStart, isFlashingRed, uiUnlocked
+    uiScale, position, isConstrained, width, onDragStart, isFlashingRed, uiUnlocked,
+    isPhone = false
 }) => {
     const [isHovered, setIsHovered] = useState(false);
 
@@ -80,8 +82,8 @@ const ArpeggiatorBar: React.FC<Props> = ({
 
     return (
         <div 
-            className={`absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
-            style={{ 
+            className={isPhone ? "relative w-full bg-slate-900/40 rounded-xl flex flex-col items-center p-3 border border-slate-800" : `absolute bg-slate-900/50 rounded-xl flex flex-col items-center backdrop-blur-sm border border-slate-700/50 transition-colors z-[150] shadow-2xl ${uiUnlocked ? 'cursor-move ring-2 ring-yellow-500/50' : ''}`}
+            style={isPhone ? { touchAction: 'none' } : { 
                 left: position.x,
                 top: position.y,
                 width: width,
@@ -89,7 +91,7 @@ const ArpeggiatorBar: React.FC<Props> = ({
                 height: 'auto',
                 touchAction: 'none'
             }}
-            onPointerDown={onDragStart}
+            onPointerDown={isPhone ? undefined : onDragStart}
             onPointerEnter={() => setIsHovered(true)}
             onPointerLeave={() => setIsHovered(false)}
         >
@@ -169,8 +171,13 @@ const ArpeggiatorBar: React.FC<Props> = ({
             
             {isSequencerOpen && (
                 <div 
-                    className="absolute left-0 top-full mt-2 bg-slate-950/90 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl p-4 z-[160] flex flex-col gap-3"
-                    style={{ 
+                    className={isPhone ? "relative w-full mt-2 bg-slate-950/90 border border-slate-800 rounded-xl p-3 z-[160] flex flex-col gap-3" : "absolute left-0 top-full mt-2 bg-slate-950/90 backdrop-blur-md border border-slate-700 rounded-xl shadow-2xl p-4 z-[160] flex flex-col gap-3"}
+                    style={isPhone ? {
+                        width: '100%',
+                        height: 'auto',
+                        minWidth: '0px',
+                        overflow: 'hidden'
+                    } : { 
                         width: '350px', 
                         height: '350px', 
                         minWidth: '350px',

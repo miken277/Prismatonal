@@ -239,6 +239,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tuningSystem: 'ji',
   layoutApproach: 'lattice',
   activeSkin: 'default',
+  explorerDepthLevel: 0,
+  explorerAnchorNodeId: null,
   
   // New 64-node Matrix Mask
   enabledGridMask: generateDefaultMask(),
@@ -329,6 +331,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   midiOutputId: null,
   midiPitchBendRange: 24,
   enableKeyboardShortcuts: false,
+  enableMapPanning: true,
   keyMappings: DEFAULT_KEY_MAPPINGS,
   strumDuration: 0.5,
   enableAudioRecording: false, 

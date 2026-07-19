@@ -91,8 +91,19 @@ export const usePerformanceState = (
 
     // NEW: Shift Toggle
     const handleShiftToggle = useCallback(() => {
+        if (activeSustainedModes.length === 0 && !settings.isShiftModeActive) {
+             // Do not allow shift to be illuminated unless there is an active sustained chord
+             return;
+        }
         updateSettings(prev => ({ ...prev, isShiftModeActive: !prev.isShiftModeActive }));
-    }, [updateSettings]);
+    }, [updateSettings, activeSustainedModes, settings.isShiftModeActive]);
+
+    // Ensure shift is turned off if all chords are cleared
+    useEffect(() => {
+        if (activeSustainedModes.length === 0 && settings.isShiftModeActive) {
+            updateSettings(prev => ({ ...prev, isShiftModeActive: false }));
+        }
+    }, [activeSustainedModes, settings.isShiftModeActive, updateSettings]);
 
     const handleModulationToggle = useCallback(() => {
         updateSettings(prev => ({ ...prev, isModulationModeActive: !prev.isModulationModeActive }));

@@ -14,6 +14,7 @@ export interface TonalityDiamondHandle {
   centerView: () => void;
   increaseDepth: () => void;
   decreaseDepth: () => void;
+  resetDepth: () => void;
   getLatchedNodes: () => { node: LatticeNode, mode: number }[];
   triggerVisual: (nodeId: string, active: boolean) => void; 
 }
@@ -84,6 +85,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   const activeCursorsRef = useRef<Map<number, ActiveCursor>>(new Map());
   const cursorPositionsRef = useRef<Map<number, {x: number, y: number}>>(new Map());
   const lastBendUpdateRef = useRef<number>(0); // For throttling glide messages
+  const dragStartScrollRef = useRef<{ scrollLeft: number, scrollTop: number, clientX: number, clientY: number, pointerId: number } | null>(null);
 
   const [persistentLatches, setPersistentLatches] = useState<Map<string, Map<number, number>>>(new Map());
   const [shiftingNodeIds, setShiftingNodeIds] = useState<Set<string>>(new Set()); 
@@ -108,7 +110,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
   }, [settings.isShiftModeActive]);
 
-  const transferredVoicesRef = useRef<Set<string>>(new Set());
+
   const isSustainEnabledRef = useRef(isCurrentSustainEnabled);
   useEffect(() => { isSustainEnabledRef.current = isCurrentSustainEnabled; }, [isCurrentSustainEnabled]);
 
@@ -259,6 +261,162 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       // Note: We check activeCursors in the render loop now for phantoms to avoid state dep
       return phantoms;
   }, [audioLatchedNodes, nodeMap, settings]);
+
+  const EXPLORER_LEVEL_INTERVALS: Record<number, { phantom: { coordsOffset: number[], label: string }[], permanent: { coordsOffset: number[], label: string }[], illuminateLimit: number }> = useMemo(() => ({
+    1: {
+      phantom: [
+        { coordsOffset: [1, 0, 0, 0, 0], label: "3/2" },  // Fifth (3/2)
+        { coordsOffset: [-1, 0, 0, 0, 0], label: "4/3" } // Fourth (4/3)
+      ],
+      permanent: [],
+      illuminateLimit: 5
+    },
+    2: {
+      phantom: [
+        { coordsOffset: [0, 1, 0, 0, 0], label: "5/4" },  // Major Third (5/4)
+        { coordsOffset: [0, -1, 0, 0, 0], label: "8/5" } // Minor Sixth (8/5)
+      ],
+      permanent: [
+        { coordsOffset: [1, 0, 0, 0, 0], label: "3/2" },
+        { coordsOffset: [-1, 0, 0, 0, 0], label: "4/3" }
+      ],
+      illuminateLimit: 7
+    },
+    3: {
+      phantom: [
+        { coordsOffset: [0, 0, 1, 0, 0], label: "7/4" },  // Natural Seventh (7/4)
+        { coordsOffset: [0, 0, -1, 0, 0], label: "8/7" } // Septimal Oversecond (8/7)
+      ],
+      permanent: [
+        { coordsOffset: [1, 0, 0, 0, 0], label: "3/2" },
+        { coordsOffset: [-1, 0, 0, 0, 0], label: "4/3" },
+        { coordsOffset: [0, 1, 0, 0, 0], label: "5/4" },
+        { coordsOffset: [0, -1, 0, 0, 0], label: "8/5" }
+      ],
+      illuminateLimit: 11
+    },
+    4: {
+      phantom: [
+        { coordsOffset: [0, 0, 0, 1, 0], label: "11/8" },  // Eleventh Harmonic (11/8)
+        { coordsOffset: [0, 0, 0, -1, 0], label: "16/11" } // Undecimal Interval (16/11)
+      ],
+      permanent: [
+        { coordsOffset: [1, 0, 0, 0, 0], label: "3/2" },
+        { coordsOffset: [-1, 0, 0, 0, 0], label: "4/3" },
+        { coordsOffset: [0, 1, 0, 0, 0], label: "5/4" },
+        { coordsOffset: [0, -1, 0, 0, 0], label: "8/5" },
+        { coordsOffset: [0, 0, 1, 0, 0], label: "7/4" },
+        { coordsOffset: [0, 0, -1, 0, 0], label: "8/7" }
+      ],
+      illuminateLimit: 13
+    },
+    5: {
+      phantom: [
+        { coordsOffset: [0, 0, 0, 0, 1], label: "13/8" },  // Thirteenth Harmonic (13/8)
+        { coordsOffset: [0, 0, 0, 0, -1], label: "16/13" } // Tridecimal Interval (16/13)
+      ],
+      permanent: [
+        { coordsOffset: [1, 0, 0, 0, 0], label: "3/2" },
+        { coordsOffset: [-1, 0, 0, 0, 0], label: "4/3" },
+        { coordsOffset: [0, 1, 0, 0, 0], label: "5/4" },
+        { coordsOffset: [0, -1, 0, 0, 0], label: "8/5" },
+        { coordsOffset: [0, 0, 1, 0, 0], label: "7/4" },
+        { coordsOffset: [0, 0, -1, 0, 0], label: "8/7" },
+        { coordsOffset: [0, 0, 0, 1, 0], label: "11/8" },
+        { coordsOffset: [0, 0, 0, -1, 0], label: "16/11" }
+      ],
+      illuminateLimit: 15
+    },
+    6: {
+      phantom: [
+        { coordsOffset: [1, 1, 0, 0, 0], label: "15/16" },  // Fifteenth Harmonic (15/16)
+        { coordsOffset: [-1, -1, 0, 0, 0], label: "16/15" } // Inverse (16/15)
+      ],
+      permanent: [
+        { coordsOffset: [1, 0, 0, 0, 0], label: "3/2" },
+        { coordsOffset: [-1, 0, 0, 0, 0], label: "4/3" },
+        { coordsOffset: [0, 1, 0, 0, 0], label: "5/4" },
+        { coordsOffset: [0, -1, 0, 0, 0], label: "8/5" },
+        { coordsOffset: [0, 0, 1, 0, 0], label: "7/4" },
+        { coordsOffset: [0, 0, -1, 0, 0], label: "8/7" },
+        { coordsOffset: [0, 0, 0, 1, 0], label: "11/8" },
+        { coordsOffset: [0, 0, 0, -1, 0], label: "16/11" },
+        { coordsOffset: [0, 0, 0, 0, 1], label: "13/8" },
+        { coordsOffset: [0, 0, 0, 0, -1], label: "16/13" }
+      ],
+      illuminateLimit: 15
+    }
+  }), []);
+
+  const explorerData = useMemo(() => {
+      const phantomNodesMap = new Map<string, LatticeNode>();
+      const permanentNodesMap = new Map<string, LatticeNode>();
+      
+      const depth = settings.explorerDepthLevel !== undefined ? settings.explorerDepthLevel : 0;
+      if (depth <= 0) {
+        return { phantom: phantomNodesMap, permanent: permanentNodesMap };
+      }
+      
+      let anchorNode = null;
+      if (settings.explorerAnchorNodeId) {
+        anchorNode = nodeMap.get(settings.explorerAnchorNodeId) || reconstructNode(settings.explorerAnchorNodeId, settings);
+      }
+      if (!anchorNode) {
+        for (const node of nodeMap.values()) {
+          if (Math.abs(node.ratio - 1.0) < 0.001) {
+            anchorNode = node;
+            break;
+          }
+        }
+      }
+      if (!anchorNode) {
+        anchorNode = reconstructNode("0,0,0,0,0:0", settings);
+      }
+      
+      if (!anchorNode) {
+        return { phantom: phantomNodesMap, permanent: permanentNodesMap };
+      }
+      
+      const anchorCoords = [...anchorNode.coords];
+      while (anchorCoords.length < 5) anchorCoords.push(0);
+      const anchorOctave = anchorNode.octave;
+      
+      const lvlConfig = EXPLORER_LEVEL_INTERVALS[depth];
+      if (lvlConfig) {
+        lvlConfig.phantom.forEach((interval) => {
+          for (let oct = anchorOctave - 1; oct <= anchorOctave + 1; oct++) {
+            const newCoords = anchorCoords.map((c, idx) => c + interval.coordsOffset[idx]);
+            const id = `${newCoords.join(',')}:${oct}`;
+            const nodeObj = reconstructNode(id, settings);
+            if (nodeObj) {
+              phantomNodesMap.set(id, nodeObj);
+            }
+          }
+        });
+        
+        lvlConfig.permanent.forEach((interval) => {
+          for (let oct = anchorOctave - 1; oct <= anchorOctave + 1; oct++) {
+            const newCoords = anchorCoords.map((c, idx) => c + interval.coordsOffset[idx]);
+            const id = `${newCoords.join(',')}:${oct}`;
+            const nodeObj = reconstructNode(id, settings);
+            if (nodeObj) {
+              nodeObj.isGhost = false;
+              permanentNodesMap.set(id, nodeObj);
+            }
+          }
+        });
+      }
+      
+      return { phantom: phantomNodesMap, permanent: permanentNodesMap };
+  }, [settings.explorerDepthLevel, settings.explorerAnchorNodeId, nodeMap, settings, EXPLORER_LEVEL_INTERVALS]);
+
+  const explorerPhantomNodesRef = useRef(explorerData.phantom);
+  const explorerPermanentNodesRef = useRef(explorerData.permanent);
+  
+  useLayoutEffect(() => {
+      explorerPhantomNodesRef.current = explorerData.phantom;
+      explorerPermanentNodesRef.current = explorerData.permanent;
+  }, [explorerData]);
 
   // Refs for Render Loop
   const settingsRef = useRef(settings);
@@ -495,23 +653,40 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     },
     centerView: () => { centerScroll(); },
     increaseDepth: () => {
-        const limit = lastTouchedLimitRef.current;
-        if (limit && limit > 1) {
-             updateSettings((prev: AppSettings) => {
-                 const currentDepth = prev.limitDepths[limit as 3|5|7|11|13|15];
-                 return { ...prev, limitDepths: { ...prev.limitDepths, [limit]: currentDepth + 1 } };
-             });
-             depthHistoryRef.current.push(limit);
-        }
+        updateSettings((prev: AppSettings) => {
+            const currentLevel = prev.explorerDepthLevel !== undefined ? prev.explorerDepthLevel : 0;
+            const nextLevel = Math.min(6, currentLevel + 1);
+            
+            let nextAnchor = prev.explorerAnchorNodeId;
+            if (!nextAnchor) {
+                nextAnchor = "0,0,0,0,0:0";
+            }
+            
+            return {
+                ...prev,
+                explorerDepthLevel: nextLevel,
+                explorerAnchorNodeId: nextAnchor
+            };
+        });
     },
     decreaseDepth: () => {
-        const limit = depthHistoryRef.current.pop();
-        if (limit) {
-            updateSettings((prev: AppSettings) => {
-                 const currentDepth = prev.limitDepths[limit as 3|5|7|11|13|15];
-                 return { ...prev, limitDepths: { ...prev.limitDepths, [limit]: Math.max(0, currentDepth - 1) } };
-             });
-        }
+        updateSettings((prev: AppSettings) => {
+            const currentLevel = prev.explorerDepthLevel !== undefined ? prev.explorerDepthLevel : 0;
+            const nextLevel = Math.max(0, currentLevel - 1);
+            return {
+                ...prev,
+                explorerDepthLevel: nextLevel
+            };
+        });
+    },
+    resetDepth: () => {
+        updateSettings((prev: AppSettings) => {
+            return {
+                ...prev,
+                explorerDepthLevel: 0,
+                explorerAnchorNodeId: null
+            };
+        });
     },
     getLatchedNodes: () => {
         const result: { node: LatticeNode, mode: number }[] = [];
@@ -537,9 +712,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       if (scrollContainerRef.current) {
         const viewportW = scrollContainerRef.current.clientWidth;
         const viewportH = scrollContainerRef.current.clientHeight;
-        scrollContainerRef.current.scrollLeft = centerOffset - viewportW / 2;
-        scrollContainerRef.current.scrollTop = centerOffset - viewportH / 2;
-        requestAnimationFrame(updateRect);
+        if (viewportW > 0 && viewportH > 0) {
+          scrollContainerRef.current.scrollLeft = centerOffset - viewportW / 2;
+          scrollContainerRef.current.scrollTop = centerOffset - viewportH / 2;
+          requestAnimationFrame(updateRect);
+        } else {
+          setTimeout(() => {
+            if (scrollContainerRef.current) centerScroll();
+          }, 50);
+        }
       }
   };
 
@@ -608,19 +789,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       
       current.forEach((activations, nodeId) => {
           activations.forEach(act => {
-              const voiceId = `node-${nodeId}-${act.mode}`;
+              const voiceId = `latch-${act.timestamp}`;
               const prevActivations = prev.get(nodeId);
               const wasActive = prevActivations && prevActivations.some(p => p.mode === act.mode);
               
               if (!wasActive) {
-                   if (transferredVoicesRef.current.has(voiceId)) {
-                       transferredVoicesRef.current.delete(voiceId);
-                   } else {
-                       const node = nodes.get(nodeId) || phantoms.get(nodeId); 
-                       if (node) {
-                           audioEngine.startVoice(voiceId, node.ratio, settings.baseFrequency, act.presetId, 'latch');
-                           if (settings.midiEnabled) midiService.noteOn(voiceId, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
-                       }
+                   const node = nodes.get(nodeId) || phantoms.get(nodeId); 
+                   if (node) {
+                       audioEngine.startVoice(voiceId, node.ratio, settings.baseFrequency, act.presetId, 'latch');
+                       if (settings.midiEnabled) midiService.noteOn(voiceId, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                    }
               }
           });
@@ -628,7 +805,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       
       prev.forEach((activations, nodeId) => {
           activations.forEach(act => {
-              const voiceId = `node-${nodeId}-${act.mode}`;
+              const voiceId = `latch-${act.timestamp}`;
               const currentActivations = current.get(nodeId);
               const stillActive = currentActivations && currentActivations.some(c => c.mode === act.mode);
               
@@ -716,6 +893,26 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
           if (dx*dx + dy*dy < hitDistSq) return node;
       }
 
+      if (explorerPhantomNodesRef.current) {
+          for (const node of explorerPhantomNodesRef.current.values()) {
+              const nx = node.x * spacing + center;
+              const ny = node.y * spacing + center;
+              const dx = x - nx;
+              const dy = y - ny;
+              if (dx*dx + dy*dy < hitDistSq) return node;
+          }
+      }
+
+      if (explorerPermanentNodesRef.current) {
+          for (const node of explorerPermanentNodesRef.current.values()) {
+              const nx = node.x * spacing + center;
+              const ny = node.y * spacing + center;
+              const dx = x - nx;
+              const dy = y - ny;
+              if (dx*dx + dy*dy < hitDistSq) return node;
+          }
+      }
+
       return null;
   };
 
@@ -731,13 +928,33 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       }
   };
 
-  const triggerModulation = (node: LatticeNode) => {
-        const newOrigin: GenerationOrigin = {
-            coords: node.coords,
-            octave: node.octave
-        };
-        const newPath = [...settingsRef.current.modulationPath, newOrigin];
-        updateSettings({ modulationPath: newPath, isModulationModeActive: false });
+  const triggerModulation = (targetNode: LatticeNode) => {
+        let anchorNode: LatticeNode | null | undefined = nodeMapRef.current.get("0,0,0,0,0:0") || phantomNodesRef.current.get("0,0,0,0,0:0");
+        if (!anchorNode) anchorNode = reconstructNode("0,0,0,0,0:0", settingsRef.current);
+        
+        if (anchorNode && targetNode.id !== anchorNode.id) {
+             const allLatches = getAllLatchesAsMap();
+             const effectiveShiftingGroup = new Set<string>();
+             allLatches.forEach((_, nid) => effectiveShiftingGroup.add(nid));
+             
+             const shiftResult = executeShift(anchorNode, targetNode, allLatches, effectiveShiftingGroup);
+             if (shiftResult) {
+                 setPersistentLatches(shiftResult.latches);
+                 setNodeGroups(gPrev => {
+                     const gNext = new Map(gPrev);
+                     shiftResult.moves.forEach((newId, oldId) => {
+                         const grp = gNext.get(oldId);
+                         if (grp) {
+                             gNext.delete(oldId);
+                             gNext.set(newId, grp);
+                         }
+                     });
+                     return gNext;
+                 });
+                 if (onClearActiveChords) onClearActiveChords();
+             }
+        }
+        updateSettings({ isModulationModeActive: false });
   };
 
   const executeShift = (
@@ -786,12 +1003,6 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
                   if (newNode) {
                       idMappings.set(sourceId, newId);
-                      modes.forEach((ts, m) => {
-                          const oldVoiceId = `node-${sourceId}-${m}`;
-                          const newVoiceId = `node-${newId}-${m}`;
-                          audioEngine.transferVoice(oldVoiceId, newVoiceId, newNode.ratio, settingsRef.current.baseFrequency);
-                          transferredVoicesRef.current.add(newVoiceId);
-                      });
                       const targetModes = newLatches.get(newId) || new Map<number, number>();
                       modes.forEach((ts, m) => targetModes.set(m, Date.now()));
                       newLatches.set(newId, targetModes);
@@ -807,7 +1018,11 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
       if (audioEngine) audioEngine.resume();
       if (uiUnlocked) return;
       e.preventDefault();
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      try {
+          (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      } catch (err) {
+          // Safe fallback for simulated pointer systems in lab audits
+      }
 
       updateRect();
       cursorPositionsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -827,10 +1042,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         const isClickedLatched = allLatches.has(hitNode.id);
 
         if (isShiftMode) {
-             let anchorNode = null;
-             let effectiveShiftingGroup = new Set<string>();
-             
              if (isClickedLatched) {
+                 let effectiveShiftingGroup = new Set<string>();
+                 
                  const groupId = nodeGroupsRef.current.get(hitNode.id);
                  if (groupId) {
                      nodeGroupsRef.current.forEach((gid, nid) => {
@@ -850,22 +1064,19 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                          effectiveShiftingGroup.add(hitNode.id);
                      }
                  }
-                 anchorNode = hitNode;
-             } 
-             
-             if (anchorNode) {
-                 setShiftingNodeIds(effectiveShiftingGroup); // State Update!
+                 
+                 setShiftingNodeIds(effectiveShiftingGroup);
                  shiftingNodeIdsRef.current = effectiveShiftingGroup;
 
                  activeCursorsRef.current.set(e.pointerId, {
                     pointerId: e.pointerId,
-                    originNodeId: anchorNode.id, 
-                    hoverNodeId: anchorNode.id,
+                    originNodeId: hitNode.id, 
+                    hoverNodeId: hitNode.id,
                     hasMoved: false,
                     interactionLockedNodeId: null,
                     isShiftAnchor: true
-                });
-                return;
+                 });
+                 return;
              }
         }
 
@@ -878,6 +1089,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
         if (onNodeTrigger) {
             onNodeTrigger(hitNode.id, hitNode.ratio, hitNode.n, hitNode.d, hitNode.maxPrime);
         }
+        updateSettings({ explorerAnchorNodeId: hitNode.id });
 
         const mode = latchModeRef.current;
         const isSustainingInstrument = mode >= 1;
@@ -959,6 +1171,15 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               interactionLockedNodeId: null,
               isShiftAnchor: false
           });
+          if (scrollContainerRef.current) {
+              dragStartScrollRef.current = {
+                  scrollLeft: scrollContainerRef.current.scrollLeft,
+                  scrollTop: scrollContainerRef.current.scrollTop,
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  pointerId: e.pointerId
+              };
+          }
       }
   };
 
@@ -966,6 +1187,19 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     if (uiUnlocked) return;
     const cursor = activeCursorsRef.current.get(e.pointerId);
     if (!cursor) return;
+
+    if (cursor.originNodeId === null && dragStartScrollRef.current && dragStartScrollRef.current.pointerId === e.pointerId) {
+        if (settingsRef.current.enableMapPanning !== false && scrollContainerRef.current) {
+            const dx = e.clientX - dragStartScrollRef.current.clientX;
+            const dy = e.clientY - dragStartScrollRef.current.clientY;
+            scrollContainerRef.current.scrollLeft = dragStartScrollRef.current.scrollLeft - dx;
+            scrollContainerRef.current.scrollTop = dragStartScrollRef.current.scrollTop - dy;
+            updateRect();
+            visualsDirtyRef.current = true;
+            cursor.hasMoved = true;
+            return;
+        }
+    }
 
     if (scrollContainerRef.current) {
         const r = scrollContainerRef.current.getBoundingClientRect();
@@ -998,7 +1232,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     // --- SHIFT LOGIC (Glide) ---
     if (isShiftMode && cursor.isShiftAnchor && cursor.originNodeId) {
          // Throttle shift updates for performance
-         if (Date.now() - lastBendUpdateRef.current > 30) {
+         if (Date.now() - lastBendUpdateRef.current > 2) {
              const anchorNode = nodeMapRef.current.get(cursor.originNodeId) || phantomNodesRef.current.get(cursor.originNodeId);
              if (anchorNode) {
                  const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
@@ -1014,7 +1248,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                      if (node) {
                          const targetRatio = node.ratio * glideRatio;
                          activations.forEach(act => {
-                             const voiceId = `node-${nodeId}-${act.mode}`;
+                             const voiceId = `latch-${act.timestamp}`;
                              audioEngine.glideVoice(voiceId, targetRatio, settingsRef.current.baseFrequency);
                          });
                      }
@@ -1028,7 +1262,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
     const isBending = isBendEnabled && !!cursor.originNodeId && !isShiftMode;
 
     if (isBending && dynamicCanvasRef.current) {
-         if (Date.now() - lastBendUpdateRef.current > 30) {
+         if (Date.now() - lastBendUpdateRef.current > 2) {
              const originNode = nodeMapRef.current.get(cursor.originNodeId!) || phantomNodesRef.current.get(cursor.originNodeId!);
              if (originNode) {
                  const spacing = settingsRef.current.buttonSpacingScale * effectiveScale;
@@ -1044,8 +1278,8 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                  if (cursor.pendingUnlatch || persistentLatchesRef.current.has(cursor.originNodeId!)) {
                      const latchedModes = persistentLatchesRef.current.get(cursor.originNodeId!);
                      if (latchedModes) {
-                         latchedModes.forEach((_, mode) => {
-                             const latchedVoiceId = `node-${cursor.originNodeId}-${mode}`;
+                         latchedModes.forEach((timestamp, mode) => {
+                             const latchedVoiceId = `latch-${timestamp}`;
                              audioEngine.glideVoice(latchedVoiceId, finalRatio, settingsRef.current.baseFrequency);
                          });
                      }
@@ -1156,6 +1390,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    if (dragStartScrollRef.current && dragStartScrollRef.current.pointerId === e.pointerId) {
+        dragStartScrollRef.current = null;
+    }
     if (activeCursorsRef.current.has(e.pointerId)) {
         const cursor = activeCursorsRef.current.get(e.pointerId)!;
         const mode = latchModeRef.current;
@@ -1194,10 +1431,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                         });
 
                         if (onClearActiveChords) onClearActiveChords();
-                        if (settingsRef.current.isModulationModeActive) triggerModulation(targetNode);
                     }
-                } else {
-                    if (settingsRef.current.isModulationModeActive) triggerModulation(targetNode);
                 }
             } else if (!targetNode) {
                 const newLatches = new Map<string, Map<number, number>>(persistentLatchesRef.current);
@@ -1330,7 +1564,9 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               time: time,
               latchMode: latchModeRef.current,
               phantomNodes: phantomNodesRef.current,
-              shiftGhostNodes: cachedShiftGhostNodes.current 
+              shiftGhostNodes: cachedShiftGhostNodes.current,
+              explorerPhantomNodes: explorerPhantomNodesRef.current,
+              explorerPermanentNodes: explorerPermanentNodesRef.current
           }
       );
 
@@ -1405,6 +1641,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   return (
     <div 
+        id="tonality-diamond-interactive"
         ref={scrollContainerRef} 
         className="w-full h-full overflow-auto relative bg-black" 
         style={{ touchAction: 'none' }} 
