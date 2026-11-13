@@ -2,12 +2,16 @@
 import React, { useEffect, useRef, useState, useLayoutEffect, useImperativeHandle, forwardRef, useMemo } from 'react';
 import { AppSettings, LatticeNode, LatticeLine, ButtonShape, PresetSlot, PlaybackMode, LimitType, SynthPreset, GenerationOrigin } from '../types';
 import { getPitchRatioFromScreenDelta, PITCH_SCALE } from '../services/ProjectionService';
-import AudioEngine from '../services/AudioEngine';
+import { VoiceSink, MidiSink } from '../services/SurfaceSinks';
 import { midiService } from '../services/MidiService';
 import { LatticeRenderer, RenderState } from '../services/LatticeRenderer';
 import { useLatticeData } from '../hooks/useLatticeData';
 import { GRID_CELL_SIZE } from '../constants';
 import { reconstructNode } from '../services/LatticeService';
+
+// This surface depends on the MidiSink interface (SURFACE-CONTRACT.md §3
+// Step 1); the host's MidiService singleton is today's implementation.
+const midiSink: MidiSink = midiService;
 
 export interface TonalityDiamondHandle {
   clearLatches: (mode?: number) => void;
@@ -22,7 +26,7 @@ export interface TonalityDiamondHandle {
 interface Props {
   settings: AppSettings;
   updateSettings: (s: Partial<AppSettings> | ((prev: AppSettings) => AppSettings)) => void;
-  audioEngine: AudioEngine;
+  audioEngine: VoiceSink;
   onLimitInteraction: (limit: number) => void;
   activeChordIds: string[];
   uiUnlocked: boolean;
@@ -163,7 +167,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
 
   // Global Bend Listener
   useEffect(() => {
-      const unsubscribe = midiService.onGlobalBend((semitones) => {
+      const unsubscribe = midiSink.onGlobalBend((semitones) => {
           globalBendRef.current = semitones;
       });
       return unsubscribe;
@@ -797,7 +801,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                    const node = nodes.get(nodeId) || phantoms.get(nodeId); 
                    if (node) {
                        audioEngine.startVoice(voiceId, node.ratio, settings.baseFrequency, act.presetId, 'latch');
-                       if (settings.midiEnabled) midiService.noteOn(voiceId, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
+                       if (settings.midiEnabled) midiSink.noteOn(voiceId, node.ratio, settings.baseFrequency, settings.midiPitchBendRange);
                    }
               }
           });
@@ -811,7 +815,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
               
               if (!stillActive) {
                   audioEngine.stopVoice(voiceId);
-                  if (settings.midiEnabled) midiService.noteOff(voiceId);
+                  if (settings.midiEnabled) midiSink.noteOff(voiceId);
               }
           });
       });
@@ -1150,7 +1154,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
             const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
             
             audioEngine.startVoice(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, preset, playback);
-            if (settingsRef.current.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
+            if (settingsRef.current.midiEnabled) midiSink.noteOn(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
         } else if (pendingUnlatch) {
             activeCursorsRef.current.set(e.pointerId, {
                 pointerId: e.pointerId,
@@ -1273,7 +1277,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                  
                  const voiceId = `cursor-${e.pointerId}-${cursor.originNodeId}`;
                  audioEngine.glideVoice(voiceId, finalRatio, settingsRef.current.baseFrequency);
-                 if (settingsRef.current.midiEnabled) midiService.pitchBend(voiceId, finalRatio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
+                 if (settingsRef.current.midiEnabled) midiSink.pitchBend(voiceId, finalRatio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
     
                  if (cursor.pendingUnlatch || persistentLatchesRef.current.has(cursor.originNodeId!)) {
                      const latchedModes = persistentLatchesRef.current.get(cursor.originNodeId!);
@@ -1332,7 +1336,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
              if (playback === 'gate') {
                  const oldVoiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
                  audioEngine.stopVoice(oldVoiceId);
-                 if (settingsRef.current.midiEnabled) midiService.noteOff(oldVoiceId);
+                 if (settingsRef.current.midiEnabled) midiSink.noteOff(oldVoiceId);
              }
         }
 
@@ -1371,7 +1375,7 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                  const voiceId = `cursor-${e.pointerId}-${hitNode.id}`;
                  
                  audioEngine.startVoice(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, preset, playback);
-                 if (settingsRef.current.midiEnabled) midiService.noteOn(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
+                 if (settingsRef.current.midiEnabled) midiSink.noteOn(voiceId, hitNode.ratio, settingsRef.current.baseFrequency, settingsRef.current.midiPitchBendRange);
              }
         }
     }
@@ -1502,13 +1506,13 @@ const TonalityDiamond = forwardRef<TonalityDiamondHandle, Props>((props, ref) =>
                 }
 
                 audioEngine.stopVoice(voiceId);
-                if (settingsRef.current.midiEnabled) midiService.noteOff(voiceId);
+                if (settingsRef.current.midiEnabled) midiSink.noteOff(voiceId);
             }
             else if (cursor.hoverNodeId) {
                  if (playback === 'gate') {
                      const voiceId = `cursor-${e.pointerId}-${cursor.hoverNodeId}`;
                      audioEngine.stopVoice(voiceId);
-                     if (settingsRef.current.midiEnabled) midiService.noteOff(voiceId);
+                     if (settingsRef.current.midiEnabled) midiSink.noteOff(voiceId);
                  }
             }
         }

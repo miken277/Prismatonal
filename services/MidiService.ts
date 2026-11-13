@@ -1,5 +1,6 @@
 
 import { createHostAdapter, IHostAdapter, MidiDevice, TransportCallback } from './HostAdapter';
+import { MidiSink } from './SurfaceSinks';
 
 // Re-export for consumers (SettingsModal, etc.)
 export type { MidiDevice };
@@ -7,7 +8,7 @@ export type { MidiDevice };
 type SustainListener = (active: boolean) => void;
 type GlobalBendListener = (semitones: number) => void;
 
-class MidiService {
+class MidiService implements MidiSink {
     private adapter: IHostAdapter | null = null;
     private initialized = false;
     

@@ -4,6 +4,7 @@ import { store } from './Store';
 import { DEFAULT_PRESET, REVERB_DEFAULTS } from '../constants';
 import { AUDIO_PROCESSOR_CODE } from './AudioProcessorCode';
 import { midiService } from './MidiService';
+import { VoiceSink } from './SurfaceSinks';
 
 // --- Typed Messages for Worklet ---
 interface WorkletMessageBase {
@@ -64,7 +65,7 @@ interface StopGroupMessage extends WorkletMessageBase {
 
 type AudioWorkletMessage = UpdatePresetMessage | ConfigMessage | NoteOnMessage | NoteOffMessage | GlideMessage | StopAllMessage | StopGroupMessage | TransferMessage;
 
-class AudioEngine {
+class AudioEngine implements VoiceSink {
   private ctx: AudioContext | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private initPromise: Promise<void> | null = null;
